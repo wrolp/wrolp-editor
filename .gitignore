@@ -1,0 +1,19 @@
+node_modules
+src-tauri/target
+src-tauri/gen
+dist
+task
+.tauri
+package-lock.json
+
+dist-check
+
+# Playwright E2E output
+test-results/
+playwright-report/
+blob-report/
+
+# Coverage output (frontend E2E + Rust llvm-cov)
+coverage/
+
+.tmp*
