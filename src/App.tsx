@@ -9,6 +9,7 @@ import TitleBar from "./components/TitleBar";
 import Toast from "./components/Toast";
 import { useDraft } from "./hooks/useDraft";
 import { useEditorTabs } from "./hooks/useEditorTabs";
+import { setLang, t } from "./lib/i18n";
 import { dirname } from "./lib/path";
 import type { EditorHandle } from "./lib/types";
 import {
@@ -29,6 +30,7 @@ const DEFAULT_SETTINGS: Settings = {
   sidebarVisible: true,
   sidebarView: "explorer",
   sidebarWidth: 240,
+  language: "en",
 };
 
 async function copyText(text: string): Promise<boolean> {
@@ -86,9 +88,9 @@ export default function App() {
       .then((target) => {
         setMenuTarget(target);
         if (!target.installed) {
-          toast('Tip: add "Open with WROLP" to the file context menu from Settings.');
+          toast(t("app.tipMenu"));
         } else if (!target.matchesCurrent) {
-          toast("The context menu launches a different build. Re-enable it in Settings.");
+          toast(t("app.tipStaleMenu"));
         }
       })
       .catch((e) => toast(errorMessage(e)));
@@ -99,6 +101,7 @@ export default function App() {
     api
       .getSettings()
       .then((s) => {
+        setLang(s.language);
         setSettings(s);
         setSidebarVisible(s.sidebarVisible);
         setSidebarView(s.sidebarView === "history" ? "history" : "explorer");
@@ -139,6 +142,7 @@ export default function App() {
   const saveSettings = useCallback(
     (patch: Partial<Settings>) => {
       const next = { ...settings, ...patch };
+      if (patch.language) setLang(patch.language);
       setSettings(next);
       api.saveSettings(next).catch((e) => toast(errorMessage(e)));
     },
@@ -167,10 +171,10 @@ export default function App() {
       try {
         if (installed) {
           const value = await api.installContextMenu();
-          toast(`Context menu added: ${value}`);
+          toast(t("menu.added", { value }));
         } else {
           await api.uninstallContextMenu();
-          toast("Context menu removed");
+          toast(t("menu.removed"));
         }
         refreshMenu();
       } catch (e) {
@@ -184,7 +188,7 @@ export default function App() {
 
   const menuTabPath = useMemo(() => {
     if (!tabMenu) return null;
-    return tabs.tabs.find((t) => t.id === tabMenu.tabId)?.path ?? null;
+    return tabs.tabs.find((tab) => tab.id === tabMenu.tabId)?.path ?? null;
   }, [tabMenu, tabs.tabs]);
 
   useEffect(() => {
@@ -211,7 +215,7 @@ export default function App() {
           toast(errorMessage(e));
         }
       } else if (action === "copy") {
-        toast((await copyText(path)) ? `Path copied: ${path}` : "Copy failed");
+        toast((await copyText(path)) ? t("title.copied", { path }) : t("title.copyFailed"));
       } else {
         setSidebarView("explorer");
         setSidebarVisible(true);
@@ -336,13 +340,7 @@ export default function App() {
             </div>
           )}
 
-          {!editorTab && (
-            <div className="editor-empty">
-              Open a file with the button above, or pick one from the Explorer sidebar,
-              <br />
-              or right-click a file and choose "Open with WROLP".
-            </div>
-          )}
+          {!editorTab && <div className="editor-empty">{t("app.empty")}</div>}
 
           {showSettings && (
             <SettingsPanel
@@ -361,13 +359,13 @@ export default function App() {
       {tabMenu && menuTabPath && (
         <div className="ctx-menu" style={{ display: "block", left: tabMenu.x, top: tabMenu.y }}>
           <div className="ctx-item" onClick={() => void runTabAction("reveal")}>
-            Reveal in Explorer
+            {t("title.menuReveal")}
           </div>
           <div className="ctx-item" onClick={() => void runTabAction("copy")}>
-            Copy path
+            {t("title.menuCopy")}
           </div>
           <div className="ctx-item" onClick={() => void runTabAction("sidebar")}>
-            Show folder in sidebar
+            {t("title.menuSidebar")}
           </div>
         </div>
       )}

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import TabBar, { TabGlyph } from "./TabBar";
+import { t } from "../lib/i18n";
 import { IconChevron, IconOpenFolder, IconSettings, IconSidebar } from "./icons";
 import type { Tab } from "../lib/types";
 
@@ -39,7 +40,7 @@ export default function TitleBar(props: Props) {
     <div className="titlebar" data-tauri-drag-region>
       <button
         className={`title-toggle${sidebarVisible ? " active" : ""}`}
-        title="Toggle sidebar (Ctrl+B)"
+        title={t("title.toggleSidebar")}
         onClick={props.onToggleSidebar}
       >
         <IconSidebar />
@@ -57,7 +58,7 @@ export default function TitleBar(props: Props) {
         <button
           className="tab-list-btn"
           ref={btnRef}
-          title="Open files"
+          title={t("title.openFiles")}
           onClick={() => setDropdownOpen((v) => !v)}
         >
           <IconChevron />
@@ -66,7 +67,7 @@ export default function TitleBar(props: Props) {
         {dropdownOpen && (
           <div className="tab-dropdown">
             {tabs.length === 0 ? (
-              <div className="dd-empty">No open files</div>
+              <div className="dd-empty">{t("tab.empty")}</div>
             ) : (
               tabs.map((tab) => (
                 <div
@@ -81,7 +82,7 @@ export default function TitleBar(props: Props) {
                   <span className="dd-name">{tab.name}</span>
                   <button
                     className="dd-close"
-                    title="Close"
+                    title={t("tab.close")}
                     onClick={(e) => {
                       e.stopPropagation();
                       props.onClose(tab.id);
@@ -96,29 +97,29 @@ export default function TitleBar(props: Props) {
         )}
       </div>
 
-      <button className="tab-new" title="New file (Ctrl+N)" onClick={props.onNewFile}>
+      <button className="tab-new" title={t("title.newFile")} onClick={props.onNewFile}>
         +
       </button>
 
       <div className="titlebar-actions">
-        <button className="tb-icon" title="Open (Ctrl+O)" onClick={props.onOpenFiles}>
+        <button className="tb-icon" title={t("title.open")} onClick={props.onOpenFiles}>
           <IconOpenFolder />
         </button>
-        <button className="tb-icon" title="Settings" onClick={props.onOpenSettings}>
+        <button className="tb-icon" title={t("title.settings")} onClick={props.onOpenSettings}>
           <IconSettings />
         </button>
         <div className="win-controls">
-          <button className="win-btn" title="Minimize" onClick={() => appWindow.current.minimize()}>
+          <button className="win-btn" title={t("title.minimize")} onClick={() => appWindow.current.minimize()}>
             —
           </button>
           <button
             className="win-btn"
-            title="Maximize"
+            title={t("title.maximize")}
             onClick={() => appWindow.current.toggleMaximize()}
           >
             ▢
           </button>
-          <button className="win-btn win-close" title="Close" onClick={() => appWindow.current.close()}>
+          <button className="win-btn win-close" title={t("tab.close")} onClick={() => appWindow.current.close()}>
             ✕
           </button>
         </div>

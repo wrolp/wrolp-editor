@@ -595,6 +595,7 @@ body.resizing .editor-host {
   inset: 0;
 }
 .editor-empty {
+  white-space: pre-line;
   position: absolute;
   inset: 0;
   display: flex;
@@ -701,6 +702,26 @@ body.resizing .editor-host {
   background: #1e1e1e;
   color: var(--text);
   font-size: 13px;
+}
+.select {
+  min-width: 120px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: #2d2d2d;
+  color: var(--text);
+  font-size: 13px;
+}
+.select:hover {
+  background: #363636;
+}
+.select:focus {
+  outline: none;
+  border-color: var(--accent-soft);
+}
+.select option {
+  background: #2d2d2d;
+  color: var(--text);
 }
 .settings-cat p.muted,
 .modal p.muted {

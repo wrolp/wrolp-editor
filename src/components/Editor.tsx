@@ -2,6 +2,7 @@ import MonacoEditor from "@monaco-editor/react";
 import type { Monaco } from "@monaco-editor/loader";
 import { useCallback, useEffect, useRef } from "react";
 import type { editor } from "monaco-editor";
+import { t } from "../lib/i18n";
 import "../lib/monaco";
 import { modelUri } from "../lib/path";
 import type { CursorPos, EditorHandle, Tab } from "../lib/types";
@@ -39,7 +40,7 @@ export default function Editor({ tab, fontSize, minimap, onChange, onCursor, onR
       defaultValue={tab.original}
       language={tab.language}
       theme="vs-dark"
-      loading={<div className="editor-empty">Loading editor…</div>}
+      loading={<div className="editor-empty">{t("app.loading")}</div>}
       onChange={(value) => value !== undefined && onChange(value)}
       onMount={handleMount}
       options={{

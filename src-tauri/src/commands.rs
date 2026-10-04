@@ -55,6 +55,9 @@ pub struct Settings {
   pub sidebar_visible: bool,
   pub sidebar_view: String,
   pub sidebar_width: f64,
+  /// UI language code, e.g. "en" or "zh". Unknown values are stored as-is; the frontend
+  /// falls back to English, so adding a language needs no change here.
+  pub language: String,
 }
 
 /// Used when settings.json is absent or a key is missing, so a first run must not
@@ -67,6 +70,7 @@ impl Default for Settings {
       sidebar_visible: true,
       sidebar_view: "explorer".into(),
       sidebar_width: 240.0,
+      language: "en".into(),
     }
   }
 }
@@ -96,6 +100,11 @@ impl Settings {
           .sidebar_width
           .clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH)
       },
+      language: if self.language.is_empty() {
+        "en".into()
+      } else {
+        self.language
+      },
     }
   }
 }
@@ -108,16 +117,16 @@ fn read_json<T: for<'de> Deserialize<'de>>(
   match std::fs::read(&path) {
     Ok(bytes) => serde_json::from_slice::<T>(&bytes)
       .map(Some)
-      .map_err(|e| format!("Cannot parse {file}: {e}")),
+      .map_err(|e| format!("state_parse:{file}: {e}")),
     Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
-    Err(e) => Err(format!("Cannot read {file}: {e}")),
+    Err(e) => Err(format!("state_read:{file}: {e}")),
   }
 }
 
 fn write_json<T: Serialize>(app: &AppHandle, file: &str, value: &T) -> Result<(), String> {
   let path = draft::store_dir(app)?.join(file);
   let json = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
-  std::fs::write(&path, json).map_err(|e| format!("Cannot write {file}: {e}"))
+  std::fs::write(&path, json).map_err(|e| format!("state_write:{file}: {e}"))
 }
 
 /// Drained once at startup: paths handed over by "Open with WROLP".
@@ -130,22 +139,18 @@ pub fn take_startup_files(state: State<'_, PendingFiles>) -> Vec<String> {
 pub fn open_file(app: AppHandle, path: String) -> Result<OpenedFile, String> {
   let normalized = draft::normalize_path(&path);
   if normalized.is_empty() {
-    return Err("Empty file path".into());
+    return Err("path_empty".into());
   }
   let file = Path::new(&normalized);
-  let meta = std::fs::metadata(file).map_err(|e| format!("Cannot access file: {e}"))?;
+  let meta = std::fs::metadata(file).map_err(|e| format!("file_access:{e}"))?;
   if !meta.is_file() {
-    return Err("Not a file".into());
+    return Err("file_not_file".into());
   }
   if meta.len() > MAX_FILE_BYTES {
-    return Err(format!(
-      "File too large ({} MB); this editor does not support it yet",
-      meta.len() / (1024 * 1024)
-    ));
+    return Err(format!("file_too_large:{}", meta.len() / (1024 * 1024)));
   }
-  let bytes = std::fs::read(file).map_err(|e| format!("Read failed: {e}"))?;
-  let content =
-    String::from_utf8(bytes).map_err(|_| "Only UTF-8 text files are supported".to_string())?;
+  let bytes = std::fs::read(file).map_err(|e| format!("file_read:{e}"))?;
+  let content = String::from_utf8(bytes).map_err(|_| "file_not_utf8".to_string())?;
   let mtime = meta
     .modified()
     .ok()
@@ -165,13 +170,13 @@ pub fn open_file(app: AppHandle, path: String) -> Result<OpenedFile, String> {
 pub fn save_file(app: AppHandle, path: String, content: String) -> Result<SavedFile, String> {
   let normalized = draft::normalize_path(&path);
   if normalized.is_empty() {
-    return Err("Empty file path".into());
+    return Err("path_empty".into());
   }
   let file = Path::new(&normalized);
   if let Some(parent) = file.parent() {
-    std::fs::create_dir_all(parent).map_err(|e| format!("Cannot create directory: {e}"))?;
+    std::fs::create_dir_all(parent).map_err(|e| format!("dir_create:{e}"))?;
   }
-  std::fs::write(file, content.as_bytes()).map_err(|e| format!("Write failed: {e}"))?;
+  std::fs::write(file, content.as_bytes()).map_err(|e| format!("file_write:{e}"))?;
   let mtime = std::fs::metadata(file)
     .ok()
     .and_then(|m| m.modified().ok())
@@ -212,9 +217,9 @@ pub fn list_dir(path: String) -> Result<Vec<FsEntry>, String> {
   let normalized = draft::normalize_path(&path);
   let dir = Path::new(&normalized);
   if !dir.is_dir() {
-    return Err("Not a directory".into());
+    return Err("not_a_directory".into());
   }
-  let read = std::fs::read_dir(dir).map_err(|e| format!("Cannot read directory: {e}"))?;
+  let read = std::fs::read_dir(dir).map_err(|e| format!("dir_read:{e}"))?;
   let mut entries: Vec<FsEntry> = Vec::new();
   for item in read.flatten() {
     let name = item.file_name().to_string_lossy().to_string();
@@ -354,6 +359,38 @@ mod tests {
     assert_eq!(s.sidebar_view, "explorer");
     assert_eq!(s.font_size, 14.0);
     assert_eq!(s.sidebar_width, 240.0);
+  }
+
+  #[test]
+  fn language_defaults_to_english_and_otherwise_passes_through() {
+    assert_eq!(
+      Settings {
+        language: "zh".into(),
+        ..Default::default()
+      }
+      .filled()
+      .language,
+      "zh"
+    );
+    assert_eq!(
+      Settings {
+        language: String::new(),
+        ..Default::default()
+      }
+      .filled()
+      .language,
+      "en"
+    );
+    assert_eq!(
+      Settings {
+        language: "fr".into(),
+        ..Default::default()
+      }
+      .filled()
+      .language,
+      "fr"
+    );
+    assert_eq!(Settings::default().language, "en");
   }
 
   #[test]

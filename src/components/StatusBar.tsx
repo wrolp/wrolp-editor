@@ -1,3 +1,4 @@
+import { t } from "../lib/i18n";
 import type { Tab } from "../lib/types";
 
 interface Props {
@@ -7,17 +8,18 @@ interface Props {
 }
 
 export default function StatusBar({ tab, line, column }: Props) {
+  const file = tab && !tab.isSettings;
   return (
     <div className="statusbar">
-      <span className="sb-path">{tab ? (tab.isSettings ? "Settings" : tab.path) : "No file open"}</span>
+      <span className="sb-path">
+        {tab ? (tab.isSettings ? t("tab.settings") : tab.path) : t("status.noFile")}
+      </span>
       <span className="sb-spacer" />
-      <span className="sb-dirty">
-        {tab && !tab.isSettings ? (tab.dirty ? "● Unsaved" : "Saved") : ""}
-      </span>
+      <span className="sb-dirty">{file ? (tab.dirty ? t("status.dirty") : t("status.saved")) : ""}</span>
       <span className="sb-cursor">
-        {tab && !tab.isSettings ? `Ln ${line} · Col ${column}` : ""}
+        {file ? t("status.cursor", { line, column }) : ""}
       </span>
-      <span className="sb-lang">{tab && !tab.isSettings ? tab.language : ""}</span>
+      <span className="sb-lang">{file ? tab.language : ""}</span>
     </div>
   );
 }

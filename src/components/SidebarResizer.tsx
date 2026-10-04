@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { t } from "../lib/i18n";
 
 const MIN_WIDTH = 180;
 const MAX_WIDTH = 640;
@@ -63,7 +64,7 @@ export default function SidebarResizer({ value, defaultValue, onChange, onCommit
   return (
     <div
       className="sidebar-resizer"
-      title="Drag to resize, double-click to reset"
+      title={t("side.resizeHint")}
       onPointerDown={onPointerDown}
       onDoubleClick={() => onCommit(defaultValue)}
     />

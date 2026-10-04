@@ -116,10 +116,10 @@ pub fn probe() -> Result<MenuTarget, String> {
 
 #[cfg(not(windows))]
 pub fn install() -> Result<String, String> {
-  Err("The context menu integration is Windows-only".into())
+  Err("menu_windows_only".into())
 }
 
 #[cfg(not(windows))]
 pub fn uninstall() -> Result<(), String> {
-  Err("The context menu integration is Windows-only".into())
+  Err("menu_windows_only".into())
 }

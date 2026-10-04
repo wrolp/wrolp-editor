@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { t } from "../lib/i18n";
 import { tabIcon } from "../lib/path";
 import type { Tab } from "../lib/types";
 
@@ -26,7 +27,7 @@ export default function TabBar({ tabs, activeId, onSelect, onClose, onContextMen
   if (tabs.length === 0) {
     return (
       <div className="tabbar" ref={barRef} data-tauri-drag-region>
-        <div className="tab empty">No open files</div>
+        <div className="tab empty">{t("tab.empty")}</div>
       </div>
     );
   }
@@ -58,7 +59,7 @@ export default function TabBar({ tabs, activeId, onSelect, onClose, onContextMen
           data-id={tab.id}
           className={`tab${tab.id === activeId ? " active" : ""}`}
           onClick={() => onSelect(tab.id)}
-          title={tab.isSettings ? "Settings" : tab.path}
+          title={tab.isSettings ? t("tab.settings") : tab.path}
         >
           {tab.isSettings ? (
             <span className="tab-icon icon-file">⚙</span>
@@ -69,7 +70,7 @@ export default function TabBar({ tabs, activeId, onSelect, onClose, onContextMen
           {tab.dirty && !tab.isSettings && <span className="tab-dirty">U</span>}
           <button
             className="tab-close"
-            title="Close"
+            title={t("tab.close")}
             onClick={(e) => {
               e.stopPropagation();
               onClose(tab.id);

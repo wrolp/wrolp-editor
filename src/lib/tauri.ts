@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { t, translateError } from "./i18n";
 
 export interface OpenedFile {
   path: string;
@@ -39,6 +40,8 @@ export interface Settings {
   sidebarVisible: boolean;
   sidebarView: string;
   sidebarWidth: number;
+  /** Language code; unknown values are stored as-is and fall back to English in the UI. */
+  language: string;
 }
 
 export interface MenuTarget {
@@ -69,25 +72,25 @@ export const api = {
 
 export { invoke, listen, open, save, revealItemInDir };
 
-const FILE_FILTERS = [{ name: "All files", extensions: ["*"] }];
+const fileFilters = () => [{ name: t("dialog.allFiles"), extensions: ["*"] }];
 
 export function pickFiles(): Promise<string[]> {
-  return open({ multiple: true, filters: FILE_FILTERS }).then((r) =>
+  return open({ multiple: true, filters: fileFilters() }).then((r) =>
     Array.isArray(r) ? r : r ? [r] : []
   );
 }
 
 export function pickSaveAs(defaultPath?: string): Promise<string | null> {
-  return save({ filters: FILE_FILTERS, defaultPath }).then((r) => r ?? null);
+  return save({ filters: fileFilters(), defaultPath }).then((r) => r ?? null);
 }
 
 export function pickFolder(): Promise<string | null> {
   return open({ directory: true }).then((r) => (typeof r === "string" ? r : null));
 }
 
-/** Backend errors arrive as strings; other throws carry a message. Flatten to display text. */
+/** Backend errors arrive as "code" or "code:detail"; other throws carry a message. */
 export function errorMessage(e: unknown): string {
-  if (typeof e === "string") return e;
+  if (typeof e === "string") return translateError(e);
   if (e instanceof Error) return e.message;
   return String(e);
 }

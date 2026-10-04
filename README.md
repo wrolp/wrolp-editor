@@ -15,7 +15,8 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | Restore | On open, disk content is compared with the draft; a differing draft raises a Restore / Discard dialog |
 | Sidebar | Explorer file tree (lazy folders, refresh button) and a History list of recently opened files. Drag the divider to resize (180–640 px, double-click resets); the width is persisted |
 | Single instance | Launching a second time hands the path to the running window, adds a tab and focuses it |
-| Settings | Context-menu switch, editor font size, minimap; persisted and applied live. The context-menu page also shows the command the entry currently launches, and warns when it points at a different build or when this is a debug build |
+| Settings | Context-menu switch, editor font size, minimap, UI language; persisted and applied live. The context-menu page also shows the command the entry currently launches, and warns when it points at a different build or when this is a debug build |
+| Language | English by default, switchable to 中文 from a dropdown in Settings. All strings, including messages coming from the Rust side, resolve through one key table |
 
 ## Keyboard shortcuts
 
@@ -75,7 +76,7 @@ wrolp/
 ├── drafts/<sha256>.draft     one draft per file
 └── state/
     ├── history.json          recently opened files, newest first, capped at 50
-    └── settings.json         fontSize, minimap, sidebarVisible, sidebarView, sidebarWidth
+    └── settings.json         fontSize, minimap, sidebarVisible, sidebarView, sidebarWidth, language
 ```
 
 `<sha256>` is the hash of the **normalized** path: absolute, `\\?\` verbatim prefix removed, separators unified, lowercased on Windows. A draft looks like:
@@ -99,3 +100,31 @@ wrolp/
 
 File IO is deliberately **not** the `fs` plugin: the WebView only ever calls these fixed
 commands, so no broad disk scope is exposed to the frontend.
+
+## Interface language
+
+English is the default and the fallback; Settings → General → *UI language* is a dropdown, so
+adding a language does not change any layout.
+
+Strings never live in components. `src/lib/i18n.ts` holds one flat key table per language and
+exposes `t(key, params)` with `{placeholder}` substitution:
+
+```ts
+{ "status.cursor": "Ln {line} · Col {column}" }        // en
+{ "status.cursor": "第 {line} 行 · 第 {column} 列" }    // zh
+```
+
+The Rust side does not translate. Commands fail with a stable **code**, optionally followed by
+the raw detail after the first `:`, e.g. `file_too_large:8`, `file_read:os error 5`,
+`path_empty`. `translateError()` splits on that first `:`, looks up `err.<code>` and injects the
+detail as `{detail}`, so an unknown code still shows something readable instead of nothing.
+
+To add a language:
+
+1. Add a table in `src/lib/i18n.ts` and register it in `TABLES` plus `LANGUAGES` (native name as
+   its own label). Key sets must stay identical — `t()` falls back to English for missing keys.
+2. Nothing else. `Settings.language` is an opaque string stored as-is, and the dropdown,
+   the fallback and the error mapping pick the new entry up automatically.
+3. Localize the app description if you ship it (`tauri.conf.json` → `bundle.shortDescription`);
+   the Windows context-menu entry stays English on purpose, since it is registered once and
+   shared by every language.

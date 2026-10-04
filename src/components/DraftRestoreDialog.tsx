@@ -1,3 +1,4 @@
+import { getLang, t } from "../lib/i18n";
 import type { PendingRestore } from "../lib/types";
 
 interface Props {
@@ -8,22 +9,24 @@ interface Props {
 }
 
 export default function DraftRestoreDialog({ request, count, onRestore, onDiscard }: Props) {
-  const updated = new Date(request.draft.updatedAt).toLocaleString();
+  const updated = new Date(request.draft.updatedAt).toLocaleString(
+    getLang() === "zh" ? "zh-CN" : "en-US"
+  );
   return (
     <div className="modal-overlay">
       <div className="modal">
-        <h3>Unsaved draft found</h3>
+        <h3>{t("dialog.title")}</h3>
         <p>
-          "{request.name}" has edits that were never saved (draft updated {updated}).
-          {count > 1 && <span> {count - 1} more file(s) waiting.</span>}
+          {t("dialog.body", { name: request.name, time: updated })}
+          {count > 1 && <span> {t("dialog.more", { count: count - 1 })}</span>}
         </p>
-        <p className="muted">Restore the edits from the last session?</p>
+        <p className="muted">{t("dialog.ask")}</p>
         <div className="modal-actions">
           <button className="btn primary" onClick={onRestore} autoFocus>
-            Restore draft
+            {t("dialog.restore")}
           </button>
           <button className="btn" onClick={onDiscard}>
-            Discard and open file
+            {t("dialog.discard")}
           </button>
         </div>
       </div>

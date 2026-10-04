@@ -15,7 +15,8 @@
 | 恢复 | 打开文件时把磁盘内容与草稿比对，不一致就弹「恢复草稿 / 丢弃」 |
 | 侧边栏 | 资源管理器目录树（子目录懒加载 + 刷新按钮）与最近打开的历史列表。拖动分隔条可调宽（180–640 px，双击复位），宽度会持久化 |
 | 单实例 | 再次启动时把路径交给已运行的窗口，新增标签并聚焦 |
-| 设置 | 右键菜单开关、编辑器字号、minimap；即时生效并持久化。右键菜单页还会显示当前注册表实际启动的命令，指向别的构建或当前是 debug 构建时给出警告 |
+| 设置 | 右键菜单开关、编辑器字号、minimap、界面语言；即时生效并持久化。右键菜单页还会显示当前注册表实际启动的命令，指向别的构建或当前是 debug 构建时给出警告 |
+| 语言 | 默认英文，可在设置里下拉切换成中文。所有文案（含 Rust 侧返回的报错）都走同一张 key 表 |
 
 ## 快捷键
 
@@ -72,7 +73,7 @@ wrolp/
 ├── drafts/<sha256>.draft     每个文件一份草稿
 └── state/
     ├── history.json          最近打开，新的在前，最多 50 条
-    └── settings.json         fontSize、minimap、sidebarVisible、sidebarView、sidebarWidth
+    └── settings.json         fontSize、minimap、sidebarVisible、sidebarView、sidebarWidth、language
 ```
 
 `<sha256>` 是**规范化**路径的哈希：绝对路径、去掉 `\\?\` 前缀、分隔符统一、Windows 下再转小写。草稿内容形如：
@@ -95,3 +96,27 @@ wrolp/
 `context_menu_target`、`install_context_menu`、`uninstall_context_menu`。
 
 文件读写**故意不用** `fs` 插件：WebView 只能调用上面这些固定命令，不把大范围磁盘 scope 暴露给前端。
+
+## 界面语言
+
+默认语言是英文，缺 key 时也回落到英文；设置 → 常规 → *界面语言* 是下拉框，因此新增语言不用改布局。
+
+文案不写在组件里。`src/lib/i18n.ts` 每种语言一张扁平 key 表，对外只有 `t(key, params)`，用
+`{placeholder}` 做替换：
+
+```ts
+{ "status.cursor": "Ln {line} · Col {column}" }        // en
+{ "status.cursor": "第 {line} 行 · 第 {column} 列" }    // zh
+```
+
+Rust 侧不做翻译。命令失败时返回稳定的**错误码**，后面可用第一个 `:` 跟原始细节，例如
+`file_too_large:8`、`file_read:os error 5`、`path_empty`。`translateError()` 按第一个 `:` 切开，
+查 `err.<code>` 并把细节填进 `{detail}`，所以就算码没收录，也还能显示可读内容而不是空白。
+
+新增语言的步骤：
+
+1. 在 `src/lib/i18n.ts` 里加一张表，并注册进 `TABLES` 和 `LANGUAGES`（语言名用其自身写法作标签）。
+   各表 key 集合必须一致，缺失的 key 会回落英文。
+2. 其余不用动。`Settings.language` 只是个原样存储的字符串，下拉项、英文回落和错误映射会自动带上新语言。
+3. 若要发布，顺手本地化应用描述（`tauri.conf.json` → `bundle.shortDescription`）；右键菜单那条文案
+   故意保持英文，因为它注册一次就被所有语言共用。

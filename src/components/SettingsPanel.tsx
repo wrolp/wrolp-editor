@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
+import { LANGUAGES, t } from "../lib/i18n";
 import type { MenuTarget, Settings } from "../lib/tauri";
 
 type Category = "context" | "general" | "about";
@@ -12,10 +13,10 @@ interface Props {
   onSetMenu: (installed: boolean) => void;
 }
 
-const NAV: { cat: Category; label: string }[] = [
-  { cat: "context", label: "Context menu" },
-  { cat: "general", label: "General" },
-  { cat: "about", label: "About" },
+const NAV: { cat: Category; key: string }[] = [
+  { cat: "context", key: "settings.catContext" },
+  { cat: "general", key: "settings.catGeneral" },
+  { cat: "about", key: "settings.catAbout" },
 ];
 
 export default function SettingsPanel({
@@ -36,14 +37,14 @@ export default function SettingsPanel({
   return (
     <div className="settings-panel" style={{ display: "flex" }}>
       <aside className="settings-side">
-        <div className="settings-nav-title">Settings</div>
+        <div className="settings-nav-title">{t("settings.nav")}</div>
         {NAV.map((item) => (
           <button
             key={item.cat}
             className={`settings-nav-item${category === item.cat ? " active" : ""}`}
             onClick={() => setCategory(item.cat)}
           >
-            {item.label}
+            {t(item.key)}
           </button>
         ))}
       </aside>
@@ -51,7 +52,7 @@ export default function SettingsPanel({
       <div className="settings-content">
         {category === "context" && (
           <div className="settings-cat">
-            <h2>Explorer context menu</h2>
+            <h2>{t("settings.contextHeading")}</h2>
             <div className="setting-group">
               <label className="setting-row">
                 <input
@@ -61,47 +62,52 @@ export default function SettingsPanel({
                   onChange={(e) => onSetMenu(e.target.checked)}
                 />
                 <div>
-                  <div className="setting-title">Add to the context menu</div>
-                  <div className="setting-desc">
-                    Shows "Open with WROLP" when right-clicking a file in Explorer
-                  </div>
+                  <div className="setting-title">{t("settings.contextAdd")}</div>
+                  <div className="setting-desc">{t("settings.contextDesc")}</div>
                 </div>
               </label>
               <p className="muted">
                 {menuBusy
-                  ? "Writing to the registry…"
+                  ? t("settings.contextBusy")
                   : menu?.installed
-                    ? "Installed at HKCU\\Software\\Classes\\*\\shell\\WROLP Editor"
-                    : "Not installed. Writes to HKCU for the current user, no administrator rights needed."}
+                    ? t("settings.contextInstalled")
+                    : t("settings.contextMissing")}
               </p>
               {menu?.registered && (
                 <div className="setting-target">
-                  <div className="setting-desc">Currently launches</div>
+                  <div className="setting-desc">{t("settings.currentlyLaunches")}</div>
                   <code>{menu.registered}</code>
                 </div>
               )}
               {menu?.installed && !menu.matchesCurrent && (
-                <p className="setting-warn">
-                  That entry points at a different build than the one running now. Switch the box
-                  off and on again to repoint it at this executable.
-                </p>
+                <p className="setting-warn">{t("settings.warnStale")}</p>
               )}
-              {menu?.debugBuild && (
-                <p className="setting-warn">
-                  This is a debug build: it loads the Vite dev server, so the context menu only
-                  opens files while <code>npm run tauri dev</code> is running.
-                </p>
-              )}
+              {menu?.debugBuild && <p className="setting-warn">{t("settings.warnDebug")}</p>}
             </div>
           </div>
         )}
 
         {category === "general" && (
           <div className="settings-cat">
-            <h2>General</h2>
+            <h2>{t("settings.generalHeading")}</h2>
             <div className="setting-group">
               <label className="setting-row">
-                <span>Editor font size</span>
+                <span className="setting-title">{t("settings.language")}</span>
+                <select
+                  className="select"
+                  value={settings.language}
+                  onChange={(e) => onSaveSettings({ language: e.target.value })}
+                >
+                  {LANGUAGES.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p className="muted">{t("settings.languageDesc")}</p>
+              <label className="setting-row">
+                <span>{t("settings.fontSize")}</span>
                 <input
                   type="number"
                   min={10}
@@ -119,25 +125,20 @@ export default function SettingsPanel({
                   checked={settings.minimap}
                   onChange={(e) => onSaveSettings({ minimap: e.target.checked })}
                 />
-                <span>Show minimap</span>
+                <span>{t("settings.minimap")}</span>
               </label>
-              <p className="muted">
-                Changes apply immediately and are stored in {`<app data>/wrolp/state/settings.json`}.
-              </p>
+              <p className="muted">{t("settings.persisted")}</p>
             </div>
           </div>
         )}
 
         {category === "about" && (
           <div className="settings-cat">
-            <h2>About WROLP Editor</h2>
+            <h2>{t("settings.aboutHeading")}</h2>
             <div className="setting-group">
-              <p>Version {version}</p>
-              <p className="muted">A lightweight local text editor built on Tauri v2 + Monaco Editor.</p>
-              <p className="muted">
-                Unsaved edits go to <code>wrolp/drafts/&lt;sha256&gt;.draft</code> and are offered
-                back the next time the same file is opened.
-              </p>
+              <p>{t("settings.version", { version })}</p>
+              <p className="muted">{t("settings.aboutLine")}</p>
+              <p className="muted">{t("settings.draftLine")}</p>
             </div>
           </div>
         )}

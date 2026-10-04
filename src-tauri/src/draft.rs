@@ -28,8 +28,7 @@ fn wrolp_dir(app: &AppHandle, sub: &str) -> Result<PathBuf, String> {
     .map_err(|e| e.to_string())?
     .join("wrolp")
     .join(sub);
-  std::fs::create_dir_all(&dir)
-    .map_err(|e| format!("Cannot create directory {}: {e}", dir.display()))?;
+  std::fs::create_dir_all(&dir).map_err(|e| format!("dir_create:{e}"))?;
   Ok(dir)
 }
 
@@ -111,7 +110,7 @@ fn draft_key(raw: &str) -> String {
 fn draft_file(app: &AppHandle, raw: &str) -> Result<PathBuf, String> {
   let key = draft_key(raw);
   if key.is_empty() {
-    return Err("Cannot resolve file path".into());
+    return Err("path_unresolvable".into());
   }
   Ok(drafts_dir(app)?.join(format!("{key}.draft")))
 }
@@ -121,14 +120,14 @@ pub fn load(app: &AppHandle, raw: &str) -> Result<Option<Draft>, String> {
   let bytes = match std::fs::read(&file) {
     Ok(b) => b,
     Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-    Err(e) => return Err(format!("Cannot read draft: {e}")),
+    Err(e) => return Err(format!("draft_read:{e}")),
   };
   match serde_json::from_slice::<Draft>(&bytes) {
     Ok(d) => Ok(Some(d)),
     Err(e) => {
       // A broken draft must not block opening the file; drop it.
       let _ = std::fs::remove_file(&file);
-      Err(format!("Draft was corrupt and has been discarded: {e}"))
+      Err(format!("draft_corrupt:{e}"))
     }
   }
 }
@@ -144,11 +143,11 @@ pub fn save(app: &AppHandle, raw: &str, content: &str, cursor: usize) -> Result<
   let json = serde_json::to_vec(&draft).map_err(|e| e.to_string())?;
   // Write a temp file first, then swap: an interrupted write cannot leave half a JSON behind.
   let tmp = file.with_extension("tmp");
-  std::fs::write(&tmp, &json).map_err(|e| format!("Cannot write draft: {e}"))?;
+  std::fs::write(&tmp, &json).map_err(|e| format!("draft_write:{e}"))?;
   if file.exists() {
-    std::fs::remove_file(&file).map_err(|e| format!("Cannot replace draft: {e}"))?;
+    std::fs::remove_file(&file).map_err(|e| format!("draft_replace:{e}"))?;
   }
-  std::fs::rename(&tmp, &file).map_err(|e| format!("Cannot replace draft: {e}"))?;
+  std::fs::rename(&tmp, &file).map_err(|e| format!("draft_replace:{e}"))?;
   Ok(draft)
 }
 
@@ -158,7 +157,7 @@ pub fn clear(app: &AppHandle, raw: &str) -> Result<bool, String> {
     Ok(()) => Ok(true),
     // Nothing there to begin with counts as cleared.
     Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
-    Err(e) => Err(format!("Cannot delete draft: {e}")),
+    Err(e) => Err(format!("draft_delete:{e}")),
   }
 }
 

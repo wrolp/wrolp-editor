@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState, type RefObject } from "react";
+import { t } from "../lib/i18n";
 import { api, errorMessage, pickSaveAs, type Draft } from "../lib/tauri";
 import { basename, dirname, isUntitled, langOf, modelUri } from "../lib/path";
 import { pathKey, type EditorHandle, type PendingRestore, type Tab } from "../lib/types";
@@ -106,7 +107,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened }: Options
   );
 
   const openUntitled = useCallback(async () => {
-    const name = `Untitled-${++untitledSeq.current}`;
+    const name = t("tab.untitled", { n: ++untitledSeq.current });
     const tab: Tab = {
       id: nextId(),
       path: `untitled://${name}`,
@@ -128,7 +129,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened }: Options
     const tab: Tab = {
       id: nextId(),
       path: "__settings__",
-      name: "Settings",
+      name: t("tab.settings"),
       language: "plaintext",
       original: "",
       dirty: false,
@@ -228,7 +229,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened }: Options
         );
         setTimeout(() => oldModel?.dispose(), 0);
         onFileOpened?.(dirname(saved.path));
-        toast(`Saved ${basename(saved.path)}`);
+        toast(t("menu.saved", { name: basename(saved.path) }));
         return;
       }
 
@@ -236,7 +237,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened }: Options
       draft.forget(tab.path);
       await api.clearDraft(tab.path);
       setTabs((prev) => prev.map((t) => (t.id === tab.id ? { ...t, original: content, dirty: false } : t)));
-      toast(`Saved ${tab.name}`);
+      toast(t("menu.saved", { name: tab.name }));
     } catch (e) {
       toast(errorMessage(e));
     }
@@ -254,7 +255,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened }: Options
       if (mode === "discard") {
         try {
           await api.clearDraft(req.path);
-          toast("Draft discarded");
+          toast(t("menu.draftDiscarded"));
         } catch (e) {
           toast(errorMessage(e));
         }
@@ -276,7 +277,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened }: Options
         h.editor.revealPositionInCenter(position);
         h.editor.focus();
       }
-      toast("Draft restored");
+      toast(t("menu.draftRestored"));
     },
     [editorRef, toast]
   );

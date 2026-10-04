@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { IconFile, IconFolder } from "./icons";
+import { t } from "../lib/i18n";
 import { api, errorMessage, type FsEntry, type HistoryEntry } from "../lib/tauri";
 import { pathKey } from "../lib/types";
 
@@ -77,7 +78,7 @@ function FolderNode({ entry, depth, ...handlers }: NodeProps & { entry: FsEntry 
       {!collapsed &&
         (children === null ? (
           <div className="empty" style={indent(depth + 1)}>
-            Loading…
+            {t("side.loading")}
           </div>
         ) : (
           <TreeLevel {...handlers} entries={children} depth={depth + 1} />
@@ -159,24 +160,24 @@ export default function Sidebar(props: Props) {
           className={`side-tab${view === "explorer" ? " active" : ""}`}
           onClick={() => onSetView("explorer")}
         >
-          Explorer
+          {t("side.explorer")}
         </button>
         <button
           className={`side-tab${view === "history" ? " active" : ""}`}
           onClick={() => onSetView("history")}
         >
-          History
+          {t("side.history")}
         </button>
       </div>
 
       <div className={`side-view${view === "explorer" ? " active" : ""}`}>
         <div className="side-actions">
           <button className="side-btn" onClick={onPickFolder}>
-            Open folder…
+            {t("side.openFolder")}
           </button>
           <button
             className="side-btn side-btn-icon"
-            title="Refresh"
+            title={t("side.refresh")}
             onClick={() => setRefreshKey((k) => k + 1)}
           >
             ↻
@@ -184,7 +185,7 @@ export default function Sidebar(props: Props) {
         </div>
         <div className="tree">
           {rootDir === null ? (
-            <div className="empty">No folder open</div>
+            <div className="empty">{t("side.noFolder")}</div>
           ) : (
             <TreeLevel
               key={refreshKey}
@@ -200,7 +201,7 @@ export default function Sidebar(props: Props) {
 
       <div className={`side-view${view === "history" ? " active" : ""}`}>
         {history.length === 0 ? (
-          <div className="empty">No recently opened files</div>
+          <div className="empty">{t("side.noHistory")}</div>
         ) : (
           history.map((item) => (
             <div
@@ -213,7 +214,7 @@ export default function Sidebar(props: Props) {
               <span className="hi-path">{item.path}</span>
               <button
                 className="hist-remove"
-                title="Remove from history"
+                title={t("side.removeHistory")}
                 onClick={(e) => {
                   e.stopPropagation();
                   onRemoveHistory(item.path);
