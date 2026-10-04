@@ -53,46 +53,48 @@ export default function TitleBar(props: Props) {
         onContextMenu={props.onTabContextMenu}
       />
 
-      <button
-        className="tab-list-btn"
-        ref={btnRef}
-        title="Open files"
-        onClick={() => setDropdownOpen((v) => !v)}
-      >
-        <IconChevron />
-      </button>
+      <div className="tab-list-wrap">
+        <button
+          className="tab-list-btn"
+          ref={btnRef}
+          title="Open files"
+          onClick={() => setDropdownOpen((v) => !v)}
+        >
+          <IconChevron />
+        </button>
 
-      {dropdownOpen && (
-        <div className="tab-dropdown">
-          {tabs.length === 0 ? (
-            <div className="dd-empty">No open files</div>
-          ) : (
-            tabs.map((tab) => (
-              <div
-                key={tab.id}
-                className={`dd-row${tab.id === activeId ? " active" : ""}`}
-                onClick={() => {
-                  props.onSelect(tab.id);
-                  setDropdownOpen(false);
-                }}
-              >
-                <TabGlyph name={tab.name} />
-                <span className="dd-name">{tab.name}</span>
-                <button
-                  className="dd-close"
-                  title="Close"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    props.onClose(tab.id);
+        {dropdownOpen && (
+          <div className="tab-dropdown">
+            {tabs.length === 0 ? (
+              <div className="dd-empty">No open files</div>
+            ) : (
+              tabs.map((tab) => (
+                <div
+                  key={tab.id}
+                  className={`dd-row${tab.id === activeId ? " active" : ""}`}
+                  onClick={() => {
+                    props.onSelect(tab.id);
+                    setDropdownOpen(false);
                   }}
                 >
-                  ×
-                </button>
-              </div>
-            ))
-          )}
-        </div>
-      )}
+                  <TabGlyph name={tab.name} />
+                  <span className="dd-name">{tab.name}</span>
+                  <button
+                    className="dd-close"
+                    title="Close"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      props.onClose(tab.id);
+                    }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))
+            )}
+          </div>
+        )}
+      </div>
 
       <button className="tab-new" title="New file (Ctrl+N)" onClick={props.onNewFile}>
         +

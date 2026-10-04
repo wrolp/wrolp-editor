@@ -213,7 +213,6 @@ body {
   align-self: center;
   width: 28px;
   height: 28px;
-  margin: 0 2px 0 6px;
   border: none;
   border-radius: 7px;
   background: transparent;
@@ -228,10 +227,17 @@ body {
   color: var(--text);
 }
 
+.tab-list-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  /* The offset lives here so the panel's left edge matches the button's left edge. */
+  margin: 0 2px 0 6px;
+}
 .tab-dropdown {
   position: absolute;
   top: 100%;
-  right: 8px;
+  left: 0;
   z-index: 50;
   min-width: 220px;
   max-height: 320px;
