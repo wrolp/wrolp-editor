@@ -29,7 +29,7 @@ pub fn run() {
       commands::remove_history,
       commands::get_settings,
       commands::save_settings,
-      commands::is_context_menu_installed,
+      commands::context_menu_target,
       commands::install_context_menu,
       commands::uninstall_context_menu
     ]);

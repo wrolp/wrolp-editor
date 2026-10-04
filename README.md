@@ -15,7 +15,7 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | Restore | On open, disk content is compared with the draft; a differing draft raises a Restore / Discard dialog |
 | Sidebar | Explorer file tree (lazy folders, refresh button) and a History list of recently opened files |
 | Single instance | Launching a second time hands the path to the running window, adds a tab and focuses it |
-| Settings | Context-menu switch, editor font size, minimap; persisted and applied live |
+| Settings | Context-menu switch, editor font size, minimap; persisted and applied live. The context-menu page also shows the command the entry currently launches, and warns when it points at a different build or when this is a debug build |
 
 ## Keyboard shortcuts
 
@@ -43,6 +43,11 @@ Scrolling the mouse wheel over the tab strip scrolls it sideways.
 npm install
 npm run tauri dev
 ```
+
+A debug build renders the page served by Vite at `localhost:1420`. If the context-menu entry
+points at `target/debug/wrolp-editor.exe`, right-clicking a file only works while that dev
+server is running — otherwise the window shows a connection-refused page. Point the entry at
+the installed build for normal use (Settings → context menu shows which path is registered).
 
 ### Build an installer
 
@@ -90,7 +95,7 @@ wrolp/
 
 `take_startup_files`, `open_file`, `save_file`, `get_draft`, `save_draft`, `clear_draft`,
 `list_dir`, `get_history`, `remove_history`, `get_settings`, `save_settings`,
-`is_context_menu_installed`, `install_context_menu`, `uninstall_context_menu`.
+`context_menu_target`, `install_context_menu`, `uninstall_context_menu`.
 
 File IO is deliberately **not** the `fs` plugin: the WebView only ever calls these fixed
 commands, so no broad disk scope is exposed to the frontend.

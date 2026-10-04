@@ -15,7 +15,7 @@
 | 恢复 | 打开文件时把磁盘内容与草稿比对，不一致就弹「恢复草稿 / 丢弃」 |
 | 侧边栏 | 资源管理器目录树（子目录懒加载 + 刷新按钮）与最近打开的历史列表 |
 | 单实例 | 再次启动时把路径交给已运行的窗口，新增标签并聚焦 |
-| 设置 | 右键菜单开关、编辑器字号、minimap；即时生效并持久化 |
+| 设置 | 右键菜单开关、编辑器字号、minimap；即时生效并持久化。右键菜单页还会显示当前注册表实际启动的命令，指向别的构建或当前是 debug 构建时给出警告 |
 
 ## 快捷键
 
@@ -43,6 +43,8 @@
 npm install
 npm run tauri dev
 ```
+
+debug 构建加载的是 Vite 在 `localhost:1420` 提供的页面。若右键菜单那条注册表指向 `target/debug/wrolp-editor.exe`，只有在 dev server 运行时右键才能打开文件，否则窗口会显示「拒绝连接」页面。日常使用请把菜单指向安装版（设置页会显示当前注册的实际命令）。
 
 ### 打安装包
 
@@ -90,6 +92,6 @@ wrolp/
 
 `take_startup_files`、`open_file`、`save_file`、`get_draft`、`save_draft`、`clear_draft`、
 `list_dir`、`get_history`、`remove_history`、`get_settings`、`save_settings`、
-`is_context_menu_installed`、`install_context_menu`、`uninstall_context_menu`。
+`context_menu_target`、`install_context_menu`、`uninstall_context_menu`。
 
 文件读写**故意不用** `fs` 插件：WebView 只能调用上面这些固定命令，不把大范围磁盘 scope 暴露给前端。

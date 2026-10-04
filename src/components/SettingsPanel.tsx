@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import type { Settings } from "../lib/tauri";
+import type { MenuTarget, Settings } from "../lib/tauri";
 
 type Category = "context" | "general" | "about";
 
 interface Props {
   settings: Settings;
-  menuInstalled: boolean;
+  menu: MenuTarget | null;
   menuBusy: boolean;
   onSaveSettings: (patch: Partial<Settings>) => void;
   onSetMenu: (installed: boolean) => void;
@@ -20,7 +20,7 @@ const NAV: { cat: Category; label: string }[] = [
 
 export default function SettingsPanel({
   settings,
-  menuInstalled,
+  menu,
   menuBusy,
   onSaveSettings,
   onSetMenu,
@@ -56,7 +56,7 @@ export default function SettingsPanel({
               <label className="setting-row">
                 <input
                   type="checkbox"
-                  checked={menuInstalled}
+                  checked={menu?.installed ?? false}
                   disabled={menuBusy}
                   onChange={(e) => onSetMenu(e.target.checked)}
                 />
@@ -70,10 +70,28 @@ export default function SettingsPanel({
               <p className="muted">
                 {menuBusy
                   ? "Writing to the registry…"
-                  : menuInstalled
+                  : menu?.installed
                     ? "Installed at HKCU\\Software\\Classes\\*\\shell\\WROLP Editor"
                     : "Not installed. Writes to HKCU for the current user, no administrator rights needed."}
               </p>
+              {menu?.registered && (
+                <div className="setting-target">
+                  <div className="setting-desc">Currently launches</div>
+                  <code>{menu.registered}</code>
+                </div>
+              )}
+              {menu?.installed && !menu.matchesCurrent && (
+                <p className="setting-warn">
+                  That entry points at a different build than the one running now. Switch the box
+                  off and on again to repoint it at this executable.
+                </p>
+              )}
+              {menu?.debugBuild && (
+                <p className="setting-warn">
+                  This is a debug build: it loads the Vite dev server, so the context menu only
+                  opens files while <code>npm run tauri dev</code> is running.
+                </p>
+              )}
             </div>
           </div>
         )}

@@ -661,6 +661,32 @@ body {
   font-family: Consolas, "Courier New", monospace;
   color: #cfcfcf;
 }
+.setting-target {
+  margin-top: 12px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #1e1e1e;
+}
+.setting-target code {
+  display: block;
+  margin-top: 4px;
+  font-size: 12px;
+  word-break: break-all;
+}
+.setting-warn {
+  margin-top: 10px;
+  padding: 8px 11px;
+  border-left: 3px solid #d9a441;
+  background: rgba(217, 164, 65, 0.12);
+  border-radius: 0 7px 7px 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #e6c98a;
+}
+.setting-warn code {
+  color: #f0d9a8;
+}
 
 /* ---------- Status bar ---------- */
 .statusbar {

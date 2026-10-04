@@ -274,8 +274,8 @@ pub fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, Str
 }
 
 #[tauri::command]
-pub fn is_context_menu_installed() -> Result<bool, String> {
-  crate::context_menu::is_installed()
+pub fn context_menu_target() -> Result<crate::context_menu::MenuTarget, String> {
+  crate::context_menu::probe()
 }
 
 #[tauri::command]

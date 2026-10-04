@@ -40,6 +40,14 @@ export interface Settings {
   sidebarView: string;
 }
 
+export interface MenuTarget {
+  installed: boolean;
+  registered: string | null;
+  expected: string;
+  matchesCurrent: boolean;
+  debugBuild: boolean;
+}
+
 export const api = {
   takeStartupFiles: () => invoke<string[]>("take_startup_files"),
   openFile: (path: string) => invoke<OpenedFile>("open_file", { path }),
@@ -53,7 +61,7 @@ export const api = {
   removeHistory: (path: string) => invoke<HistoryEntry[]>("remove_history", { path }),
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (settings: Settings) => invoke<Settings>("save_settings", { settings }),
-  isContextMenuInstalled: () => invoke<boolean>("is_context_menu_installed"),
+  contextMenuTarget: () => invoke<MenuTarget>("context_menu_target"),
   installContextMenu: () => invoke<string>("install_context_menu"),
   uninstallContextMenu: () => invoke<void>("uninstall_context_menu"),
 };

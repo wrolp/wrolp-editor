@@ -18,6 +18,7 @@ import {
   pickFolder,
   revealItemInDir,
   type HistoryEntry,
+  type MenuTarget,
   type Settings,
 } from "./lib/tauri";
 
@@ -58,7 +59,7 @@ export default function App() {
   const [rootDir, setRootDir] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [cursor, setCursor] = useState({ line: 1, column: 1 });
-  const [menuInstalled, setMenuInstalled] = useState(false);
+  const [menuTarget, setMenuTarget] = useState<MenuTarget | null>(null);
   const [menuBusy, setMenuBusy] = useState(false);
   const [tabMenu, setTabMenu] = useState<{ tabId: number; x: number; y: number } | null>(null);
 
@@ -76,6 +77,20 @@ export default function App() {
     api.getHistory().then(setHistory).catch((e) => toast(errorMessage(e)));
   }, [toast]);
 
+  const refreshMenu = useCallback(() => {
+    api
+      .contextMenuTarget()
+      .then((target) => {
+        setMenuTarget(target);
+        if (!target.installed) {
+          toast('Tip: add "Open with WROLP" to the file context menu from Settings.');
+        } else if (!target.matchesCurrent) {
+          toast("The context menu launches a different build. Re-enable it in Settings.");
+        }
+      })
+      .catch((e) => toast(errorMessage(e)));
+  }, [toast]);
+
   // Startup: settings, history, context-menu state, and files from argv or a second instance.
   useEffect(() => {
     api
@@ -88,14 +103,7 @@ export default function App() {
       .catch((e) => toast(errorMessage(e)));
 
     refreshHistory();
-
-    api
-      .isContextMenuInstalled()
-      .then((installed) => {
-        setMenuInstalled(installed);
-        if (!installed) toast('Tip: add "Open with WROLP" to the file context menu from Settings.');
-      })
-      .catch((e) => toast(errorMessage(e)));
+    refreshMenu();
 
     const openStartup = async () => {
       try {
@@ -155,20 +163,19 @@ export default function App() {
       try {
         if (installed) {
           const value = await api.installContextMenu();
-          setMenuInstalled(true);
           toast(`Context menu added: ${value}`);
         } else {
           await api.uninstallContextMenu();
-          setMenuInstalled(false);
           toast("Context menu removed");
         }
+        refreshMenu();
       } catch (e) {
         toast(errorMessage(e));
       } finally {
         setMenuBusy(false);
       }
     },
-    [toast]
+    [refreshMenu, toast]
   );
 
   const menuTabPath = useMemo(() => {
@@ -318,7 +325,7 @@ export default function App() {
           {showSettings && (
             <SettingsPanel
               settings={settings}
-              menuInstalled={menuInstalled}
+              menu={menuTarget}
               menuBusy={menuBusy}
               onSaveSettings={saveSettings}
               onSetMenu={setMenu}
