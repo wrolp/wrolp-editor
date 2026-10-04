@@ -17,6 +17,8 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | Single instance | Launching a second time hands the path to the running window, adds a tab and focuses it |
 | Settings | Context-menu switch, editor font size, minimap, UI language; persisted and applied live. The context-menu page also shows the command the entry currently launches, and warns when it points at a different build or when this is a debug build |
 | Language | English by default, switchable to 中文 from a dropdown in Settings. All strings, including messages coming from the Rust side, resolve through one key table |
+| Workspaces | A workspace is one sidebar folder plus the tabs opened in it. Switching workspaces swaps that whole context inside the same window; tabs and caret positions come back on the next start |
+| Move / copy tabs | A tab can be re-homed into another workspace from its context menu. This changes *where the tab is listed*, never the file on disk |
 
 ## Keyboard shortcuts
 
@@ -76,7 +78,8 @@ wrolp/
 ├── drafts/<sha256>.draft     one draft per file
 └── state/
     ├── history.json          recently opened files, newest first, capped at 50
-    └── settings.json         fontSize, minimap, sidebarVisible, sidebarView, sidebarWidth, language
+    ├── settings.json         fontSize, minimap, sidebarVisible, sidebarView, sidebarWidth, language, restoreSession
+    └── workspaces.json       the workspaces: root folder, tabs and caret positions
 ```
 
 `<sha256>` is the hash of the **normalized** path: absolute, `\\?\` verbatim prefix removed, separators unified, lowercased on Windows. A draft looks like:
@@ -96,10 +99,38 @@ wrolp/
 
 `take_startup_files`, `open_file`, `save_file`, `get_draft`, `save_draft`, `clear_draft`,
 `list_dir`, `get_history`, `remove_history`, `get_settings`, `save_settings`,
+`get_workspaces`, `save_workspaces`, `transfer_tabs`,
 `context_menu_target`, `install_context_menu`, `uninstall_context_menu`.
 
 File IO is deliberately **not** the `fs` plugin: the WebView only ever calls these fixed
 commands, so no broad disk scope is exposed to the frontend.
+
+## Workspaces
+
+A workspace is **one sidebar folder plus the tabs opened in it**, and the name in the title bar
+switches between them inside the same window. Nothing else in the app is per-workspace: the
+sidebar width and the language are global settings.
+
+- **A workspace appears on its own.** Opening the first file in a bare window makes a workspace
+  for that file's folder. Files opened later from the Explorer context menu join the workspace
+  that is on screen — a right-click never changes your whole context under you. To point at a
+  different folder deliberately, use *Open folder…* or *Show folder in sidebar* on a tab.
+- **What is remembered:** the tab order, which tab was selected, the caret position per tab
+  (`Settings → Reopen tabs from last time` turns this off), the sidebar view, and for untitled
+  tabs their text — scratch tabs have no draft file, so the workspace is their only copy.
+  Capped at 32 workspaces, 200 tabs each and 64 KB of scratch text per tab.
+- **Content is never duplicated.** File-backed tabs store only path + caret; unsaved text stays
+  in the draft file, keyed by path. That is why a tab can be moved to another workspace without
+  touching its draft, and why the draft prompt follows the file there.
+- **Move / copy tab** (tab context menu) re-homes a tab between workspaces. It never renames or
+  moves the file on disk — that would orphan the draft keyed to its path.
+- **A workspace that points at deleted files** skips them on restore with one aggregated notice
+  and drops them from the store. *Remove from list* deletes only the record: files and drafts
+  are left alone.
+
+`workspaces.json` is whole-store, single-writer (the app is single instance) and written through
+a temp file + rename. Tab paths are the same normalized form the drafts hash, so one file cannot
+appear twice inside a workspace.
 
 ## Interface language
 

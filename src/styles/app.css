@@ -297,6 +297,154 @@ body {
   font-size: 12px;
 }
 
+/* Workspace switcher: same panel language as the tab list, so the title bar stays one system. */
+.ws-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-left: 6px;
+  flex: 0 0 auto;
+}
+.ws-chip {
+  display: flex;
+  align-items: center;
+  max-width: 190px;
+  height: 24px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #2d2d30;
+  color: #d4d4d4;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ws-chip:hover {
+  background: #3a3a3a;
+  color: #fff;
+}
+.ws-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 60;
+  min-width: 260px;
+  max-height: 340px;
+  overflow-y: auto;
+  background: #252526;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+  padding: 6px;
+}
+.ws-heading {
+  padding: 6px 10px 4px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.ws-row,
+.ws-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  color: #d4d4d4;
+  font-size: 13px;
+}
+.ws-row:hover,
+.ws-item:hover {
+  background: #2f2f2f;
+  color: #fff;
+}
+.ws-row.active {
+  background: var(--accent-soft);
+  color: #fff;
+}
+.ws-row-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-row-meta {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+.ws-row.active .ws-row-meta {
+  color: #d7d7e8;
+}
+.ws-item.danger:hover {
+  background: #4a2a2a;
+  color: #fff;
+}
+.ws-sep {
+  height: 1px;
+  margin: 6px 4px;
+  background: var(--border);
+}
+.ws-rename {
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+}
+.ws-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: #1e1e1e;
+  color: var(--text);
+  font-size: 13px;
+}
+.ws-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+/* Batch draft dialog */
+.draft-list {
+  max-height: 190px;
+  overflow-y: auto;
+  margin: 10px 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+}
+.draft-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+.draft-row:hover {
+  background: #2f2f2f;
+}
+.draft-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.draft-time {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+
 .titlebar-actions {
   display: flex;
   align-items: center;

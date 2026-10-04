@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import TabBar, { TabGlyph } from "./TabBar";
 import { t } from "../lib/i18n";
@@ -9,6 +9,8 @@ interface Props {
   tabs: Tab[];
   activeId: number | null;
   sidebarVisible: boolean;
+  /** Rendered at the left of the tab strip: the workspace switcher. */
+  workspaceSlot?: ReactNode;
   onSelect: (id: number) => void;
   onClose: (id: number) => void;
   onTabContextMenu: (id: number, x: number, y: number) => void;
@@ -45,6 +47,8 @@ export default function TitleBar(props: Props) {
       >
         <IconSidebar />
       </button>
+
+      {props.workspaceSlot}
 
       <TabBar
         tabs={tabs}

@@ -42,7 +42,41 @@ export interface Settings {
   sidebarWidth: number;
   /** Language code; unknown values are stored as-is and fall back to English in the UI. */
   language: string;
+  /** Reopen the tabs of the active workspace on startup. */
+  restoreSession: boolean;
 }
+
+/** One restored tab: either a file (path + cursor) or scratch text (untitled + content). */
+export interface WorkspaceTab {
+  path: string;
+  cursor: number;
+  untitled: string;
+  content: string;
+}
+
+export interface Workspace {
+  id: string;
+  name: string;
+  /** True while the name follows the root folder. */
+  autoName: boolean;
+  root: string;
+  tabs: WorkspaceTab[];
+  /** Key of the selected tab: its path, or `untitled://<name>`. Empty when none. */
+  active: string;
+  sidebarView: string;
+  updatedAt: string;
+}
+
+export interface WorkspaceStore {
+  version: number;
+  active: string;
+  items: Workspace[];
+}
+
+/** Re-homing a tab: `tab` is a tab key, or null for every tab of the source workspace. */
+export type TabTransfer =
+  | { action: "move"; from: string; to: string; tab: string | null }
+  | { action: "copy"; from: string; to: string; tab: string | null };
 
 export interface MenuTarget {
   installed: boolean;
@@ -52,9 +86,12 @@ export interface MenuTarget {
   debugBuild: boolean;
 }
 
+export const EMPTY_WORKSPACE_STORE: WorkspaceStore = { version: 1, active: "", items: [] };
+
 export const api = {
   takeStartupFiles: () => invoke<string[]>("take_startup_files"),
-  openFile: (path: string) => invoke<OpenedFile>("open_file", { path }),
+  /** `record: false` keeps a session restore from rewriting the recent-files history. */
+  openFile: (path: string, record = true) => invoke<OpenedFile>("open_file", { path, record }),
   saveFile: (path: string, content: string) => invoke<SavedFile>("save_file", { path, content }),
   getDraft: (path: string) => invoke<Draft | null>("get_draft", { path }),
   saveDraft: (path: string, content: string, cursor: number) =>
@@ -65,6 +102,10 @@ export const api = {
   removeHistory: (path: string) => invoke<HistoryEntry[]>("remove_history", { path }),
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (settings: Settings) => invoke<Settings>("save_settings", { settings }),
+  getWorkspaces: () => invoke<WorkspaceStore>("get_workspaces"),
+  saveWorkspaces: (store: WorkspaceStore) => invoke<WorkspaceStore>("save_workspaces", { store }),
+  transferTabs: (store: WorkspaceStore, transfer: TabTransfer) =>
+    invoke<WorkspaceStore>("transfer_tabs", { store, transfer }),
   contextMenuTarget: () => invoke<MenuTarget>("context_menu_target"),
   installContextMenu: () => invoke<string>("install_context_menu"),
   uninstallContextMenu: () => invoke<void>("uninstall_context_menu"),

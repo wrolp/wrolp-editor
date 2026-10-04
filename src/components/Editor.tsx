@@ -37,7 +37,7 @@ export default function Editor({ tab, fontSize, minimap, onChange, onCursor, onR
   return (
     <MonacoEditor
       path={modelUri(tab.path)}
-      defaultValue={tab.original}
+      defaultValue={tab.initialValue ?? tab.original}
       language={tab.language}
       theme="vs-dark"
       loading={<div className="editor-empty">{t("app.loading")}</div>}

@@ -11,6 +11,11 @@ export interface Tab {
   /** Baseline content on disk, used to decide whether the tab is dirty. */
   original: string;
   dirty: boolean;
+  /**
+   * Text to seed the Monaco model with when it is first created. Only restored scratch
+   * tabs use it: their content has no draft file to come back from.
+   */
+  initialValue?: string;
   isSettings?: boolean;
 }
 

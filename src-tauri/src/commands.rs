@@ -1,7 +1,8 @@
 //! Tauri commands exposed to the frontend: file IO, draft CRUD, directory listings,
-//! recently-opened history, settings and the context-menu install switch.
+//! recently-opened history, settings, workspace state and the context-menu install switch.
 
 use crate::draft::{self, Draft};
+use crate::workspace::WorkspaceStore;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Mutex;
@@ -58,6 +59,8 @@ pub struct Settings {
   /// UI language code, e.g. "en" or "zh". Unknown values are stored as-is; the frontend
   /// falls back to English, so adding a language needs no change here.
   pub language: String,
+  /// Reopen the tabs of the active workspace on startup.
+  pub restore_session: bool,
 }
 
 /// Used when settings.json is absent or a key is missing, so a first run must not
@@ -71,6 +74,7 @@ impl Default for Settings {
       sidebar_view: "explorer".into(),
       sidebar_width: 240.0,
       language: "en".into(),
+      restore_session: true,
     }
   }
 }
@@ -105,6 +109,7 @@ impl Settings {
       } else {
         self.language
       },
+      restore_session: self.restore_session,
     }
   }
 }
@@ -123,10 +128,22 @@ fn read_json<T: for<'de> Deserialize<'de>>(
   }
 }
 
+/// Replace `path` with `bytes` without ever leaving a half-written file behind:
+/// the whole payload goes to a sibling temp file first, then gets renamed over the target.
+/// Renaming onto an existing file fails on Windows, so the target is removed first.
+fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+  let tmp = path.with_extension("json.tmp");
+  std::fs::write(&tmp, bytes).map_err(|e| format!("tmp_write:{e}"))?;
+  if path.exists() {
+    std::fs::remove_file(path).map_err(|e| format!("target_remove:{e}"))?;
+  }
+  std::fs::rename(&tmp, path).map_err(|e| format!("tmp_replace:{e}"))
+}
+
 fn write_json<T: Serialize>(app: &AppHandle, file: &str, value: &T) -> Result<(), String> {
   let path = draft::store_dir(app)?.join(file);
   let json = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
-  std::fs::write(&path, json).map_err(|e| format!("state_write:{file}: {e}"))
+  write_atomic(&path, &json).map_err(|e| format!("state_write:{file}: {e}"))
 }
 
 /// Drained once at startup: paths handed over by "Open with WROLP".
@@ -136,7 +153,7 @@ pub fn take_startup_files(state: State<'_, PendingFiles>) -> Vec<String> {
 }
 
 #[tauri::command]
-pub fn open_file(app: AppHandle, path: String) -> Result<OpenedFile, String> {
+pub fn open_file(app: AppHandle, path: String, record: Option<bool>) -> Result<OpenedFile, String> {
   let normalized = draft::normalize_path(&path);
   if normalized.is_empty() {
     return Err("path_empty".into());
@@ -158,7 +175,11 @@ pub fn open_file(app: AppHandle, path: String) -> Result<OpenedFile, String> {
     .map(|d| d.as_millis() as u64)
     .unwrap_or(0);
 
-  push_history_entry(&app, &normalized)?;
+  // Reopening a whole workspace is not "the user just opened these": recording it would
+  // bury the files actually touched today under whatever was left open last session.
+  if record.unwrap_or(true) {
+    push_history_entry(&app, &normalized)?;
+  }
   Ok(OpenedFile {
     path: normalized,
     content,
@@ -288,6 +309,34 @@ pub fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, Str
   let settings = settings.filled();
   write_json(&app, "settings.json", &settings)?;
   Ok(settings)
+}
+
+/// Whole-store round trip, same shape as settings: a missing file is a clean first run,
+/// not an error, and the returned store is always the cleaned one that was validated.
+#[tauri::command]
+pub fn get_workspaces(app: AppHandle) -> Result<WorkspaceStore, String> {
+  Ok(
+    read_json::<WorkspaceStore>(&app, "workspaces.json")?
+      .unwrap_or_default()
+      .filled(),
+  )
+}
+
+#[tauri::command]
+pub fn save_workspaces(app: AppHandle, store: WorkspaceStore) -> Result<WorkspaceStore, String> {
+  let store = store.filled().stamp_active();
+  write_json(&app, "workspaces.json", &store)?;
+  Ok(store)
+}
+
+/// Re-home tabs between workspaces. Pure: it takes the store the frontend is holding and
+/// hands back the new one, which the frontend then saves in a single write.
+#[tauri::command]
+pub fn transfer_tabs(
+  store: WorkspaceStore,
+  transfer: crate::workspace::TabTransfer,
+) -> WorkspaceStore {
+  crate::workspace::apply_transfer(store, &transfer).filled()
 }
 
 #[tauri::command]
@@ -434,5 +483,50 @@ mod tests {
     .filled();
     assert_eq!(s.font_size, 14.0);
     assert_eq!(s.sidebar_view, "explorer");
+  }
+
+  /// An older settings.json has no restoreSession key at all; that must not read as
+  /// "the user turned session restore off".
+  #[test]
+  fn missing_settings_keys_fall_back_to_the_defaults() {
+    let s: Settings = serde_json::from_str("{\"fontSize\":16.0,\"minimap\":false}")
+      .expect("parse partial settings");
+    assert!(s.restore_session);
+    assert!(!s.minimap);
+    assert_eq!(s.font_size, 16.0);
+    assert_eq!(s.language, "en");
+  }
+
+  fn scratch_dir(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("wrolp-{}-{}", name, std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    dir
+  }
+
+  #[test]
+  fn atomic_write_replaces_content_and_leaves_no_temp_file() {
+    let dir = scratch_dir("atomic-ok");
+    let target = dir.join("store.json");
+    std::fs::write(&target, b"old").expect("seed");
+
+    write_atomic(&target, b"{\"version\":1}").expect("write");
+
+    assert_eq!(std::fs::read(&target).expect("read"), b"{\"version\":1}");
+    assert!(!dir.join("store.json.tmp").exists());
+    std::fs::remove_dir_all(&dir).ok();
+  }
+
+  #[test]
+  fn failed_atomic_write_leaves_the_previous_file_intact() {
+    let dir = scratch_dir("atomic-bad");
+    let target = dir.join("store.json");
+    std::fs::write(&target, b"old").expect("seed");
+    // A directory cannot be swapped in as a file, so this write must fail...
+    let blocked = dir.join("blocked");
+    std::fs::create_dir_all(&blocked).expect("mkdir");
+    assert!(write_atomic(&blocked, b"new").is_err());
+    // ...and the state that was already on disk is still readable.
+    assert_eq!(std::fs::read(&target).expect("read"), b"old");
+    std::fs::remove_dir_all(&dir).ok();
   }
 }

@@ -127,6 +127,15 @@ export default function SettingsPanel({
                 />
                 <span>{t("settings.minimap")}</span>
               </label>
+              <label className="setting-row">
+                <input
+                  type="checkbox"
+                  checked={settings.restoreSession}
+                  onChange={(e) => onSaveSettings({ restoreSession: e.target.checked })}
+                />
+                <span>{t("settings.restoreSession")}</span>
+              </label>
+              <p className="muted">{t("settings.restoreSessionDesc")}</p>
               <p className="muted">{t("settings.persisted")}</p>
             </div>
           </div>
