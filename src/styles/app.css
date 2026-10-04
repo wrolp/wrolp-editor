@@ -511,6 +511,7 @@ body.resizing .editor-host {
   color: #fff;
 }
 .tree-row .chev {
+  flex: 0 0 10px;
   width: 10px;
   display: inline-block;
   text-align: center;
@@ -522,7 +523,17 @@ body.resizing .editor-host {
   transform: rotate(-90deg);
 }
 .tree-row .ti {
-  font-size: 12px;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+}
+/* Only the name shrinks: the chevron and icon keep their width, so the text's left
+   edge stays put while the sidebar is resized. */
+.tree-row .tn {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .hist-item {

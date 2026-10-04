@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { IconFile, IconFolder } from "./icons";
 import { api, errorMessage, type FsEntry, type HistoryEntry } from "../lib/tauri";
 import { pathKey } from "../lib/types";
 
@@ -30,7 +31,9 @@ function FileRow({ entry, depth, activePath, onOpenPath }: NodeProps & { entry: 
       onClick={() => onOpenPath(entry.path)}
     >
       <span className="chev" />
-      <span className="ti">📄</span>
+      <span className="ti">
+        <IconFile />
+      </span>
       <span className="tn">{entry.name}</span>
     </div>
   );
@@ -66,7 +69,9 @@ function FolderNode({ entry, depth, ...handlers }: NodeProps & { entry: FsEntry 
         onClick={() => setCollapsed((v) => !v)}
       >
         <span className="chev">▾</span>
-        <span className="ti">📁</span>
+        <span className="ti">
+          <IconFolder />
+        </span>
         <span className="tn">{entry.name.replace(/\/$/, "")}</span>
       </div>
       {!collapsed &&

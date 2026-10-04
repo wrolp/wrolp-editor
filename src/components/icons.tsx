@@ -46,3 +46,20 @@ export function IconSettings({ size = 18 }: IconProps) {
     </svg>
   );
 }
+
+export function IconFolder({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.6}>
+      <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4L10 6.75h9.5A1.5 1.5 0 0 1 21 8.25V17.5A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5v-11z" />
+    </svg>
+  );
+}
+
+export function IconFile({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.6}>
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5z" />
+      <path d="M14 3v5h5" />
+    </svg>
+  );
+}
