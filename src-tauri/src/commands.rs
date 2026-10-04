@@ -54,6 +54,7 @@ pub struct Settings {
   pub minimap: bool,
   pub sidebar_visible: bool,
   pub sidebar_view: String,
+  pub sidebar_width: f64,
 }
 
 /// Used when settings.json is absent or a key is missing, so a first run must not
@@ -65,9 +66,13 @@ impl Default for Settings {
       minimap: true,
       sidebar_visible: true,
       sidebar_view: "explorer".into(),
+      sidebar_width: 240.0,
     }
   }
 }
+
+const SIDEBAR_MIN_WIDTH: f64 = 180.0;
+const SIDEBAR_MAX_WIDTH: f64 = 640.0;
 
 impl Settings {
   fn filled(self) -> Self {
@@ -83,6 +88,13 @@ impl Settings {
         "explorer".into()
       } else {
         self.sidebar_view
+      },
+      sidebar_width: if self.sidebar_width <= 0.0 {
+        240.0
+      } else {
+        self
+          .sidebar_width
+          .clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH)
       },
     }
   }
@@ -341,6 +353,38 @@ mod tests {
     assert!(s.minimap);
     assert_eq!(s.sidebar_view, "explorer");
     assert_eq!(s.font_size, 14.0);
+    assert_eq!(s.sidebar_width, 240.0);
+  }
+
+  #[test]
+  fn sidebar_width_is_clamped_to_the_draggable_range() {
+    assert_eq!(
+      Settings {
+        sidebar_width: 0.0,
+        ..Default::default()
+      }
+      .filled()
+      .sidebar_width,
+      240.0
+    );
+    assert_eq!(
+      Settings {
+        sidebar_width: 40.0,
+        ..Default::default()
+      }
+      .filled()
+      .sidebar_width,
+      180.0
+    );
+    assert_eq!(
+      Settings {
+        sidebar_width: 5000.0,
+        ..Default::default()
+      }
+      .filled()
+      .sidebar_width,
+      640.0
+    );
   }
 
   #[test]

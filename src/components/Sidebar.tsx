@@ -97,6 +97,7 @@ function TreeLevel({ entries, depth, ...handlers }: LevelProps) {
 
 interface Props extends TreeHandlers {
   visible: boolean;
+  width: number;
   view: "explorer" | "history";
   rootDir: string | null;
   history: HistoryEntry[];
@@ -108,6 +109,7 @@ interface Props extends TreeHandlers {
 export default function Sidebar(props: Props) {
   const {
     visible,
+    width,
     view,
     rootDir,
     history,
@@ -146,7 +148,7 @@ export default function Sidebar(props: Props) {
   if (!visible) return null;
 
   return (
-    <div className="sidebar">
+    <div className="sidebar" style={{ width }}>
       <div className="sidebar-head">
         <button
           className={`side-tab${view === "explorer" ? " active" : ""}`}

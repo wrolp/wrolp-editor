@@ -38,6 +38,7 @@ export interface Settings {
   minimap: boolean;
   sidebarVisible: boolean;
   sidebarView: string;
+  sidebarWidth: number;
 }
 
 export interface MenuTarget {

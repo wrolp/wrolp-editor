@@ -13,7 +13,7 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | Saving | `Ctrl+S` writes the file and clears its draft; a never-saved `Untitled-N` tab goes through Save As |
 | Drafts | Debounced ~500 ms after each edit; also flushed on tab switch, tab close and window blur |
 | Restore | On open, disk content is compared with the draft; a differing draft raises a Restore / Discard dialog |
-| Sidebar | Explorer file tree (lazy folders, refresh button) and a History list of recently opened files |
+| Sidebar | Explorer file tree (lazy folders, refresh button) and a History list of recently opened files. Drag the divider to resize (180–640 px, double-click resets); the width is persisted |
 | Single instance | Launching a second time hands the path to the running window, adds a tab and focuses it |
 | Settings | Context-menu switch, editor font size, minimap; persisted and applied live. The context-menu page also shows the command the entry currently launches, and warns when it points at a different build or when this is a debug build |
 
@@ -75,7 +75,7 @@ wrolp/
 ├── drafts/<sha256>.draft     one draft per file
 └── state/
     ├── history.json          recently opened files, newest first, capped at 50
-    └── settings.json         fontSize, minimap, sidebarVisible, sidebarView
+    └── settings.json         fontSize, minimap, sidebarVisible, sidebarView, sidebarWidth
 ```
 
 `<sha256>` is the hash of the **normalized** path: absolute, `\\?\` verbatim prefix removed, separators unified, lowercased on Windows. A draft looks like:

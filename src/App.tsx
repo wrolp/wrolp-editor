@@ -3,6 +3,7 @@ import Editor from "./components/Editor";
 import DraftRestoreDialog from "./components/DraftRestoreDialog";
 import SettingsPanel from "./components/SettingsPanel";
 import Sidebar from "./components/Sidebar";
+import SidebarResizer from "./components/SidebarResizer";
 import StatusBar from "./components/StatusBar";
 import TitleBar from "./components/TitleBar";
 import Toast from "./components/Toast";
@@ -27,6 +28,7 @@ const DEFAULT_SETTINGS: Settings = {
   minimap: true,
   sidebarVisible: true,
   sidebarView: "explorer",
+  sidebarWidth: 240,
 };
 
 async function copyText(text: string): Promise<boolean> {
@@ -55,6 +57,7 @@ export default function App() {
 
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SETTINGS.sidebarWidth);
   const [sidebarView, setSidebarView] = useState<"explorer" | "history">("explorer");
   const [rootDir, setRootDir] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
@@ -99,6 +102,7 @@ export default function App() {
         setSettings(s);
         setSidebarVisible(s.sidebarVisible);
         setSidebarView(s.sidebarView === "history" ? "history" : "explorer");
+        setSidebarWidth(s.sidebarWidth);
       })
       .catch((e) => toast(errorMessage(e)));
 
@@ -223,6 +227,14 @@ export default function App() {
     saveSettings({ sidebarVisible: next });
   }, [saveSettings, sidebarVisible]);
 
+  const commitSidebarWidth = useCallback(
+    (width: number) => {
+      setSidebarWidth(width);
+      saveSettings({ sidebarWidth: width });
+    },
+    [saveSettings]
+  );
+
   const changeView = useCallback(
     (view: "explorer" | "history") => {
       setSidebarView(view);
@@ -259,6 +271,7 @@ export default function App() {
   }, [closeTab, openFiles, openUntitled, saveActive, tabs.activeId, toggleSidebar]);
 
   const showSettings = tabs.activeTab?.isSettings === true;
+  const sidebarShown = sidebarVisible && !showSettings;
   const editorTab = tabs.editorTab;
 
   return (
@@ -266,7 +279,7 @@ export default function App() {
       <TitleBar
         tabs={tabs.tabs}
         activeId={tabs.activeId}
-        sidebarVisible={sidebarVisible && !showSettings}
+        sidebarVisible={sidebarShown}
         onSelect={tabs.selectTab}
         onClose={tabs.closeTab}
         onTabContextMenu={(tabId, x, y) => setTabMenu({ tabId, x, y })}
@@ -278,7 +291,8 @@ export default function App() {
 
       <div className="main">
         <Sidebar
-          visible={sidebarVisible && !showSettings}
+          visible={sidebarShown}
+          width={sidebarWidth}
           view={sidebarView}
           rootDir={rootDir}
           history={history}
@@ -294,6 +308,14 @@ export default function App() {
           }
           onError={toast}
         />
+        {sidebarShown && (
+          <SidebarResizer
+            value={sidebarWidth}
+            defaultValue={DEFAULT_SETTINGS.sidebarWidth}
+            onChange={setSidebarWidth}
+            onCommit={commitSidebarWidth}
+          />
+        )}
 
         <div className="editor-wrap">
           {editorTab && (

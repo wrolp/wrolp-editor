@@ -295,7 +295,6 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding-right: 8px;
 }
 .tb-icon {
   width: 30px;
@@ -322,16 +321,19 @@ body {
 
 .win-controls {
   display: flex;
+  align-self: stretch;
   margin-left: 6px;
 }
 .win-btn {
-  width: 38px;
-  height: 30px;
+  width: 46px;
   background: transparent;
   border: none;
   color: var(--text);
   cursor: pointer;
   font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .win-btn:hover {
   background: #3a3a3a;
@@ -373,12 +375,44 @@ body {
 }
 
 .sidebar {
-  flex: 0 0 240px;
+  flex: 0 0 auto;
   background: #252526;
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+.sidebar-resizer {
+  flex: 0 0 5px;
+  margin-left: -3px;
+  cursor: ew-resize;
+  background: transparent;
+  position: relative;
+  z-index: 6;
+}
+/* Highlight is brightest at the middle of the divider and fades out toward both ends. */
+.sidebar-resizer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, transparent, var(--accent-soft) 50%, transparent);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.sidebar-resizer:hover::after,
+body.resizing .sidebar-resizer::after {
+  opacity: 1;
+}
+/* Keep one cursor while dragging, whatever element ends up under the pointer. */
+body.resizing {
+  cursor: ew-resize;
+}
+body.resizing * {
+  cursor: inherit !important;
+}
+/* Keep Monaco from grabbing the pointer while the divider is dragged. */
+body.resizing .editor-host {
+  pointer-events: none;
 }
 .sidebar-head {
   display: flex;
@@ -409,6 +443,7 @@ body {
 .side-view {
   flex: 1 1 auto;
   overflow-y: auto;
+  overflow-x: hidden;
   display: none;
   padding: 6px 0;
 }
