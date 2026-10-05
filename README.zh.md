@@ -150,3 +150,7 @@ Rust 侧不做翻译。命令失败时返回稳定的**错误码**，后面可�
 2. 其余不用动。`Settings.language` 只是个原样存储的字符串，下拉项、英文回落和错误映射会自动带上新语言。
 3. 若要发布，顺手本地化应用描述（`tauri.conf.json` → `bundle.shortDescription`）；右键菜单那条文案
    故意保持英文，因为它注册一次就被所有语言共用。
+
+## 许可证
+
+MIT —— 见 [LICENSE](LICENSE)。

@@ -3,6 +3,7 @@ name = "wrolp-editor"
 version = "0.0.1"
 description = "WROLP Editor - a simple local text editor"
 authors = ["wrolp"]
+license = "MIT"
 edition = "2021"
 
 [lib]

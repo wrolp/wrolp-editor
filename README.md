@@ -167,3 +167,7 @@ To add a language:
 3. Localize the app description if you ship it (`tauri.conf.json` → `bundle.shortDescription`);
    the Windows context-menu entry stays English on purpose, since it is registered once and
    shared by every language.
+
+## License
+
+MIT — see [LICENSE](LICENSE).
