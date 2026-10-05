@@ -434,6 +434,21 @@ export default function App() {
     return tabs.tabs.find((tab) => tab.id === tabMenu.tabId)?.path ?? null;
   }, [tabMenu, tabs.tabs]);
 
+  /**
+   * Flip the minimap for one file. The menu is a quick toggle, so it writes a concrete
+   * true/false; "follow global" stays reachable through the per-file dialog. Other
+   * overrides on the same file are carried over, since saving replaces the whole entry.
+   */
+  const toggleFileMinimap = useCallback(
+    (path: string) => {
+      const tab = tabs.tabs.find((t) => t.path === path);
+      if (!tab) return;
+      const on = tab.fileSettings.minimap ?? settings.minimap;
+      void tabs.setFileSettings(path, { ...tab.fileSettings, minimap: !on });
+    },
+    [settings.minimap, tabs]
+  );
+
   useEffect(() => {
     if (!tabMenu) return;
     const hide = (e: MouseEvent) => {
@@ -592,8 +607,12 @@ export default function App() {
   const renderWhitespaceMode = whitespaceMode(
     editorTab?.fileSettings.renderWhitespace ?? settings.renderWhitespace
   );
+  // The menu acts on the right-clicked tab, which is not necessarily the active one.
+  const menuTab = tabs.tabs.find((t) => t.path === menuTabPath) ?? null;
+  const menuMinimapOn = menuTab?.fileSettings.minimap ?? settings.minimap;
   const wordWrap = editorTab?.fileSettings.wordWrap ?? settings.wordWrap;
   const stickyScroll = editorTab?.fileSettings.stickyScroll ?? settings.stickyScroll;
+  const minimap = editorTab?.fileSettings.minimap ?? settings.minimap;
 
   return (
     <div className="app" data-density={settings.compactMode ? "compact" : "cozy"}>
@@ -655,7 +674,7 @@ export default function App() {
               <Editor
                 tab={editorTab}
                 fontSize={settings.fontSize}
-                minimap={settings.minimap}
+                minimap={minimap}
                 renderWhitespace={renderWhitespaceMode}
                 wordWrap={wordWrap}
                 stickyScroll={stickyScroll}
@@ -736,6 +755,16 @@ export default function App() {
                 }}
               >
                 {t("title.menuFileSettings")}
+              </div>
+              <div
+                className="ctx-item"
+                onClick={() => {
+                  if (menuTabPath) toggleFileMinimap(menuTabPath);
+                  setTabMenu(null);
+                }}
+              >
+                <span className="ctx-tick">{menuMinimapOn ? "✓" : ""}</span>
+                {t("title.menuMinimap")}
               </div>
               <div className="ws-sep" />
               {(["move", "copy", "moveAll"] as const).map((panel) => (

@@ -29,6 +29,9 @@ pub struct FileSettings {
   pub word_wrap: Option<bool>,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub sticky_scroll: Option<bool>,
+  /// Minimap is per file: it helps in code and only wastes space in a log.
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub minimap: Option<bool>,
   /// Overrides the decode preference. The encoding actually used is still reported
   /// back per tab, so a save always writes back what the file was read in.
   #[serde(skip_serializing_if = "Option::is_none")]
@@ -53,6 +56,7 @@ impl FileSettings {
         .filter(|v| WHITESPACE.contains(&v.as_str())),
       word_wrap: self.word_wrap,
       sticky_scroll: self.sticky_scroll,
+      minimap: self.minimap,
       encoding: self.encoding.filter(|v| encoding::is_known(v)),
     }
   }
@@ -170,6 +174,7 @@ pub fn file_settings_view(app: AppHandle, path: String) -> Result<FileSettingsVi
     render_whitespace: Some(settings.render_whitespace),
     word_wrap: Some(settings.word_wrap),
     sticky_scroll: Some(settings.sticky_scroll),
+    minimap: Some(settings.minimap),
     encoding: Some(settings.encoding),
   };
   Ok(FileSettingsView {
@@ -211,6 +216,7 @@ mod tests {
         render_whitespace: Some("sideways".into()),
         word_wrap: Some(true),
         sticky_scroll: Some(false),
+        minimap: Some(true),
         encoding: Some("klingon".into()),
       },
     )])
@@ -220,6 +226,7 @@ mod tests {
     assert_eq!(got.encoding, None);
     assert_eq!(got.word_wrap, Some(true));
     assert_eq!(got.sticky_scroll, Some(false));
+    assert_eq!(got.minimap, Some(true));
   }
 
   #[test]

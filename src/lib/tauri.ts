@@ -113,6 +113,7 @@ export interface FileSettings {
   renderWhitespace: string | null;
   wordWrap: boolean | null;
   stickyScroll: boolean | null;
+  minimap: boolean | null;
   encoding: string | null;
 }
 
@@ -120,6 +121,7 @@ export const EMPTY_FILE_SETTINGS: FileSettings = {
   renderWhitespace: null,
   wordWrap: null,
   stickyScroll: null,
+  minimap: null,
   encoding: null,
 };
 

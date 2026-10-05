@@ -540,6 +540,15 @@ body {
   background: var(--accent-soft);
   color: #fff;
 }
+/* Fixed width so labels stay aligned whether or not the tick is present. */
+.ctx-tick {
+  display: inline-block;
+  width: 14px;
+  color: var(--accent-soft);
+}
+.ctx-item:hover .ctx-tick {
+  color: #fff;
+}
 
 /* ---------- Main area: sidebar + editor ---------- */
 .main {

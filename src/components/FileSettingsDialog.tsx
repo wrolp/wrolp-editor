@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { t } from "../lib/i18n";
 import SettingCheck from "./SettingCheck";
-import { api, errorMessage, type FileSettings, type FileSettingsView } from "../lib/tauri";
+import { api, errorMessage, EMPTY_FILE_SETTINGS, type FileSettings, type FileSettingsView } from "../lib/tauri";
 
 interface Props {
   path: string;
@@ -68,12 +68,7 @@ export default function FileSettingsDialog({
       onError(errorMessage(e));
       return;
     }
-    await onSave(path, {
-      renderWhitespace: null,
-      wordWrap: null,
-      stickyScroll: null,
-      encoding: null,
-    });
+    await onSave(path, EMPTY_FILE_SETTINGS);
     onClose();
   };
 
@@ -116,6 +111,17 @@ export default function FileSettingsDialog({
                 indeterminate={overrides.stickyScroll === null}
                 hint={overrides.stickyScroll === null ? t("fileSettings.inherits", { value: String(view.defaults.stickyScroll) }) : undefined}
                 onChange={(v) => set({ stickyScroll: v })}
+              />
+              <SettingCheck
+                label={t("settings.minimap")}
+                checked={overrides.minimap ?? view.defaults.minimap ?? false}
+                indeterminate={overrides.minimap === null}
+                hint={
+                  overrides.minimap === null
+                    ? t("fileSettings.inherits", { value: String(view.defaults.minimap) })
+                    : undefined
+                }
+                onChange={(v) => set({ minimap: v })}
               />
               <FollowSelect
                 label={t("settings.encoding")}

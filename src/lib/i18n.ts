@@ -114,6 +114,7 @@ const EN: Table = {
   "err.text_not_encodable": "The text contains characters this file's encoding cannot hold. Save as UTF-8 instead.",
 
   "title.menuFileSettings": "File settings…",
+  "title.menuMinimap": "Show minimap",
   "fileSettings.title": "Settings for {name}",
   "fileSettings.detected": "This file was read as {encoding}. It is always saved back in that encoding.",
   "fileSettings.follow": "Follow global ({value})",
@@ -291,6 +292,7 @@ const ZH: Table = {
   "err.text_not_encodable": "文本中含有该文件编码无法表示的字符，请改存为 UTF-8。",
 
   "title.menuFileSettings": "文件设置…",
+  "title.menuMinimap": "显示缩略图",
   "fileSettings.title": "{name} 的设置",
   "fileSettings.detected": "该文件以 {encoding} 读取，保存时始终写回这个编码。",
   "fileSettings.follow": "跟随全局（{value}）",
