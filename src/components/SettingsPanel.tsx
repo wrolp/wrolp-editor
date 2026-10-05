@@ -136,6 +136,15 @@ export default function SettingsPanel({
                 <span>{t("settings.restoreSession")}</span>
               </label>
               <p className="muted">{t("settings.restoreSessionDesc")}</p>
+              <label className="setting-row">
+                <input
+                  type="checkbox"
+                  checked={settings.compactMode}
+                  onChange={(e) => onSaveSettings({ compactMode: e.target.checked })}
+                />
+                <span>{t("settings.compactMode")}</span>
+              </label>
+              <p className="muted">{t("settings.compactModeDesc")}</p>
               <p className="muted">{t("settings.persisted")}</p>
             </div>
           </div>

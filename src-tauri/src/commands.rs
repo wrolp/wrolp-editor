@@ -68,6 +68,8 @@ pub struct Settings {
   /// Folder the Explorer shows. Global view state: a group is a named set of tabs, so two
   /// groups may sit on the same directory and one directory is never a group.
   pub sidebar_root: String,
+  /// Tighten the app chrome (title bar, tabs, sidebar rows, status bar, menus).
+  pub compact_mode: bool,
 }
 
 /// Used when settings.json is absent or a key is missing, so a first run must not
@@ -83,6 +85,7 @@ impl Default for Settings {
       language: "en".into(),
       restore_session: true,
       sidebar_root: String::new(),
+      compact_mode: false,
     }
   }
 }
@@ -119,6 +122,7 @@ impl Settings {
       },
       restore_session: self.restore_session,
       sidebar_root: self.sidebar_root.trim().to_string(),
+      compact_mode: self.compact_mode,
     }
   }
 }
@@ -427,6 +431,23 @@ mod tests {
     assert_eq!(s.sidebar_view, "explorer");
     assert_eq!(s.font_size, 14.0);
     assert_eq!(s.sidebar_width, 240.0);
+  }
+
+  /// Compact mode is a deliberate opt-in, so a settings.json written before the key
+  /// existed must not come back switched on.
+  #[test]
+  fn compact_mode_is_off_by_default_and_survives_missing_keys() {
+    assert!(!Settings::default().compact_mode);
+    let s: Settings = serde_json::from_str("{\"fontSize\":16.0}").expect("parse partial settings");
+    assert!(!s.compact_mode);
+    assert!(
+      Settings {
+        compact_mode: true,
+        ..Default::default()
+      }
+      .filled()
+      .compact_mode
+    );
   }
 
   #[test]

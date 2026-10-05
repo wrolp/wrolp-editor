@@ -84,6 +84,8 @@ const EN: Table = {
   "settings.draftLine": "Unsaved edits go to wrolp/drafts/<sha256>.draft and are offered back the next time the same file is opened.",
   "settings.restoreSession": "Reopen tabs from last time",
   "settings.restoreSessionDesc": "Each group keeps its own tabs; startup restores the one you left open",
+  "settings.compactMode": "Compact mode",
+  "settings.compactModeDesc": "Tighten the title bar, tabs, sidebar rows and status bar. The editor font size is unchanged",
 
   "grp.chip": "Groups",
   "grp.new": "New group…",
@@ -223,6 +225,8 @@ const ZH: Table = {
   "settings.draftLine": "未保存的编辑会写入 wrolp/drafts/<sha256>.draft，下次打开同一文件时提示恢复。",
   "settings.restoreSession": "启动时重新打开上次的标签",
   "settings.restoreSessionDesc": "每个分组各自记住标签，启动时恢复上次停用的那一个",
+  "settings.compactMode": "紧凑模式",
+  "settings.compactModeDesc": "收紧标题栏、标签栏、侧栏行与状态栏；编辑器字号不变",
 
   "grp.chip": "分组",
   "grp.new": "新建分组…",

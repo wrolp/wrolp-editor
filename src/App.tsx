@@ -38,6 +38,7 @@ const DEFAULT_SETTINGS: Settings = {
   language: "en",
   restoreSession: true,
   sidebarRoot: "",
+  compactMode: false,
 };
 
 /** Never let a save-on-close turn into a window that cannot be closed. */
@@ -545,7 +546,7 @@ export default function App() {
   const editorTab = tabs.editorTab;
 
   return (
-    <div className="app">
+    <div className="app" data-density={settings.compactMode ? "compact" : "cozy"}>
       <TitleBar
         tabs={tabs.tabs}
         activeId={tabs.activeId}

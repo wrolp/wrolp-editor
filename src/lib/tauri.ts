@@ -46,6 +46,8 @@ export interface Settings {
   restoreSession: boolean;
   /** Folder the Explorer shows. Global view state, not part of a group. */
   sidebarRoot: string;
+  /** Tighten the app chrome. Does not touch the editor's font size or line height. */
+  compactMode: boolean;
 }
 
 /** One restored tab: either a file (path + cursor) or scratch text (untitled + content). */
