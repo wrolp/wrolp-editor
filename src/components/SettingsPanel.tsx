@@ -194,6 +194,12 @@ export default function SettingsPanel({
                 onChange={(v) => onSaveSettings({ detectIndentation: v })}
               />
               <p className="muted">{t("settings.detectIndentationDesc")}</p>
+              <SettingCheck
+                label={t("settings.scrollBeyondLastLine")}
+                checked={settings.scrollBeyondLastLine}
+                onChange={(v) => onSaveSettings({ scrollBeyondLastLine: v })}
+              />
+              <p className="muted">{t("settings.scrollBeyondLastLineDesc")}</p>
               <label className="setting-row">
                 <span className="setting-title">{t("settings.encoding")}</span>
                 <select

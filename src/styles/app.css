@@ -1395,6 +1395,10 @@ body.resizing .editor-host {
 
 /* ---------- Markdown preview ---------- */
 .md-preview {
+  /* Gap between the last line of text and the end of the content box. Shared by
+     `.md-body`'s bottom padding and `.md-tail`'s height, because the tail has to be
+     measured against where the text actually ends, not against the box. */
+  --md-end-gap: 40px;
   flex: 1 1 50%;
   min-width: 0;
   /* A flex child defaults to min-height:auto, so it grows to fit its content instead of
@@ -1412,7 +1416,7 @@ body.resizing .editor-host {
 .md-body {
   max-width: 860px;
   margin: 0 auto;
-  padding: 24px 28px 40px;
+  padding: 24px 28px var(--md-end-gap);
   font-size: 14px;
   line-height: 1.7;
   user-select: text;
@@ -1513,15 +1517,9 @@ body.resizing .editor-host {
   border-top: 1px solid var(--border);
   margin: 1.6em 0;
 }
-.md-foot {
-  max-width: 860px;
-  margin: 0 auto;
-  padding: 0 28px 20px;
-  color: #6a6a6a;
-  font-size: 11px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  direction: rtl;
-  text-align: left;
-}
+/* The tail's height is set from `measureTail` in MarkdownPreview.tsx, not declared here.
+   It needs the gap below the last line and that line's own height, and neither is a
+   constant: a heading ends with padding and a border, a `pre` with 12px of padding. A
+   `calc()` has to assume the worst case and is then wrong for every other ending — too
+   small scrolls the last line out of view, too large leaves blank space under it. The
+   comment on `measureTail` records the arithmetic. */

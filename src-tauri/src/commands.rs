@@ -92,6 +92,8 @@ pub struct Settings {
   pub insert_spaces: bool,
   /// Let a file's own content win over the two settings above.
   pub detect_indentation: bool,
+  /// Allow scrolling past the end, so the last line can sit above the bottom edge.
+  pub scroll_beyond_last_line: bool,
 }
 
 /// Used when settings.json is absent or a key is missing, so a first run must not
@@ -115,6 +117,7 @@ impl Default for Settings {
       tab_size: 2,
       insert_spaces: true,
       detect_indentation: true,
+      scroll_beyond_last_line: true,
     }
   }
 }
@@ -176,6 +179,7 @@ impl Settings {
       },
       insert_spaces: self.insert_spaces,
       detect_indentation: self.detect_indentation,
+      scroll_beyond_last_line: self.scroll_beyond_last_line,
     }
   }
 }
@@ -676,6 +680,17 @@ mod tests {
     assert_eq!(s.tab_size, 2);
     assert!(s.insert_spaces);
     assert!(s.detect_indentation);
+    // Scrolling past the end is on by default, and a settings.json written before the
+    // key existed must not silently change how the editor scrolls.
+    assert!(s.scroll_beyond_last_line);
+    assert!(
+      !Settings {
+        scroll_beyond_last_line: false,
+        ..Default::default()
+      }
+      .filled()
+      .scroll_beyond_last_line
+    );
   }
 
   #[test]

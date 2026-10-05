@@ -70,6 +70,8 @@ export interface Settings {
   insertSpaces: boolean;
   /** Let a file's own content decide the indentation instead of the two settings above. */
   detectIndentation: boolean;
+  /** Allow scrolling past the end so the last line can sit above the bottom edge. */
+  scrollBeyondLastLine: boolean;
 }
 
 /** One restored tab: either a file (path + cursor) or scratch text (untitled + content). */

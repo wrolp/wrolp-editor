@@ -49,7 +49,8 @@ const DEFAULT_SETTINGS: Settings = {
   tabSize: 2,
   insertSpaces: true,
   detectIndentation: true,
-};
+  scrollBeyondLastLine: true,
+}
 
 /** The only values Monaco accepts for `renderWhitespace`. */
 const WHITESPACE_MODES = ["none", "boundary", "selection", "all", "trailing"] as const;
@@ -757,6 +758,7 @@ export default function App() {
                 tabSize={tabSize}
                 insertSpaces={insertSpaces}
                 detectIndentation={detectIndentation}
+                scrollBeyondLastLine={settings.scrollBeyondLastLine}
                 onChange={tabs.onEditorChange}
                 onCursor={(position, offset) => {
                   setCursor({ line: position.lineNumber, column: position.column });
@@ -777,6 +779,7 @@ export default function App() {
               path={editorTab.path}
               scrollRatio={scrollRatio}
               onScrollRatio={scrollEditorToRatio}
+              beyondEnd={settings.scrollBeyondLastLine}
             />
           )}
 

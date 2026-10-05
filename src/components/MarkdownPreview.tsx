@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { convertFileSrc } from "@tauri-apps/api/core";
@@ -11,6 +11,7 @@ interface Props {
   path: string;
   /** Fraction 0..1 of the editor's scroll position, so the two panes can track. */
   scrollRatio: number;
+  beyondEnd: boolean;
   /** Called when the user scrolls the preview, to drive the editor instead. */
   onScrollRatio: (ratio: number) => void;
 }
@@ -28,8 +29,10 @@ export default function MarkdownPreview({
   path,
   scrollRatio,
   onScrollRatio,
+  beyondEnd,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   /** Set while we move the preview ourselves, so our own scroll event is ignored. */
   const following = useRef(false);
 
@@ -82,6 +85,38 @@ export default function MarkdownPreview({
     [sanitized, granted, path]
   );
 
+  /**
+   * Size the tail that stands in for the editor's beyond-last-line space.
+   *
+   * The slack between the last line and the end of the content is not a constant. A
+   * paragraph ends right after its text, a heading carries padding and a border, and a
+   * `pre` carries 12px of padding, so a CSS `calc()` has to assume the largest guess and
+   * is wrong for every other ending. Worse, both failure modes look like "the preview
+   * scrolls oddly": too small a tail scrolls the last line out of view, too large a one
+   * leaves blank space under it. So the two inputs that actually vary are measured, here,
+   * and the arithmetic happens once in one place.
+   *
+   * Runs before the scroll-sync effect below (layout effects precede passive ones), which
+   * is what lets it measure a pane that does not yet contain its own tail.
+   */
+  useLayoutEffect(() => {
+    const pane = scrollRef.current;
+    const body = bodyRef.current;
+    if (!pane || !body || !beyondEnd) return;
+    const tail = pane.querySelector<HTMLElement>(".md-tail");
+    if (!tail) return;
+    const apply = () => {
+      tail.style.height = `${Math.max(0, Math.round(measureTail(pane, body)))}px`;
+    };
+    apply();
+    // The answer depends on the pane's height, and an image that finishes loading moves
+    // the last line. Neither changes the pane's own box, so this cannot loop.
+    const observer = new ResizeObserver(apply);
+    observer.observe(pane);
+    observer.observe(body);
+    return () => observer.disconnect();
+  }, [html, beyondEnd]);
+
   // Follow the editor, but only when the editor is the one that moved.
   useEffect(() => {
     const el = scrollRef.current;
@@ -121,10 +156,70 @@ export default function MarkdownPreview({
   return (
     <div className="md-preview" ref={scrollRef} onScroll={onScroll}>
       {/* Sanitized in `sanitize` below; `path` is rendered as text, never interpolated. */}
-      <div className="md-body" dangerouslySetInnerHTML={{ __html: html }} />
-      <div className="md-foot">{path}</div>
+      <div className="md-body" ref={bodyRef} dangerouslySetInnerHTML={{ __html: html }} />
+      {beyondEnd && <div className="md-tail" />}
     </div>
   );
+}
+
+/**
+ * Height for the tail that mirrors Monaco's `scrollBeyondLastLine`.
+ *
+ * `tail = pane - remain`, where `remain` is the distance from the top of the last line to
+ * the end of the body. The sign is easy to get backwards: scrolling to the end puts the
+ * viewport's top edge at `contentHeight - paneHeight`, so the space left above the last
+ * line works out to `pane - remain - tail` — zero, meaning the last line sits flush at the
+ * top, exactly when `tail` equals `pane - remain`, and negative (the line is gone) once
+ * `tail` exceeds it.
+ *
+ * `remain` is read off a single rect on purpose. Deriving it from a separate line height
+ * instead is what went wrong twice: `getComputedStyle().lineHeight` is the line box while a
+ * Range rect is the inline box, and the two differ by the half-leading, which leaves the
+ * bottom of the line before it showing at the top edge.
+ */
+function measureTail(pane: HTMLElement, body: HTMLElement): number {
+  const last = body.lastElementChild;
+  if (!last) return 0;
+  const lastLine = lastRenderedLine(last) ?? last.getBoundingClientRect();
+  // Both rects are viewport-relative and read at the same instant, so their difference is
+  // the distance below the last line wherever the pane is scrolled. Converting one of them
+  // to content space first would mix coordinate systems and scale the result by scrollTop.
+  const remain = body.getBoundingClientRect().bottom - lastLine.top;
+  return pane.clientHeight - remain;
+}
+
+/**
+ * The lowest line box rendered anywhere under `el`, or null when it renders no text.
+ *
+ * Walking backwards and taking the first text node that actually produces a line box is
+ * what makes this correct. The obvious version — take the last child, and if it is a text
+ * node measure it — fails on `marked` output, which puts a newline between block tags: a
+ * `<ul>` therefore ends with a whitespace-only text node that renders no line box at all.
+ * Falling back to the element's own box then put the tail ~180px short, because an
+ * element's border box bottom is nowhere near its last line.
+ *
+ * Only a text node is measured, never an element box: a Range over a table also returns
+ * the table's, tbody's and cell's boxes, and the lowest of those is the table's outer edge
+ * rather than the line inside it.
+ */
+function lastRenderedLine(el: Node): DOMRect | null {
+  for (let i = el.childNodes.length - 1; i >= 0; i--) {
+    const child = el.childNodes[i];
+    if (child.nodeType === Node.ELEMENT_NODE) {
+      const found = lastRenderedLine(child);
+      if (found) return found;
+      continue;
+    }
+    if (child.nodeType !== Node.TEXT_NODE) continue;
+    const range = document.createRange();
+    range.selectNodeContents(child);
+    // `width` filters the collapsed rect a trailing newline leaves behind, which sits at
+    // the start of the *next* line and would otherwise pass for the last one.
+    const rects = Array.from(range.getClientRects()).filter((r) => r.height > 0 && r.width > 0);
+    // DOM order is not visual order once cells are involved, so take the lowest.
+    if (rects.length) return rects.reduce((a, b) => (b.bottom > a.bottom ? b : a));
+  }
+  return null;
 }
 
 /**

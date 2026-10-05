@@ -17,6 +17,8 @@ interface Props {
   tabSize: number;
   insertSpaces: boolean;
   detectIndentation: boolean;
+  /** Allow scrolling past the last line instead of stopping at it. */
+  scrollBeyondLastLine: boolean;
   onChange: (value: string) => void;
   onCursor: (position: CursorPos, offset: number) => void;
   /** Selection and document totals, refreshed on every selection or content change. */
@@ -36,6 +38,7 @@ export default function Editor({
   tabSize,
   insertSpaces,
   detectIndentation,
+  scrollBeyondLastLine,
   onChange,
   onCursor,
   onStats,
@@ -130,7 +133,9 @@ export default function Editor({
         // On by default so a file keeps the indentation style it was written with; the
         // two settings above then act as the fallback for files it cannot guess about.
         detectIndentation,
-        scrollBeyondLastLine: false,
+        // When on, the document scrolls past its end, so the last line can sit above the
+        // bottom edge instead of being glued to it.
+        scrollBeyondLastLine,
         fontFamily: 'Consolas, "Cascadia Mono", "Courier New", monospace',
         renderWhitespace,
         wordWrap: wordWrap ? "on" : "off",
