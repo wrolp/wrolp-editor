@@ -9,8 +9,8 @@ interface Props {
   tabs: Tab[];
   activeId: number | null;
   sidebarVisible: boolean;
-  /** Rendered at the left of the tab strip: the workspace switcher. */
-  workspaceSlot?: ReactNode;
+  /** Rendered at the left of the tab strip: the group switcher. */
+  groupSlot?: ReactNode;
   onSelect: (id: number) => void;
   onClose: (id: number) => void;
   onTabContextMenu: (id: number, x: number, y: number) => void;
@@ -48,7 +48,7 @@ export default function TitleBar(props: Props) {
         <IconSidebar />
       </button>
 
-      {props.workspaceSlot}
+      {props.groupSlot}
 
       <TabBar
         tabs={tabs}

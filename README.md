@@ -17,8 +17,8 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | Single instance | Launching a second time hands the path to the running window, adds a tab and focuses it |
 | Settings | Context-menu switch, editor font size, minimap, UI language; persisted and applied live. The context-menu page also shows the command the entry currently launches, and warns when it points at a different build or when this is a debug build |
 | Language | English by default, switchable to 中文 from a dropdown in Settings. All strings, including messages coming from the Rust side, resolve through one key table |
-| Workspaces | A workspace is a **named group of open tabs**. Switching workspaces swaps that whole set inside the same window; tabs and caret positions come back on the next start |
-| Move / copy tabs | A tab can be re-homed into another workspace from its context menu. This changes *where the tab is listed*, never the file on disk |
+| Tab groups | A group is a **named set of open tabs**. The chip in the title bar switches between them inside the same window; tabs and caret positions come back on the next start |
+| Move / copy tabs | A tab can be re-homed into another group from its context menu. This changes *which group lists the tab*, never the file on disk |
 
 ## Keyboard shortcuts
 
@@ -78,8 +78,9 @@ wrolp/
 ├── drafts/<sha256>.draft     one draft per file
 └── state/
     ├── history.json          recently opened files, newest first, capped at 50
-    ├── settings.json         fontSize, minimap, sidebarVisible, sidebarView, sidebarWidth, language, restoreSession
-    └── workspaces.json       the workspaces: root folder, tabs and caret positions
+    ├── settings.json         fontSize, minimap, sidebarVisible, sidebarView, sidebarWidth, language,
+    │                         restoreSession, sidebarRoot
+    └── groups.json           the tab groups: name, tabs and caret positions
 ```
 
 `<sha256>` is the hash of the **normalized** path: absolute, `\\?\` verbatim prefix removed, separators unified, lowercased on Windows. A draft looks like:
@@ -99,41 +100,45 @@ wrolp/
 
 `take_startup_files`, `open_file`, `save_file`, `get_draft`, `save_draft`, `clear_draft`,
 `list_dir`, `get_history`, `remove_history`, `get_settings`, `save_settings`,
-`get_workspaces`, `save_workspaces`, `transfer_tabs`,
+`get_groups`, `save_groups`, `transfer_tabs`,
 `context_menu_target`, `install_context_menu`, `uninstall_context_menu`.
 
 File IO is deliberately **not** the `fs` plugin: the WebView only ever calls these fixed
 commands, so no broad disk scope is exposed to the frontend.
 
-## Workspaces
+## Tab groups
 
-A workspace is a **named group of open tabs** — not a folder. The chip in the title bar shows the
-current name and switches between groups inside the same window. Which folder the Explorer shows is
-a separate, global view setting, so two groups may sit on the same folder and one group may hold
-files from several folders.
+A group is a **named set of open tabs**. The chip in the title bar shows the current name and
+switches between groups inside the same window. Which folder the Explorer shows is a separate,
+global view setting (`sidebarRoot`), so two groups may sit on the same folder and one group may
+hold files from several folders.
 
-- **Names are identity.** *New workspace…* asks for a name and refuses an empty one or a name
-  already in use — two rows reading the same thing could not be told apart. Opening the first file
-  in a bare window starts a group labelled after that file's folder, which you can rename.
+- **There is always a group.** A window with no groups starts with one called *Default*, so tabs are
+  persisted from the first moment without the user having to create anything. *New group…* asks for a
+  name and refuses an empty one or a name already in use — two rows reading the same thing could not be
+  told apart. Renaming the default group is allowed; if you remove every group, the next start creates
+  a fresh default.
 - **Files join the group on screen.** Opening a file from the Explorer context menu adds it to the
   current group; a right-click never changes your context under you. *Open folder…* and *Show folder
   in sidebar* move the sidebar only — they do not create or switch a group.
 - **What is remembered:** the tab order, which tab was selected, and the caret position per tab
   (`Settings → Reopen tabs from last time` turns this off), plus the text of untitled tabs, which
   have no draft file so the group is their only copy. Capped at 32 groups, 200 tabs each, 64 KB of
-  scratch text per tab. The sidebar folder, its width and the language are global settings.
+  scratch text per tab.
 - **Content is never duplicated.** File-backed tabs store only path + caret; unsaved text stays in
-  the draft file, keyed by path. That is why a tab can be moved to another group without touching its
-  draft, and why the draft prompt follows the file there.
-- **Move / copy tab** (tab context menu) re-homes a tab between groups. It never renames or moves the
-  file on disk — that would orphan the draft keyed to its path.
+  the draft file, keyed by path. That is why a tab can be moved to another group without touching
+  its draft, and why the draft prompt follows the file there.
+- **Move / copy tab** (tab context menu) re-homes a tab between groups. It never renames or moves
+  the file on disk — that would orphan the draft keyed to its path.
 - **Deleted files** are skipped on restore with one aggregated notice and dropped from the group.
   *Remove from list* deletes only the record: files and drafts are left alone.
 
-`workspaces.json` is whole-store, single-writer (the app is single instance) and written through a
-temp file + rename. Tab paths use the same normalized form the drafts hash, so one file cannot appear
-twice inside a group. Old records from before groups were renamed-by-name carry extra `root` /
-`autoName` / `sidebarView` fields; unknown fields are ignored, so they load without migration.
+`groups.json` is whole-store, single-writer (the app is single instance) and written through a temp
+file + rename. Tab paths use the same normalized form the drafts hash, so one file cannot appear
+twice inside a group. A build that still has the older `workspaces.json` and no `groups.json` migrates
+on **read**: the legacy file is parsed, written out under the new name, and only then deleted — so a
+corrupt or unreadable legacy file is never destroyed by a later save. Unknown fields in old records
+(`root`, `autoName`, `sidebarView`) are ignored, which is why the rename needed no migration step.
 
 ## Interface language
 

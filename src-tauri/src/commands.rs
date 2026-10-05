@@ -1,8 +1,8 @@
 //! Tauri commands exposed to the frontend: file IO, draft CRUD, directory listings,
-//! recently-opened history, settings, workspace state and the context-menu install switch.
+//! recently-opened history, settings, tab groups and the context-menu install switch.
 
 use crate::draft::{self, Draft};
-use crate::workspace::WorkspaceStore;
+use crate::group::{GroupStore, TabTransfer};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::sync::Mutex;
@@ -10,6 +10,10 @@ use tauri::{AppHandle, Manager, State};
 
 /// Files larger than this are refused so Monaco cannot freeze the window.
 const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
+
+const GROUPS_FILE: &str = "groups.json";
+/// Name used before a group was understood as a named set of tabs rather than a folder.
+const LEGACY_GROUPS_FILE: &str = "workspaces.json";
 
 /// Paths handed over by the command line or by a second instance.
 #[derive(Default)]
@@ -59,10 +63,10 @@ pub struct Settings {
   /// UI language code, e.g. "en" or "zh". Unknown values are stored as-is; the frontend
   /// falls back to English, so adding a language needs no change here.
   pub language: String,
-  /// Reopen the tabs of the active workspace on startup.
+  /// Reopen the tabs of the active group on startup.
   pub restore_session: bool,
-  /// Folder the Explorer shows. Global view state: a workspace is a named group of tabs,
-  /// not a folder, so two groups may sit on the same directory.
+  /// Folder the Explorer shows. Global view state: a group is a named set of tabs, so two
+  /// groups may sit on the same directory and one directory is never a group.
   pub sidebar_root: String,
 }
 
@@ -316,32 +320,42 @@ pub fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, Str
   Ok(settings)
 }
 
-/// Whole-store round trip, same shape as settings: a missing file is a clean first run,
-/// not an error, and the returned store is always the cleaned one that was validated.
+/// Whole-store round trip, same shape as settings. A missing file is a clean first run, not
+/// an error. Older builds kept this in `workspaces.json`: that name is migrated here, on read,
+/// so a failed parse can never be followed by a save that deletes the unreadable original.
 #[tauri::command]
-pub fn get_workspaces(app: AppHandle) -> Result<WorkspaceStore, String> {
-  Ok(
-    read_json::<WorkspaceStore>(&app, "workspaces.json")?
-      .unwrap_or_default()
-      .filled(),
-  )
+pub fn get_groups(app: AppHandle) -> Result<GroupStore, String> {
+  if let Some(store) = read_json::<GroupStore>(&app, GROUPS_FILE)? {
+    return Ok(store.filled());
+  }
+  let legacy = read_json::<GroupStore>(&app, LEGACY_GROUPS_FILE)?;
+  match legacy {
+    Some(legacy) => {
+      let store = legacy.filled();
+      // The old file stays until the new one is safely on disk.
+      write_json(&app, GROUPS_FILE, &store)?;
+      let old = draft::store_dir(&app)?.join(LEGACY_GROUPS_FILE);
+      if old.exists() {
+        let _ = std::fs::remove_file(&old);
+      }
+      Ok(store)
+    }
+    None => Ok(GroupStore::default().filled()),
+  }
 }
 
 #[tauri::command]
-pub fn save_workspaces(app: AppHandle, store: WorkspaceStore) -> Result<WorkspaceStore, String> {
+pub fn save_groups(app: AppHandle, store: GroupStore) -> Result<GroupStore, String> {
   let store = store.filled().stamp_active();
-  write_json(&app, "workspaces.json", &store)?;
+  write_json(&app, GROUPS_FILE, &store)?;
   Ok(store)
 }
 
-/// Re-home tabs between workspaces. Pure: it takes the store the frontend is holding and
-/// hands back the new one, which the frontend then saves in a single write.
+/// Re-home tabs between groups. Pure: it takes the store the frontend is holding and hands
+/// back the new one, which the frontend then saves in a single write.
 #[tauri::command]
-pub fn transfer_tabs(
-  store: WorkspaceStore,
-  transfer: crate::workspace::TabTransfer,
-) -> WorkspaceStore {
-  crate::workspace::apply_transfer(store, &transfer).filled()
+pub fn transfer_tabs(store: GroupStore, transfer: TabTransfer) -> GroupStore {
+  crate::group::apply_transfer(store, &transfer).filled()
 }
 
 #[tauri::command]

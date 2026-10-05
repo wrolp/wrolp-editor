@@ -42,37 +42,37 @@ export interface Settings {
   sidebarWidth: number;
   /** Language code; unknown values are stored as-is and fall back to English in the UI. */
   language: string;
-  /** Reopen the tabs of the active workspace on startup. */
+  /** Reopen the tabs of the active group on startup. */
   restoreSession: boolean;
-  /** Folder the Explorer shows. Global view state, not part of a workspace: a workspace is a named group of tabs. */
+  /** Folder the Explorer shows. Global view state, not part of a group. */
   sidebarRoot: string;
 }
 
 /** One restored tab: either a file (path + cursor) or scratch text (untitled + content). */
-export interface WorkspaceTab {
+export interface GroupTab {
   path: string;
   cursor: number;
   untitled: string;
   content: string;
 }
 
-export interface Workspace {
+export interface Group {
   id: string;
   /** Chosen by the user; the only thing that tells one group from another. */
   name: string;
-  tabs: WorkspaceTab[];
+  tabs: GroupTab[];
   /** Key of the selected tab: its path, or `untitled://<name>`. Empty when none. */
   active: string;
   updatedAt: string;
 }
 
-export interface WorkspaceStore {
+export interface GroupStore {
   version: number;
   active: string;
-  items: Workspace[];
+  items: Group[];
 }
 
-/** Re-homing a tab: `tab` is a tab key, or null for every tab of the source workspace. */
+/** Re-homing a tab: `tab` is a tab key, or null for every tab of the source group. */
 export type TabTransfer =
   | { action: "move"; from: string; to: string; tab: string | null }
   | { action: "copy"; from: string; to: string; tab: string | null };
@@ -85,7 +85,7 @@ export interface MenuTarget {
   debugBuild: boolean;
 }
 
-export const EMPTY_WORKSPACE_STORE: WorkspaceStore = { version: 1, active: "", items: [] };
+export const EMPTY_GROUP_STORE: GroupStore = { version: 1, active: "", items: [] };
 
 export const api = {
   takeStartupFiles: () => invoke<string[]>("take_startup_files"),
@@ -101,10 +101,10 @@ export const api = {
   removeHistory: (path: string) => invoke<HistoryEntry[]>("remove_history", { path }),
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (settings: Settings) => invoke<Settings>("save_settings", { settings }),
-  getWorkspaces: () => invoke<WorkspaceStore>("get_workspaces"),
-  saveWorkspaces: (store: WorkspaceStore) => invoke<WorkspaceStore>("save_workspaces", { store }),
-  transferTabs: (store: WorkspaceStore, transfer: TabTransfer) =>
-    invoke<WorkspaceStore>("transfer_tabs", { store, transfer }),
+  getGroups: () => invoke<GroupStore>("get_groups"),
+  saveGroups: (store: GroupStore) => invoke<GroupStore>("save_groups", { store }),
+  transferTabs: (store: GroupStore, transfer: TabTransfer) =>
+    invoke<GroupStore>("transfer_tabs", { store, transfer }),
   contextMenuTarget: () => invoke<MenuTarget>("context_menu_target"),
   installContextMenu: () => invoke<string>("install_context_menu"),
   uninstallContextMenu: () => invoke<void>("uninstall_context_menu"),

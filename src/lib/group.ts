@@ -1,42 +1,28 @@
 import { isUntitled } from "./path";
-import type { Workspace, WorkspaceStore, WorkspaceTab } from "./tauri";
+import type { Group, GroupStore, GroupTab } from "./tauri";
 
 /** Tabs are identified by their path; untitled tabs already carry `untitled://<name>`. */
 export function tabKey(path: string): string {
   return path;
 }
 
-export function basenameOf(path: string): string {
-  const trimmed = path.replace(/[\\/]+$/, "");
-  const idx = Math.max(trimmed.lastIndexOf("\\"), trimmed.lastIndexOf("/"));
-  return idx < 0 ? trimmed : trimmed.slice(idx + 1);
-}
 
-/** Name a brand new group after the folder its first file came from. Only a label. */
-export function groupNameFor(dir: string, fallback: string): string {
-  return basenameOf(dir) || fallback;
-}
-
-export function newWorkspaceId(): string {
-  return `ws-${crypto.randomUUID()}`;
+export function newGroupId(): string {
+  return `grp-${crypto.randomUUID()}`;
 }
 
 /** Everything the store needs to know about what is on screen right now. */
 export interface LiveSnapshot {
-  tabs: WorkspaceTab[];
+  tabs: GroupTab[];
   /** Key of the selected tab, empty when none. */
   active: string;
-}
-
-export function emptyStore(): WorkspaceStore {
-  return { version: 1, active: "", items: [] };
 }
 
 /**
  * Write the live tab set into the group it belongs to, leaving the other groups untouched.
  * Returns the same object when nothing changed, so callers can skip a save.
  */
-export function applySnapshot(store: WorkspaceStore, snapshot: LiveSnapshot): WorkspaceStore {
+export function applySnapshot(store: GroupStore, snapshot: LiveSnapshot): GroupStore {
   if (!store.active) {
     // No group on screen: the window is showing loose tabs, nothing to remember.
     return store;
@@ -44,11 +30,8 @@ export function applySnapshot(store: WorkspaceStore, snapshot: LiveSnapshot): Wo
   let changed = false;
   const items = store.items.map((item) => {
     if (item.id !== store.active) return item;
-    const next: Workspace = { ...item, tabs: snapshot.tabs, active: snapshot.active };
-    if (
-      next.active !== item.active ||
-      JSON.stringify(next.tabs) !== JSON.stringify(item.tabs)
-    ) {
+    const next: Group = { ...item, tabs: snapshot.tabs, active: snapshot.active };
+    if (next.active !== item.active || JSON.stringify(next.tabs) !== JSON.stringify(item.tabs)) {
       changed = true;
     }
     return next;
@@ -56,7 +39,7 @@ export function applySnapshot(store: WorkspaceStore, snapshot: LiveSnapshot): Wo
   return changed ? { ...store, items } : store;
 }
 
-/** Case-insensitive label comparison, because two identically named groups cannot be told apart in the switcher. */
+/** Case-insensitive label comparison: two identically named groups cannot be told apart. */
 export function sameName(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase();
 }
@@ -67,7 +50,7 @@ export function toStoredTab(input: {
   name: string;
   cursor: number;
   value: string;
-}): WorkspaceTab {
+}): GroupTab {
   if (isUntitled(input.path)) {
     return { path: "", cursor: 0, untitled: input.name, content: input.value };
   }

@@ -1,13 +1,13 @@
-//! Workspace storage: a workspace is a **named group of open tabs**, not a folder.
-//! Which folder the Explorer shows is a global view setting (`Settings.sidebar_root`),
-//! so two groups may sit on the same directory and the same directory is never a group.
+//! Group storage: a group is a **named set of open tabs**. Which folder the Explorer shows
+//! is global view state (`Settings.sidebar_root`), so two groups may sit on the same folder
+//! and one group may hold files from several folders.
 
 use crate::draft::normalize_path;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 /// Bounded so the state file stays cheap to read and diff.
-const MAX_WORKSPACES: usize = 32;
+const MAX_GROUPS: usize = 32;
 const MAX_TABS: usize = 200;
 /// Scratch text lives in the state file (an untitled tab has no draft key), so cap it.
 const MAX_UNTITLED_BYTES: usize = 64 * 1024;
@@ -17,7 +17,7 @@ pub const STORE_VERSION: u32 = 1;
 /// One restored tab. Either file-backed (`path`) or scratch (`untitled` + `content`).
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub struct WorkspaceTab {
+pub struct GroupTab {
   /// Normalized absolute path; empty for untitled tabs.
   pub path: String,
   /// Monaco model offset, same unit the drafts use.
@@ -29,8 +29,8 @@ pub struct WorkspaceTab {
   pub content: String,
 }
 
-impl WorkspaceTab {
-  /// Identity within a workspace, matching what the frontend keys tabs by.
+impl GroupTab {
+  /// Identity within a group, matching what the frontend keys tabs by.
   pub fn key(&self) -> String {
     if !self.path.is_empty() {
       return self.path.clone();
@@ -44,23 +44,23 @@ impl WorkspaceTab {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub struct Workspace {
+pub struct Group {
   pub id: String,
-  /// Label chosen by the user; the only thing that distinguishes one group from another.
+  /// Label chosen by the user; the only thing that tells one group from another.
   pub name: String,
-  pub tabs: Vec<WorkspaceTab>,
-  /// `WorkspaceTab::key()` of the selected tab, empty when none.
+  pub tabs: Vec<GroupTab>,
+  /// `GroupTab::key()` of the selected tab, empty when none.
   pub active: String,
   pub updated_at: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
-pub struct WorkspaceStore {
+pub struct GroupStore {
   pub version: u32,
   /// Id of the group shown in the window, empty when the session starts clean.
   pub active: String,
-  pub items: Vec<Workspace>,
+  pub items: Vec<Group>,
 }
 
 /// Tab keys are compared the way the backend normalizes paths: separators unified,
@@ -69,22 +69,21 @@ fn keys_equal(a: &str, b: &str) -> bool {
   a.replace('\\', "/").to_lowercase() == b.replace('\\', "/").to_lowercase()
 }
 
-impl WorkspaceStore {
+impl GroupStore {
   /// Normalize and bound whatever the frontend sent: drop unusable tabs, cap sizes, and
   /// repair dangling pointers. Reads use it too, so a hand-edited or half-written file
   /// cannot push the app into a state it would not produce itself.
   ///
-  /// Names are labels, not identity: two groups may carry the same name or point at the
-  /// same folder, and nothing here merges them.
+  /// Names are labels, not identity: nothing here merges groups that share a name or a folder.
   pub fn filled(self) -> Self {
-    let mut items: Vec<Workspace> = Vec::new();
+    let mut items: Vec<Group> = Vec::new();
 
     for item in self.items {
       if item.id.is_empty() {
         continue;
       }
 
-      let mut tabs: Vec<WorkspaceTab> = Vec::new();
+      let mut tabs: Vec<GroupTab> = Vec::new();
       let mut seen: Vec<String> = Vec::new();
       for tab in item.tabs {
         let mut tab = tab;
@@ -126,7 +125,7 @@ impl WorkspaceStore {
         item.name.trim().to_string()
       };
 
-      items.push(Workspace {
+      items.push(Group {
         id: item.id,
         name,
         tabs,
@@ -139,16 +138,16 @@ impl WorkspaceStore {
       });
     }
 
-    if items.len() > MAX_WORKSPACES {
+    if items.len() > MAX_GROUPS {
       // Keep the most recently touched ones, in their existing order.
-      let mut ranked: Vec<String> = items.iter().map(|w| w.updated_at.clone()).collect();
+      let mut ranked: Vec<String> = items.iter().map(|g| g.updated_at.clone()).collect();
       ranked.sort_by(|a, b| b.cmp(a));
-      let cutoff = ranked[MAX_WORKSPACES - 1].clone();
-      items.retain(|w| w.updated_at >= cutoff);
-      items.truncate(MAX_WORKSPACES);
+      let cutoff = ranked[MAX_GROUPS - 1].clone();
+      items.retain(|g| g.updated_at >= cutoff);
+      items.truncate(MAX_GROUPS);
     }
 
-    let ids: Vec<String> = items.iter().map(|w| w.id.clone()).collect();
+    let ids: Vec<String> = items.iter().map(|g| g.id.clone()).collect();
     let active = if ids.contains(&self.active) {
       self.active
     } else {
@@ -174,13 +173,13 @@ impl WorkspaceStore {
     self
   }
 
-  pub fn workspace(&self, id: &str) -> Option<&Workspace> {
-    self.items.iter().find(|w| w.id == id)
+  pub fn group(&self, id: &str) -> Option<&Group> {
+    self.items.iter().find(|g| g.id == id)
   }
 }
 
-/// What the "Move tab to workspace" menu asks for. `tab` is a tab key; `None` means all
-/// of them. Nothing here touches the disk: a transfer re-homes the *opened* file.
+/// What the "Move tab to group" menu asks for. `tab` is a tab key; `None` means all of them.
+/// Nothing here touches the disk: a transfer re-homes the *opened* file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", tag = "action")]
 pub enum TabTransfer {
@@ -202,7 +201,7 @@ pub enum TabTransfer {
 ///
 /// Takes the whole store and returns the whole store, so the caller writes once: a
 /// two-step "remove from A" then "add to B" could fail in between and lose the tab.
-pub fn apply_transfer(store: WorkspaceStore, transfer: &TabTransfer) -> WorkspaceStore {
+pub fn apply_transfer(store: GroupStore, transfer: &TabTransfer) -> GroupStore {
   let (action, from_id, to_id, tab_key) = match transfer {
     TabTransfer::Move { from, to, tab } => ("move", from, to, tab),
     TabTransfer::Copy { from, to, tab } => ("copy", from, to, tab),
@@ -212,9 +211,9 @@ pub fn apply_transfer(store: WorkspaceStore, transfer: &TabTransfer) -> Workspac
   }
 
   let mut store = store;
-  let (taken, remaining_tabs) = match store.workspace(from_id) {
+  let (taken, remaining_tabs) = match store.group(from_id) {
     Some(source) => {
-      let picked: Vec<WorkspaceTab> = source
+      let picked: Vec<GroupTab> = source
         .tabs
         .iter()
         .filter(|t| match tab_key {
@@ -231,11 +230,11 @@ pub fn apply_transfer(store: WorkspaceStore, transfer: &TabTransfer) -> Workspac
     return store;
   }
 
-  let mut next_items: Vec<Workspace> = Vec::new();
+  let mut next_items: Vec<Group> = Vec::new();
   for item in store.items.clone() {
     if item.id == *from_id && action == "move" {
       let taken_keys: Vec<String> = taken.iter().map(|t| t.key()).collect();
-      let tabs: Vec<WorkspaceTab> = remaining_tabs
+      let tabs: Vec<GroupTab> = remaining_tabs
         .iter()
         .filter(|t| !taken_keys.iter().any(|k| keys_equal(k, &t.key())))
         .cloned()
@@ -244,7 +243,7 @@ pub fn apply_transfer(store: WorkspaceStore, transfer: &TabTransfer) -> Workspac
         Some(t) => t.key(),
         None => tabs.last().map(|t| t.key()).unwrap_or_default(),
       };
-      next_items.push(Workspace {
+      next_items.push(Group {
         tabs,
         active,
         ..item
@@ -264,7 +263,7 @@ pub fn apply_transfer(store: WorkspaceStore, transfer: &TabTransfer) -> Workspac
       } else {
         item.active
       };
-      next_items.push(Workspace {
+      next_items.push(Group {
         tabs,
         active,
         ..item
@@ -282,23 +281,23 @@ pub fn apply_transfer(store: WorkspaceStore, transfer: &TabTransfer) -> Workspac
 mod tests {
   use super::*;
 
-  fn tab(path: &str) -> WorkspaceTab {
-    WorkspaceTab {
+  fn tab(path: &str) -> GroupTab {
+    GroupTab {
       path: path.to_string(),
       ..Default::default()
     }
   }
 
-  fn untitled(name: &str, content: &str) -> WorkspaceTab {
-    WorkspaceTab {
+  fn untitled(name: &str, content: &str) -> GroupTab {
+    GroupTab {
       untitled: name.to_string(),
       content: content.to_string(),
       ..Default::default()
     }
   }
 
-  fn ws(id: &str, name: &str, tabs: Vec<WorkspaceTab>) -> Workspace {
-    Workspace {
+  fn grp(id: &str, name: &str, tabs: Vec<GroupTab>) -> Group {
+    Group {
       id: id.to_string(),
       name: name.to_string(),
       tabs,
@@ -306,8 +305,8 @@ mod tests {
     }
   }
 
-  fn store(items: Vec<Workspace>) -> WorkspaceStore {
-    WorkspaceStore {
+  fn store(items: Vec<Group>) -> GroupStore {
+    GroupStore {
       active: "a".into(),
       items,
       ..Default::default()
@@ -315,8 +314,24 @@ mod tests {
   }
 
   #[test]
+  fn a_legacy_workspace_file_still_loads() {
+    // The file used to be workspaces.json and each record carried root/autoName/sidebarView.
+    // Unknown fields are ignored, so renaming the feature needs no migration step.
+    let json = r#"{"version":1,"active":"ws-1","items":[{"id":"ws-1","name":"notes",
+      "root":"d:\\notes","autoName":true,"sidebarView":"explorer",
+      "tabs":[{"path":"d:\\notes\\a.txt","cursor":3,"untitled":"","content":""}],
+      "active":"d:\\notes\\a.txt","updatedAt":"2026-01-01T00:00:00Z"}]}"#;
+    let store = serde_json::from_str::<GroupStore>(json)
+      .expect("legacy json")
+      .filled();
+    assert_eq!(store.active, "ws-1");
+    assert_eq!(store.items[0].name, "notes");
+    assert_eq!(store.items[0].tabs[0].cursor, 3);
+  }
+
+  #[test]
   fn empty_store_is_not_an_error() {
-    let filled = WorkspaceStore::default().filled();
+    let filled = GroupStore::default().filled();
     assert_eq!(filled.version, STORE_VERSION);
     assert_eq!(filled.active, "");
     assert!(filled.items.is_empty());
@@ -325,8 +340,8 @@ mod tests {
   #[test]
   fn same_name_is_not_merged_because_a_name_is_only_a_label() {
     let filled = store(vec![
-      ws("a", "notes", vec![tab(r"C:\notes\a.txt")]),
-      ws("b", "notes", vec![tab(r"C:\other\b.txt")]),
+      grp("a", "notes", vec![tab(r"C:\notes\a.txt")]),
+      grp("b", "notes", vec![tab(r"C:\other\b.txt")]),
     ])
     .filled();
     assert_eq!(filled.items.len(), 2);
@@ -335,7 +350,7 @@ mod tests {
 
   #[test]
   fn a_missing_name_falls_back_to_a_placeholder() {
-    let filled = store(vec![ws("a", "   ", vec![]), ws("b", "scratch", vec![])]).filled();
+    let filled = store(vec![grp("a", "   ", vec![]), grp("b", "scratch", vec![])]).filled();
     assert_eq!(filled.items[0].name, "Group 1");
     assert_eq!(filled.items[1].name, "scratch");
     assert_eq!(filled.items[0].id, "a");
@@ -344,8 +359,8 @@ mod tests {
   #[test]
   fn records_without_an_id_are_dropped() {
     let filled = store(vec![
-      ws("", "no id", vec![tab(r"C:\a.txt")]),
-      ws("b", "ok", vec![]),
+      grp("", "no id", vec![tab(r"C:\a.txt")]),
+      grp("b", "ok", vec![]),
     ])
     .filled();
     assert_eq!(filled.items.len(), 1);
@@ -354,11 +369,11 @@ mod tests {
 
   #[test]
   fn dangling_pointers_are_repaired() {
-    let filled = WorkspaceStore {
+    let filled = GroupStore {
       active: "gone".into(),
-      items: vec![Workspace {
+      items: vec![Group {
         active: r"C:\notes\missing.txt".into(),
-        ..ws("a", "notes", vec![tab(r"C:\notes\a.txt")])
+        ..grp("a", "notes", vec![tab(r"C:\notes\a.txt")])
       }],
       ..Default::default()
     }
@@ -371,13 +386,13 @@ mod tests {
   fn tab_keys_separate_files_from_scratch_tabs() {
     assert_eq!(tab(r"C:\a.txt").key(), r"C:\a.txt");
     assert_eq!(untitled("Untitled-3", "").key(), "untitled://Untitled-3");
-    assert_eq!(WorkspaceTab::default().key(), "");
+    assert_eq!(GroupTab::default().key(), "");
   }
 
   #[test]
   fn oversized_scratch_text_is_dropped_but_the_tab_kept() {
     let big = "x".repeat(MAX_UNTITLED_BYTES + 1);
-    let filled = store(vec![ws(
+    let filled = store(vec![grp(
       "a",
       "notes",
       vec![
@@ -394,10 +409,10 @@ mod tests {
 
   #[test]
   fn untitled_tabs_never_carry_a_path_and_file_tabs_never_carry_content() {
-    let filled = store(vec![ws(
+    let filled = store(vec![grp(
       "a",
       "notes",
-      vec![WorkspaceTab {
+      vec![GroupTab {
         // A file tab must not smuggle a second copy of unsaved text.
         path: r"C:\notes\a.txt".into(),
         untitled: "Untitled-1".into(),
@@ -414,13 +429,13 @@ mod tests {
 
   #[test]
   fn duplicate_tabs_and_blank_entries_are_dropped() {
-    let filled = store(vec![ws(
+    let filled = store(vec![grp(
       "a",
       "notes",
       vec![
         tab(r"C:\notes\a.txt"),
         tab("c:/NOTES/A.TXT"),
-        WorkspaceTab::default(),
+        GroupTab::default(),
         tab(r"C:\notes\b.txt"),
       ],
     )])
@@ -429,50 +444,50 @@ mod tests {
   }
 
   #[test]
-  fn tab_and_workspace_counts_are_bounded() {
-    let many = Workspace {
+  fn tab_and_group_counts_are_bounded() {
+    let many = Group {
       tabs: (0..MAX_TABS + 40)
         .map(|i| tab(&format!(r"C:\notes\f{i}.txt")))
         .collect(),
-      ..ws("a", "notes", vec![])
+      ..grp("a", "notes", vec![])
     };
     let filled = store(vec![many]).filled();
     assert_eq!(filled.items[0].tabs.len(), MAX_TABS);
 
     let mut items = Vec::new();
-    for i in 0..MAX_WORKSPACES + 1 {
-      items.push(Workspace {
+    for i in 0..MAX_GROUPS + 1 {
+      items.push(Group {
         updated_at: format!("2026-01-01T00:00:{i:02}Z"),
-        ..ws(
-          &format!("w{i}"),
+        ..grp(
+          &format!("g{i}"),
           &format!("group {i}"),
           vec![tab(r"C:\a.txt")],
         )
       });
     }
-    let filled = WorkspaceStore {
+    let filled = GroupStore {
       items,
       ..Default::default()
     }
     .filled();
-    assert_eq!(filled.items.len(), MAX_WORKSPACES);
+    assert_eq!(filled.items.len(), MAX_GROUPS);
     // The oldest timestamp lost the tie-break, not the newest.
-    assert!(filled.workspace("w0").is_none());
-    assert!(filled.workspace("w32").is_some());
+    assert!(filled.group("g0").is_none());
+    assert!(filled.group("g32").is_some());
   }
 
   #[test]
   fn only_the_active_group_is_retimestamped() {
-    let stamped = WorkspaceStore {
+    let stamped = GroupStore {
       active: "a".into(),
       items: vec![
-        Workspace {
+        Group {
           updated_at: "2026-01-01T00:00:00Z".into(),
-          ..ws("a", "one", vec![])
+          ..grp("a", "one", vec![])
         },
-        Workspace {
+        Group {
           updated_at: "2026-01-01T00:00:00Z".into(),
-          ..ws("b", "two", vec![])
+          ..grp("b", "two", vec![])
         },
       ],
       ..Default::default()
@@ -482,37 +497,37 @@ mod tests {
     assert_eq!(stamped.items[1].updated_at, "2026-01-01T00:00:00Z");
   }
 
-  fn two_groups() -> WorkspaceStore {
+  fn two_groups() -> GroupStore {
     store(vec![
-      Workspace {
+      Group {
         active: r"C:\a\x.txt".into(),
         tabs: vec![
-          WorkspaceTab {
+          GroupTab {
             path: r"C:\a\x.txt".into(),
             cursor: 9,
             ..Default::default()
           },
-          WorkspaceTab {
+          GroupTab {
             path: r"C:\a\y.txt".into(),
             cursor: 3,
             ..Default::default()
           },
         ],
-        ..ws("a", "first", vec![])
+        ..grp("a", "first", vec![])
       },
-      Workspace {
-        tabs: vec![WorkspaceTab {
+      Group {
+        tabs: vec![GroupTab {
           path: r"C:\b\z.txt".into(),
           cursor: 1,
           ..Default::default()
         }],
-        ..ws("b", "second", vec![])
+        ..grp("b", "second", vec![])
       },
     ])
     .filled()
   }
 
-  fn move_one(from: &str, to: &str, key: &str) -> WorkspaceStore {
+  fn move_one(from: &str, to: &str, key: &str) -> GroupStore {
     apply_transfer(
       two_groups(),
       &TabTransfer::Move {
@@ -526,8 +541,8 @@ mod tests {
   #[test]
   fn moving_a_tab_moves_exactly_one_and_keeps_the_total() {
     let filled = move_one("a", "b", "c:\\a\\x.txt");
-    let a = filled.workspace("a").unwrap();
-    let b = filled.workspace("b").unwrap();
+    let a = filled.group("a").unwrap();
+    let b = filled.group("b").unwrap();
     assert_eq!(a.tabs.len(), 1);
     assert_eq!(b.tabs.len(), 2);
     assert!(b.tabs.iter().any(|t| t.path == r"c:\a\x.txt"));
@@ -537,7 +552,7 @@ mod tests {
   fn moving_the_active_tab_falls_back_and_an_empty_group_has_no_active() {
     let filled = move_one("a", "b", "c:\\a\\x.txt");
     // x.txt was active in a, so a now points at what is left.
-    assert_eq!(filled.workspace("a").unwrap().active, r"c:\a\y.txt");
+    assert_eq!(filled.group("a").unwrap().active, r"c:\a\y.txt");
 
     let emptied = apply_transfer(
       filled,
@@ -547,28 +562,28 @@ mod tests {
         tab: None,
       },
     );
-    assert!(emptied.workspace("a").unwrap().tabs.is_empty());
-    assert_eq!(emptied.workspace("a").unwrap().active, "");
+    assert!(emptied.group("a").unwrap().tabs.is_empty());
+    assert_eq!(emptied.group("a").unwrap().active, "");
   }
 
   #[test]
   fn a_tab_already_open_downstairs_is_not_duplicated() {
     let prepared = store(vec![
-      Workspace {
-        tabs: vec![WorkspaceTab {
+      Group {
+        tabs: vec![GroupTab {
           path: r"C:\b\z.txt".into(),
           cursor: 42,
           ..Default::default()
         }],
-        ..ws("a", "first", vec![])
+        ..grp("a", "first", vec![])
       },
-      Workspace {
-        tabs: vec![WorkspaceTab {
+      Group {
+        tabs: vec![GroupTab {
           path: r"C:\b\z.txt".into(),
           cursor: 1,
           ..Default::default()
         }],
-        ..ws("b", "second", vec![])
+        ..grp("b", "second", vec![])
       },
     ])
     .filled();
@@ -580,7 +595,7 @@ mod tests {
         tab: Some(r"c:\b\z.txt".into()),
       },
     );
-    let b = filled.workspace("b").unwrap();
+    let b = filled.group("b").unwrap();
     assert_eq!(b.tabs.len(), 1);
     // The incoming caret wins over the stale one.
     assert_eq!(b.tabs[0].cursor, 42);
@@ -589,7 +604,7 @@ mod tests {
   #[test]
   fn scratch_text_travels_with_its_tab() {
     let prepared = store(vec![
-      ws(
+      grp(
         "a",
         "first",
         vec![
@@ -597,7 +612,7 @@ mod tests {
           tab(r"C:\a\x.txt"),
         ],
       ),
-      ws("b", "second", vec![]),
+      grp("b", "second", vec![]),
     ])
     .filled();
     let filled = apply_transfer(
@@ -608,8 +623,8 @@ mod tests {
         tab: Some("untitled://Untitled-1".into()),
       },
     );
-    assert_eq!(filled.workspace("a").unwrap().tabs.len(), 1);
-    let b = filled.workspace("b").unwrap();
+    assert_eq!(filled.group("a").unwrap().tabs.len(), 1);
+    let b = filled.group("b").unwrap();
     assert_eq!(b.tabs[0].untitled, "Untitled-1");
     assert_eq!(b.tabs[0].content, "half-written note");
     // The group that had no selection now shows the tab that arrived.
@@ -626,8 +641,8 @@ mod tests {
         tab: None,
       },
     );
-    let b = filled.workspace("b").unwrap();
-    assert!(filled.workspace("a").unwrap().tabs.is_empty());
+    let b = filled.group("b").unwrap();
+    assert!(filled.group("a").unwrap().tabs.is_empty());
     assert_eq!(
       b.tabs.iter().map(|t| t.key()).collect::<Vec<_>>(),
       vec![r"c:\b\z.txt", r"c:\a\x.txt", r"c:\a\y.txt"]
@@ -644,8 +659,8 @@ mod tests {
         tab: Some(r"c:\a\x.txt".into()),
       },
     );
-    assert_eq!(filled.workspace("a").unwrap().tabs.len(), 2);
-    assert_eq!(filled.workspace("b").unwrap().tabs.len(), 2);
+    assert_eq!(filled.group("a").unwrap().tabs.len(), 2);
+    assert_eq!(filled.group("b").unwrap().tabs.len(), 2);
   }
 
   #[test]
@@ -658,7 +673,7 @@ mod tests {
         tab: None,
       },
     );
-    assert_eq!(same.workspace("a").unwrap().tabs.len(), 2);
+    assert_eq!(same.group("a").unwrap().tabs.len(), 2);
 
     let missing = apply_transfer(
       two_groups(),
@@ -668,7 +683,7 @@ mod tests {
         tab: None,
       },
     );
-    assert_eq!(missing.workspace("b").unwrap().tabs.len(), 1);
+    assert_eq!(missing.group("b").unwrap().tabs.len(), 1);
 
     let absent = apply_transfer(
       two_groups(),
@@ -678,6 +693,6 @@ mod tests {
         tab: Some(r"c:\a\gone.txt".into()),
       },
     );
-    assert_eq!(absent.workspace("a").unwrap().tabs.len(), 2);
+    assert_eq!(absent.group("a").unwrap().tabs.len(), 2);
   }
 }

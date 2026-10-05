@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from "react";
-import { api, errorMessage, type Workspace, type WorkspaceStore } from "../lib/tauri";
-import { applySnapshot, newWorkspaceId, sameName, type LiveSnapshot } from "../lib/workspace";
+import { api, errorMessage, type Group, type GroupStore } from "../lib/tauri";
+import { applySnapshot, newGroupId, sameName, type LiveSnapshot } from "../lib/group";
 
 const DEBOUNCE_MS = 400;
 
@@ -10,18 +10,18 @@ interface Options {
   onError: (message: string) => void;
 }
 
-export interface WorkspaceCommitter {
-  store: WorkspaceStore;
-  load(): Promise<WorkspaceStore>;
+export interface GroupStoreCommitter {
+  store: GroupStore;
+  load(): Promise<GroupStore>;
   /** Mirror the live tab set into the group on screen. */
   commit(snapshot: LiveSnapshot, immediate?: boolean): void;
   /** Write whatever is pending right now. */
   flush(): Promise<void>;
-  active(): Workspace | null;
-  snapshotStore(): WorkspaceStore;
+  active(): Group | null;
+  snapshotStore(): GroupStore;
   /** Adopt a store produced elsewhere (a transfer) and persist it at once. */
-  replace(next: WorkspaceStore): void;
-  create(name: string): { workspace: Workspace | null; problem: NameProblem };
+  replace(next: GroupStore): void;
+  create(name: string): { group: Group | null; problem: NameProblem };
   select(id: string): void;
   rename(id: string, name: string): NameProblem;
   isNameTaken(name: string, exceptId?: string): boolean;
@@ -32,25 +32,25 @@ export interface WorkspaceCommitter {
 }
 
 /**
- * Owns the group store: a group is a name plus the tabs opened under it. The sidebar
- * folder is not part of it — that is global view state in settings.
+ * Owns the group store: a group is a name plus the tabs opened under it. The sidebar folder
+ * is not part of it — that is global view state in settings.
  */
-export function useWorkspaces({ onError }: Options): WorkspaceCommitter {
-  const [store, setStore] = useState<WorkspaceStore>({ version: 1, active: "", items: [] });
+export function useGroups({ onError }: Options): GroupStoreCommitter {
+  const [store, setStore] = useState<GroupStore>({ version: 1, active: "", items: [] });
   const storeRef = useRef(store);
   const timer = useRef<number | undefined>(undefined);
-  // Serialize writes: two overlapping save_workspaces calls would race on one file.
+  // Serialize writes: two overlapping save_groups calls would race on one file.
   const writing = useRef<Promise<void>>(Promise.resolve());
 
   const write = useCallback(
-    (next: WorkspaceStore) => {
+    (next: GroupStore) => {
       storeRef.current = next;
       setStore(next);
       writing.current = writing.current
         .catch(() => undefined)
         .then(() =>
           api
-            .saveWorkspaces(next)
+            .saveGroups(next)
             // The backend cleans and re-times the store, so its answer is the new truth.
             .then((saved) => {
               storeRef.current = saved;
@@ -63,7 +63,7 @@ export function useWorkspaces({ onError }: Options): WorkspaceCommitter {
   );
 
   const schedule = useCallback(
-    (next: WorkspaceStore, immediate?: boolean) => {
+    (next: GroupStore, immediate?: boolean) => {
       if (immediate) {
         window.clearTimeout(timer.current);
         write(next);
@@ -78,7 +78,7 @@ export function useWorkspaces({ onError }: Options): WorkspaceCommitter {
   );
 
   const load = useCallback(async () => {
-    const s = await api.getWorkspaces();
+    const s = await api.getGroups();
     storeRef.current = s;
     setStore(s);
     return s;
@@ -106,7 +106,7 @@ export function useWorkspaces({ onError }: Options): WorkspaceCommitter {
 
   const snapshotStore = useCallback(() => storeRef.current, []);
 
-  const replace = useCallback((next: WorkspaceStore) => schedule(next, true), [schedule]);
+  const replace = useCallback((next: GroupStore) => schedule(next, true), [schedule]);
 
   const isNameTaken = useCallback((name: string, exceptId?: string) => {
     return storeRef.current.items.some((item) => item.id !== exceptId && sameName(item.name, name));
@@ -115,18 +115,18 @@ export function useWorkspaces({ onError }: Options): WorkspaceCommitter {
   const create = useCallback(
     (name: string) => {
       const trimmed = name.trim();
-      if (!trimmed) return { workspace: null, problem: "empty" as NameProblem };
-      if (isNameTaken(trimmed)) return { workspace: null, problem: "duplicate" as NameProblem };
+      if (!trimmed) return { group: null, problem: "empty" as NameProblem };
+      if (isNameTaken(trimmed)) return { group: null, problem: "duplicate" as NameProblem };
       const s = storeRef.current;
-      const workspace: Workspace = {
-        id: newWorkspaceId(),
+      const group: Group = {
+        id: newGroupId(),
         name: trimmed,
         tabs: [],
         active: "",
         updatedAt: "",
       };
-      schedule({ ...s, active: workspace.id, items: [...s.items, workspace] });
-      return { workspace, problem: "ok" as NameProblem };
+      schedule({ ...s, active: group.id, items: [...s.items, group] });
+      return { group, problem: "ok" as NameProblem };
     },
     [isNameTaken, schedule]
   );

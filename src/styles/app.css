@@ -297,15 +297,15 @@ body {
   font-size: 12px;
 }
 
-/* Workspace switcher: same panel language as the tab list, so the title bar stays one system. */
-.ws-wrap {
+/* Group switcher: same panel language as the tab list, so the title bar stays one system. */
+.grp-wrap {
   position: relative;
   display: flex;
   align-items: center;
   margin-left: 6px;
   flex: 0 0 auto;
 }
-.ws-chip {
+.grp-chip {
   display: flex;
   align-items: center;
   max-width: 190px;
@@ -318,16 +318,16 @@ body {
   font-size: 12px;
   cursor: pointer;
 }
-.ws-chip:hover {
+.grp-chip:hover {
   background: #3a3a3a;
   color: #fff;
 }
-.ws-name {
+.grp-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ws-panel {
+.grp-panel {
   position: absolute;
   top: 100%;
   left: 0;
@@ -341,15 +341,15 @@ body {
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
   padding: 6px;
 }
-.ws-heading {
+.grp-heading {
   padding: 6px 10px 4px;
   color: var(--muted);
   font-size: 11px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
-.ws-row,
-.ws-item {
+.grp-row,
+.grp-item {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -359,45 +359,45 @@ body {
   color: #d4d4d4;
   font-size: 13px;
 }
-.ws-row:hover,
-.ws-item:hover {
+.grp-row:hover,
+.grp-item:hover {
   background: #2f2f2f;
   color: #fff;
 }
-.ws-row.active {
+.grp-row.active {
   background: var(--accent-soft);
   color: #fff;
 }
-.ws-row-name {
+.grp-row-name {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.ws-row-meta {
+.grp-row-meta {
   flex: 0 0 auto;
   color: var(--muted);
   font-size: 11px;
 }
-.ws-row.active .ws-row-meta {
+.grp-row.active .grp-row-meta {
   color: #d7d7e8;
 }
-.ws-item.danger:hover {
+.grp-item.danger:hover {
   background: #4a2a2a;
   color: #fff;
 }
-.ws-sep {
+.grp-sep {
   height: 1px;
   margin: 6px 4px;
   background: var(--border);
 }
-.ws-rename {
+.grp-rename {
   display: flex;
   gap: 6px;
   padding: 6px;
 }
-.ws-input {
+.grp-input {
   flex: 1 1 auto;
   min-width: 0;
   padding: 5px 8px;
@@ -407,22 +407,22 @@ body {
   color: var(--text);
   font-size: 13px;
 }
-.ws-input:focus {
+.grp-input:focus {
   outline: none;
   border-color: var(--accent);
 }
 /* The name dialog reuses the modal shell, so its input needs the full width. */
-.modal .ws-input {
+.modal .grp-input {
   width: 100%;
   box-sizing: border-box;
 }
 .modal-error,
-.ws-error {
+.grp-error {
   color: #e57373;
   font-size: 12px;
   margin: 6px 0 0;
 }
-.ws-panel .ws-error {
+.grp-panel .grp-error {
   padding: 2px 10px;
 }
 .btn.small {

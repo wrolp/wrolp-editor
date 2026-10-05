@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { t } from "../lib/i18n";
-import type { Workspace } from "../lib/tauri";
-import type { NameProblem } from "./NewWorkspaceDialog";
+import type { Group } from "../lib/tauri";
+import type { NameProblem } from "../hooks/useGroups";
 
 interface Props {
-  items: Workspace[];
+  groups: Group[];
   activeId: string;
   onSwitch: (id: string) => void;
   onNew: () => void;
@@ -13,9 +13,9 @@ interface Props {
   onRemove: (id: string) => void;
 }
 
-/** A named group of open tabs, and the only way to move between whole editing contexts. */
-export default function WorkspaceChip({
-  items,
+/** A named set of open tabs, and the only way to move between whole editing contexts. */
+export default function GroupChip({
+  groups,
   activeId,
   onSwitch,
   onNew,
@@ -28,7 +28,7 @@ export default function WorkspaceChip({
   const [draftName, setDraftName] = useState("");
   const [problem, setProblem] = useState<NameProblem>("ok");
   const wrapRef = useRef<HTMLDivElement>(null);
-  const active = items.find((w) => w.id === activeId) ?? null;
+  const active = groups.find((g) => g.id === activeId) ?? null;
 
   useEffect(() => {
     if (!open) return;
@@ -56,27 +56,27 @@ export default function WorkspaceChip({
     setProblem(result);
   };
 
-  const rowLabel = (w: Workspace) =>
-    w.tabs.length > 0 ? t("ws.currentTabs", { n: w.tabs.length }) : t("ws.noTabs");
+  const rowLabel = (g: Group) =>
+    g.tabs.length > 0 ? t("grp.currentTabs", { n: g.tabs.length }) : t("grp.noTabs");
 
   return (
-    <div className="ws-wrap" ref={wrapRef}>
+    <div className="grp-wrap" ref={wrapRef}>
       <button
-        className="ws-chip"
-        title={active ? `${active.name} - ${rowLabel(active)}` : t("ws.noWorkspace")}
+        className="grp-chip"
+        title={active ? `${active.name} - ${rowLabel(active)}` : t("grp.noGroup")}
         onClick={() => setOpen((v) => !v)}
       >
-        <span className="ws-name">{active?.name ?? t("ws.noWorkspace")}</span>
+        <span className="grp-name">{active?.name ?? t("grp.noGroup")}</span>
       </button>
 
       {open && (
-        <div className="ws-panel">
+        <div className="grp-panel">
           {editing ? (
-            <div className="ws-rename">
+            <div className="grp-rename">
               <input
-                className="ws-input"
+                className="grp-input"
                 value={draftName}
-                placeholder={t("ws.renameHint")}
+                placeholder={t("grp.renameHint")}
                 autoFocus
                 onChange={(e) => {
                   setDraftName(e.target.value);
@@ -88,62 +88,62 @@ export default function WorkspaceChip({
                 }}
               />
               <button className="btn primary small" onClick={commitRename}>
-                {t("ws.rename")}
+                {t("grp.rename")}
               </button>
             </div>
           ) : (
             <>
-              <div className="ws-heading">{t("ws.chip")}</div>
-              {items.map((w) => (
+              <div className="grp-heading">{t("grp.chip")}</div>
+              {groups.map((g) => (
                 <div
-                  key={w.id}
-                  className={`ws-row${w.id === activeId ? " active" : ""}`}
+                  key={g.id}
+                  className={`grp-row${g.id === activeId ? " active" : ""}`}
                   onClick={() => {
-                    onSwitch(w.id);
+                    onSwitch(g.id);
                     setOpen(false);
                   }}
                 >
-                  <span className="ws-row-name">{w.name}</span>
-                  <span className="ws-row-meta">{rowLabel(w)}</span>
+                  <span className="grp-row-name">{g.name}</span>
+                  <span className="grp-row-meta">{rowLabel(g)}</span>
                 </div>
               ))}
               {problem !== "ok" && (
-                <div className="ws-error">
-                  {t(problem === "duplicate" ? "ws.nameDuplicate" : "ws.nameEmpty")}
+                <div className="grp-error">
+                  {t(problem === "duplicate" ? "grp.nameDuplicate" : "grp.nameEmpty")}
                 </div>
               )}
-              <div className="ws-sep" />
+              <div className="grp-sep" />
               <div
-                className="ws-item"
+                className="grp-item"
                 onClick={() => {
                   onNew();
                   setOpen(false);
                 }}
               >
-                {t("ws.new")}
+                {t("grp.new")}
               </div>
               {active && (
                 <>
-                  <div className="ws-item" onClick={startRename}>
-                    {t("ws.rename")}
+                  <div className="grp-item" onClick={startRename}>
+                    {t("grp.rename")}
                   </div>
                   <div
-                    className="ws-item"
+                    className="grp-item"
                     onClick={() => {
                       onClear(active.id);
                       setOpen(false);
                     }}
                   >
-                    {t("ws.clear")}
+                    {t("grp.clear")}
                   </div>
                   <div
-                    className="ws-item danger"
+                    className="grp-item danger"
                     onClick={() => {
                       onRemove(active.id);
                       setOpen(false);
                     }}
                   >
-                    {t("ws.remove")}
+                    {t("grp.remove")}
                   </div>
                 </>
               )}

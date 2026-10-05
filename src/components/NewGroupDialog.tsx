@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { t } from "../lib/i18n";
-
-export type NameProblem = "ok" | "empty" | "duplicate";
+import type { NameProblem } from "../hooks/useGroups";
 
 interface Props {
   validate: (name: string) => NameProblem;
@@ -10,11 +9,11 @@ interface Props {
 }
 
 /**
- * A workspace is identified by the name the user gives it, so creating one asks for that
- * name instead of deriving it from a folder. Duplicate names are refused rather than
- * suffixed: two rows reading the same thing cannot be told apart in the switcher.
+ * A group is identified by the name the user gives it, so creating one asks for that name
+ * instead of deriving it from a folder. Duplicate names are refused rather than suffixed:
+ * two rows reading the same thing cannot be told apart in the switcher.
  */
-export default function NewWorkspaceDialog({ validate, onConfirm, onCancel }: Props) {
+export default function NewGroupDialog({ validate, onConfirm, onCancel }: Props) {
   const [value, setValue] = useState("");
   const [problem, setProblem] = useState<NameProblem>("ok");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -32,12 +31,12 @@ export default function NewWorkspaceDialog({ validate, onConfirm, onCancel }: Pr
   return (
     <div className="modal-overlay">
       <div className="modal">
-        <h3>{t("ws.newTitle")}</h3>
+        <h3>{t("grp.newTitle")}</h3>
         <input
           ref={inputRef}
-          className="ws-input"
+          className="grp-input"
           value={value}
-          placeholder={t("ws.renameHint")}
+          placeholder={t("grp.renameHint")}
           onChange={(e) => {
             setValue(e.target.value);
             if (problem !== "ok") setProblem("ok");
@@ -49,15 +48,15 @@ export default function NewWorkspaceDialog({ validate, onConfirm, onCancel }: Pr
         />
         {problem !== "ok" && (
           <p className="modal-error">
-            {t(problem === "duplicate" ? "ws.nameDuplicate" : "ws.nameEmpty")}
+            {t(problem === "duplicate" ? "grp.nameDuplicate" : "grp.nameEmpty")}
           </p>
         )}
         <div className="modal-actions">
           <button className="btn primary" onClick={submit}>
-            {t("ws.create")}
+            {t("grp.create")}
           </button>
           <button className="btn" onClick={onCancel}>
-            {t("ws.cancel")}
+            {t("grp.cancel")}
           </button>
         </div>
       </div>

@@ -1,7 +1,7 @@
 mod commands;
 mod context_menu;
 mod draft;
-mod workspace;
+mod group;
 
 use tauri::Manager;
 
@@ -30,8 +30,8 @@ pub fn run() {
       commands::remove_history,
       commands::get_settings,
       commands::save_settings,
-      commands::get_workspaces,
-      commands::save_workspaces,
+      commands::get_groups,
+      commands::save_groups,
       commands::transfer_tabs,
       commands::context_menu_target,
       commands::install_context_menu,

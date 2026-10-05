@@ -2,21 +2,20 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import Editor from "./components/Editor";
 import DraftRestoreDialog from "./components/DraftRestoreDialog";
-import NewWorkspaceDialog from "./components/NewWorkspaceDialog";
+import NewGroupDialog from "./components/NewGroupDialog";
 import SettingsPanel from "./components/SettingsPanel";
 import Sidebar from "./components/Sidebar";
 import SidebarResizer from "./components/SidebarResizer";
 import StatusBar from "./components/StatusBar";
 import TitleBar from "./components/TitleBar";
 import Toast from "./components/Toast";
-import WorkspaceChip from "./components/WorkspaceChip";
+import GroupChip from "./components/GroupChip";
 import DraftRestoreSummary from "./components/DraftRestoreSummary";
 import { useDraft } from "./hooks/useDraft";
 import { useEditorTabs } from "./hooks/useEditorTabs";
-import { useWorkspaces } from "./hooks/useWorkspaces";
+import { useGroups } from "./hooks/useGroups";
 import { setLang, t } from "./lib/i18n";
 import { basename, dirname } from "./lib/path";
-import { groupNameFor } from "./lib/workspace";
 import type { EditorHandle } from "./lib/types";
 import {
   api,
@@ -92,13 +91,13 @@ export default function App() {
   const editorRef = useRef<EditorHandle | null>(null);
   const draft = useDraft(toast);
 
-  // Stable callback for useEditorTabs: the real work needs the workspace plumbing below,
+  // Stable callback for useEditorTabs: the real work needs the group plumbing below,
   // which in turn needs the tabs, so it is reached through a ref instead of a dependency.
   const fileOpened = useRef<(dir: string) => void>(() => {});
   const onFileOpened = useCallback((dir: string) => fileOpened.current(dir), []);
 
   const tabs = useEditorTabs({ toast, draft, editorRef, onFileOpened });
-  const workspaces = useWorkspaces({ onError: toast });
+  const groups = useGroups({ onError: toast });
   /** Startup must finish before the live state is mirrored into the store. */
   const [booted, setBooted] = useState(false);
 
@@ -120,7 +119,7 @@ export default function App() {
       .catch((e) => toast(errorMessage(e)));
   }, [toast]);
 
-  // Startup: settings, workspace session, then files from argv or a second instance.
+  // Startup: settings, group session, then files from argv or a second instance.
   const bootStarted = useRef(false);
   useEffect(() => {
     if (bootStarted.current) return;
@@ -137,21 +136,21 @@ export default function App() {
       setSidebarVisible(loadedSettings.sidebarVisible);
       setSidebarView(loadedSettings.sidebarView === "history" ? "history" : "explorer");
       setSidebarWidth(loadedSettings.sidebarWidth);
-      // The Explorer folder is global view state; a workspace only remembers tabs.
+      // The Explorer folder is global view state; a group only remembers tabs.
       setRootDir(loadedSettings.sidebarRoot || null);
 
-      const store = await workspaces.load().catch((e) => {
+      const store = await groups.load().catch((e) => {
         toast(errorMessage(e));
         return null;
       });
       const active = store?.active ? store.items.find((w) => w.id === store.active) ?? null : null;
       if (active && loadedSettings.restoreSession && active.tabs.length > 0) {
         const result = await tabs.restoreTabs(active.tabs, active.active);
-        if (result.skipped > 0) toast(t("ws.skipped", { n: result.skipped }));
+        if (result.skipped > 0) toast(t("grp.skipped", { n: result.skipped }));
       }
 
       try {
-        // Anything handed over by the context menu lands in the workspace already on screen.
+        // Anything handed over by the context menu lands in the group already on screen.
         for (const path of await api.takeStartupFiles()) await tabs.openPath(path);
       } catch (e) {
         toast(errorMessage(e));
@@ -175,8 +174,8 @@ export default function App() {
 
   /** What the store should remember about the screen right now. */
   const pausedCommit = useRef(false);
-  const workspacesRef = useRef(workspaces);
-  workspacesRef.current = workspaces;
+  const groupsRef = useRef(groups);
+  groupsRef.current = groups;
   const snapshotOf = useRef(tabs.snapshotTabs);
   snapshotOf.current = tabs.snapshotTabs;
   const rootRef = useRef<string | null>(null);
@@ -187,7 +186,7 @@ export default function App() {
     // Suspended while a switch is rebuilding the tab set, otherwise the half-cleared tabs
     // would be written into the group being switched to.
     if (pausedCommit.current) return;
-    workspacesRef.current.commit(snapshotOf.current(), immediate);
+    groupsRef.current.commit(snapshotOf.current(), immediate);
   }, []);
 
   useEffect(() => {
@@ -203,22 +202,22 @@ export default function App() {
       setRootDir(dir);
       saveSettingsRef.current({ sidebarRoot: dir });
     }
-    if (!workspacesRef.current.active()) {
-      // The first file in a bare window opens a group named after its folder; without a
-      // group there is nothing for a session restore to remember. The name is only a
-      // label — a group is the set of tabs, not the folder.
-      const preferred = groupNameFor(dir, t("ws.ungrouped"));
-      for (let i = 1; i <= 20; i++) {
-        const candidate = i === 1 ? preferred : `${preferred} (${i})`;
-        const { problem } = workspacesRef.current.create(candidate);
-        if (problem === "ok") break;
-        if (problem === "empty") break;
-      }
-    }
     commitLive(true);
   };
 
-  // Land the caret where the workspace remembered, once the model for that tab is attached.
+  /**
+   * There is always somewhere to put a tab: a window with no groups starts with a default one,
+   * so nothing depends on the user remembering to create it before work gets persisted. The
+   * snapshot is committed right away because the tab that triggered this may already be open —
+   * its own commit ran while there was no group to write into.
+   */
+  useEffect(() => {
+    if (!booted || groups.store.items.length > 0) return;
+    groupsRef.current.create(t("grp.default"));
+    commitLive(true);
+  }, [booted, commitLive, groups.store.items.length]);
+
+  // Land the caret where the group remembered, once the model for that tab is attached.
   useEffect(() => {
     tabs.applyPendingCursor();
     // The readout only follows Monaco's cursor events, which a model switch may not fire:
@@ -231,26 +230,26 @@ export default function App() {
   }, [tabs, tabs.activeId]);
 
   /** Replace the whole tab set with another group's, keeping the outgoing one intact. */
-  const switchWorkspace = useCallback(
+  const switchGroup = useCallback(
     async (id: string) => {
-      const target = workspacesRef.current.store.items.find((w) => w.id === id);
+      const target = groupsRef.current.store.items.find((w) => w.id === id);
       if (!target) return;
       pausedCommit.current = true;
       try {
         await draft.flushAll();
-        workspacesRef.current.commit(snapshotOf.current(), true);
-        workspacesRef.current.select(id);
+        groupsRef.current.commit(snapshotOf.current(), true);
+        groupsRef.current.select(id);
         tabs.clearAllTabs();
         if (target.tabs.length > 0) {
           const result = await tabs.restoreTabs(target.tabs, target.active);
-          if (result.skipped > 0) toast(t("ws.skipped", { n: result.skipped }));
+          if (result.skipped > 0) toast(t("grp.skipped", { n: result.skipped }));
         }
         // Files that could not be read must not stay in the store for next startup to retry.
-        workspacesRef.current.commit(snapshotOf.current(), true);
+        groupsRef.current.commit(snapshotOf.current(), true);
       } finally {
         pausedCommit.current = false;
       }
-      toast(t("ws.switched", { name: target.name }));
+      toast(t("grp.switched", { name: target.name }));
     },
     [draft, tabs, toast]
   );
@@ -264,16 +263,16 @@ export default function App() {
       pausedCommit.current = true;
       try {
         await draft.flushAll();
-        workspacesRef.current.commit(snapshotOf.current(), true);
-        const { workspace, problem } = workspacesRef.current.create(name);
-        if (!workspace) {
+        groupsRef.current.commit(snapshotOf.current(), true);
+        const { group: created, problem } = groupsRef.current.create(name);
+        if (!created) {
           // The dialog validated the name already; a race here just leaves things as they were.
-          if (problem === "duplicate") toast(t("ws.nameDuplicate"));
+          if (problem === "duplicate") toast(t("grp.nameDuplicate"));
           return null;
         }
         tabs.clearAllTabs();
-        workspacesRef.current.commit({ tabs: [], active: "" }, true);
-        return workspace;
+        groupsRef.current.commit({ tabs: [], active: "" }, true);
+        return created;
       } finally {
         pausedCommit.current = false;
       }
@@ -281,17 +280,17 @@ export default function App() {
     [draft, tabs, toast]
   );
 
-  /** Forget the current context but keep the entry, per the "Close workspace" menu item. */
+  /** Forget the current context but keep the entry, per the "Close group" menu item. */
   /** Forget a group's tabs but keep the entry; the sidebar folder is global and stays. */
-  const clearWorkspace = useCallback(
+  const clearGroup = useCallback(
     async (id: string) => {
-      const target = workspacesRef.current.store.items.find((w) => w.id === id);
+      const target = groupsRef.current.store.items.find((w) => w.id === id);
       pausedCommit.current = true;
       try {
         await draft.flushAll();
-        workspacesRef.current.clearContents(id);
+        groupsRef.current.clearContents(id);
         tabs.clearAllTabs();
-        if (target) toast(t("ws.cleared", { name: target.name }));
+        if (target) toast(t("grp.cleared", { name: target.name }));
       } finally {
         pausedCommit.current = false;
       }
@@ -301,8 +300,8 @@ export default function App() {
 
   const flushEverything = useCallback(async () => {
     await draft.flushAll();
-    await workspaces.flush();
-  }, [draft, workspaces]);
+    await groups.flush();
+  }, [draft, groups]);
 
   // Flush pending drafts when the window loses focus to shrink what a kill can lose.
   useEffect(() => {
@@ -442,20 +441,20 @@ export default function App() {
   );
 
   /**
-   * Move or copy the menu's tab into another workspace. The store travels to the backend
+   * Move or copy the menu's tab into another group. The store travels to the backend
    * and comes back whole, so one write covers both sides — never "gone from A, missing in B".
    */
   const runTransfer = useCallback(
     async (panel: "move" | "copy" | "moveAll", toId: string) => {
       const key = menuTabPath;
       if (!key) return;
-      const fromId = workspacesRef.current.store.active;
+      const fromId = groupsRef.current.store.active;
       const tabId = tabMenu?.tabId ?? null;
       pausedCommit.current = true;
       try {
         commitLive(true);
         const out = await api
-          .transferTabs(workspacesRef.current.snapshotStore(), {
+          .transferTabs(groupsRef.current.snapshotStore(), {
             action: panel === "copy" ? "copy" : "move",
             from: fromId,
             to: toId,
@@ -466,7 +465,7 @@ export default function App() {
             return null;
           });
         if (!out) return;
-        workspacesRef.current.replace(out);
+        groupsRef.current.replace(out);
         const target = out.items.find((w) => w.id === toId);
         if (panel !== "copy") {
           if (panel === "moveAll") tabs.clearAllTabs();
@@ -475,8 +474,8 @@ export default function App() {
         const name = target?.name ?? "";
         toast(
           panel === "moveAll"
-            ? t("ws.movedCount", { n: target?.tabs.length ?? 0, ws: name })
-            : t(panel === "copy" ? "ws.copied" : "ws.moved", { name: basename(key), ws: name })
+            ? t("grp.movedCount", { n: target?.tabs.length ?? 0, grp: name })
+            : t(panel === "copy" ? "grp.copied" : "grp.moved", { name: basename(key), grp: name })
         );
       } finally {
         pausedCommit.current = false;
@@ -500,10 +499,10 @@ export default function App() {
     [saveSettings]
   );
 
-  /** Every workspace except the one on screen: the destination list for move and copy. */
+  /** Every group except the one on screen: the destination list for move and copy. */
   const transferTargets = useMemo(
-    () => workspaces.store.items.filter((w) => w.id !== workspaces.store.active),
-    [workspaces.store]
+    () => groups.store.items.filter((w) => w.id !== groups.store.active),
+    [groups.store]
   );
 
   const changeView = useCallback(
@@ -551,15 +550,15 @@ export default function App() {
         tabs={tabs.tabs}
         activeId={tabs.activeId}
         sidebarVisible={sidebarShown}
-        workspaceSlot={
-          <WorkspaceChip
-            items={workspaces.store.items}
-            activeId={workspaces.store.active}
-            onSwitch={(id) => void switchWorkspace(id)}
+        groupSlot={
+          <GroupChip
+            groups={groups.store.items}
+            activeId={groups.store.active}
+            onSwitch={(id) => void switchGroup(id)}
             onNew={() => setNewGroupOpen(true)}
-            onRename={workspaces.rename}
-            onClear={(id) => void clearWorkspace(id)}
-            onRemove={workspaces.remove}
+            onRename={groups.rename}
+            onClear={(id) => void clearGroup(id)}
+            onRemove={groups.remove}
           />
         }
         onSelect={tabs.selectTab}
@@ -674,10 +673,10 @@ export default function App() {
                 <div key={panel} className="ctx-item" onClick={() => setTabMenu({ ...tabMenu, panel })}>
                   {t(
                     panel === "move"
-                      ? "ws.moveTitle"
+                      ? "grp.moveTitle"
                       : panel === "copy"
-                        ? "ws.copyTitle"
-                        : "ws.moveAllTitle"
+                        ? "grp.copyTitle"
+                        : "grp.moveAllTitle"
                   )}
                 </div>
               ))}
@@ -685,11 +684,11 @@ export default function App() {
           ) : (
             <>
               <div className="ctx-item" onClick={() => setTabMenu({ ...tabMenu, panel: "root" })}>
-                ← {t("ws.back")}
+                ← {t("grp.back")}
               </div>
               <div className="ws-sep" />
               {transferTargets.length === 0 ? (
-                <div className="dd-empty">{t("ws.noOther")}</div>
+                <div className="dd-empty">{t("grp.noOther")}</div>
               ) : (
                 transferTargets.map((w) => (
                   <div key={w.id} className="ctx-item" onClick={() => void runTransfer(tabMenu.panel as "move" | "copy" | "moveAll", w.id)}>
@@ -703,15 +702,15 @@ export default function App() {
       )}
 
       {newGroupOpen && (
-        <NewWorkspaceDialog
+        <NewGroupDialog
           validate={(name) => {
             if (!name.trim()) return "empty";
-            return workspaces.isNameTaken(name) ? "duplicate" : "ok";
+            return groups.isNameTaken(name) ? "duplicate" : "ok";
           }}
           onConfirm={async (name) => {
-            const workspace = await createGroup(name);
+            const created = await createGroup(name);
             setNewGroupOpen(false);
-            if (workspace) toast(t("ws.created", { name: workspace.name }));
+            if (created) toast(t("grp.created", { name: created.name }));
           }}
           onCancel={() => setNewGroupOpen(false)}
         />

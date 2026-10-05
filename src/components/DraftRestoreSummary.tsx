@@ -10,7 +10,7 @@ interface Props {
 
 /**
  * One answer for a session that came back with several drafts. Without it, restoring a
- * workspace would mean dismissing this dialog once per file before seeing any text.
+ * group would mean dismissing this dialog once per file before seeing any text.
  */
 export default function DraftRestoreSummary({ requests, onRestoreAll, onDiscardAll, onReviewEach }: Props) {
   const locale = getLang() === "zh" ? "zh-CN" : "en-US";

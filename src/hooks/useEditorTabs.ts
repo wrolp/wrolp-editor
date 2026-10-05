@@ -1,8 +1,8 @@
 import { useCallback, useRef, useState, type RefObject } from "react";
 import { t } from "../lib/i18n";
-import { api, errorMessage, pickSaveAs, type Draft, type WorkspaceTab } from "../lib/tauri";
+import { api, errorMessage, pickSaveAs, type Draft, type GroupTab } from "../lib/tauri";
 import { basename, dirname, isUntitled, langOf, modelUri } from "../lib/path";
-import { tabKey, toStoredTab } from "../lib/workspace";
+import { tabKey, toStoredTab } from "../lib/group";
 import { pathKey, type EditorHandle, type PendingRestore, type Tab } from "../lib/types";
 import type { DraftWriter } from "./useDraft";
 
@@ -25,7 +25,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened }: Options
   const [restoreQueue, setRestoreQueue] = useState<PendingRestore[]>([]);
   /**
    * Bumped on every caret move. The tab list alone says nothing about *where* inside a
-   * file the user was, so the workspace commit effect listens here instead.
+   * file the user was, so the group commit effect listens here instead.
    */
   const [cursorRev, setCursorRev] = useState(0);
 
@@ -62,7 +62,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened }: Options
         const content = h?.editor.getValue();
         const offset = currentOffset();
         const key = pathKey(prev.path);
-        // Remember where the caret was even in a clean tab: the workspace stores it.
+        // Remember where the caret was even in a clean tab: the group stores it.
         // Skip it while a restored caret is still waiting to be placed, otherwise the
         // model's default position (0) would overwrite the position we just restored.
         if (!pendingCursors.current.has(key)) cursors.current.set(key, offset);
@@ -151,7 +151,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened }: Options
     await activate(tab.id);
   }, [activate]);
 
-  /** Restored scratch tab: its text lives in the workspace file, so seed the model with it. */
+  /** Restored scratch tab: its text lives in the group file, so seed the model with it. */
   const openScratch = useCallback(
     async (name: string, content: string) => {
       const path = `untitled://${name}`;
@@ -176,8 +176,8 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened }: Options
     [activate]
   );
 
-  /** Serializable view of the open tabs, for the workspace store. */
-  const snapshotTabs = useCallback((): { tabs: WorkspaceTab[]; active: string } => {
+  /** Serializable view of the open tabs, for the group store. */
+  const snapshotTabs = useCallback((): { tabs: GroupTab[]; active: string } => {
     const h = editorRef.current;
     const live = tabsRef.current.filter((t) => !t.isSettings);
     const tabs = live.map((tab) => {
@@ -193,9 +193,9 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened }: Options
     return { tabs, active: activeTab ? tabKey(activeTab.path) : "" };
   }, [editorRef]);
 
-  /** Reopen a workspace. Unreadable entries are skipped so one dead path cannot eat the session. */
+  /** Reopen a group. Unreadable entries are skipped so one dead path cannot eat the session. */
   const restoreTabs = useCallback(
-    async (entries: WorkspaceTab[], activeKey: string): Promise<RestoreResult> => {
+    async (entries: GroupTab[], activeKey: string): Promise<RestoreResult> => {
       let restored = 0;
       let skipped = 0;
       for (const entry of entries) {
@@ -318,7 +318,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened }: Options
     [currentOffset, draft, editorRef]
   );
 
-  /** Drop the whole tab set (switching workspaces). Drafts were flushed by the caller. */
+  /** Drop the whole tab set (switching groups). Drafts were flushed by the caller. */
   const clearAllTabs = useCallback(() => {
     const h = editorRef.current;
     for (const tab of tabsRef.current) {
@@ -443,7 +443,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened }: Options
       } catch (e) {
         toast(errorMessage(e));
       }
-      // A draft cursor belongs to the draft's content, so it overrides the workspace's.
+      // A draft cursor belongs to the draft's content, so it overrides the group's.
       cursors.current.set(key, req.draft.cursor);
       if (activeRef.current === req.tabId) {
         pendingCursors.current.delete(key);
