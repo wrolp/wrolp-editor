@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { IconFolder } from "./icons";
+import { IconFolder, IconTreeChevron } from "./icons";
 import FileIcon from "./FileIcon";
 import { t } from "../lib/i18n";
 import {
@@ -161,7 +161,11 @@ function FolderNode({
             openMenu({ path: entry.path, name: entry.name, isDir: true }, e.clientX, e.clientY);
           }}
         >
-          <span className="chev">▾</span>
+          {/* An icon, not a character: it stays crisp at any DPI, and the expanded
+              state is the same glyph turned a quarter turn (see the CSS). */}
+          <span className="chev">
+            <IconTreeChevron />
+          </span>
           <span className="ti">
             <IconFolder />
           </span>

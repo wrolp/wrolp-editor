@@ -47,6 +47,18 @@ export function IconSettings({ size = 18 }: IconProps) {
   );
 }
 
+/**
+ * Explorer tree toggle. Points right while a folder is collapsed and is turned a
+ * quarter turn clockwise (see `.tree-row.folder:not(.collapsed) .chev`) once expanded.
+ */
+export function IconTreeChevron({ size = 12 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={2.4}>
+      <polyline points="9 5 16 12 9 19" />
+    </svg>
+  );
+}
+
 export function IconFolder({ size = 14 }: IconProps) {
   return (
     <svg {...base(size)} strokeWidth={1.6}>
