@@ -8,11 +8,21 @@ export interface OpenedFile {
   path: string;
   content: string;
   mtime: number;
+  /** Encoding the bytes actually turned out to be. */
+  encoding: string;
+  /** The file carried a BOM that was stripped from `content`. */
+  bom: boolean;
+  /** Size on disk in bytes. */
+  bytes: number;
 }
 
 export interface SavedFile {
   path: string;
   mtime: number;
+  /** Encoding actually written, after resolving aliases. */
+  encoding: string;
+  /** Bytes actually written; differs from the text length for legacy encodings. */
+  bytes: number;
 }
 
 export interface Draft {
@@ -48,6 +58,12 @@ export interface Settings {
   sidebarRoot: string;
   /** Tighten the app chrome. Does not touch the editor's font size or line height. */
   compactMode: boolean;
+  /** `auto` sniffs every file; the rest force one encoding. */
+  encoding: string;
+  /** none | boundary | selection | all | trailing. */
+  renderWhitespace: string;
+  wordWrap: boolean;
+  stickyScroll: boolean;
 }
 
 /** One restored tab: either a file (path + cursor) or scratch text (untitled + content). */
@@ -89,16 +105,48 @@ export interface MenuTarget {
 
 export const EMPTY_GROUP_STORE: GroupStore = { version: 1, active: "", items: [] };
 
+/**
+ * Per-file overrides. A missing field means "follow the global default", which is why
+ * every one is optional rather than carrying a copy of the default.
+ */
+export interface FileSettings {
+  renderWhitespace: string | null;
+  wordWrap: boolean | null;
+  stickyScroll: boolean | null;
+  encoding: string | null;
+}
+
+export const EMPTY_FILE_SETTINGS: FileSettings = {
+  renderWhitespace: null,
+  wordWrap: null,
+  stickyScroll: null,
+  encoding: null,
+};
+
+export interface FileSettingsView {
+  defaults: FileSettings;
+  overrides: FileSettings;
+  /** `[value, i18n key suffix]` pairs straight from the backend's accepted list. */
+  encodings: [string, string][];
+  whitespace: string[];
+}
+
 export const api = {
   takeStartupFiles: () => invoke<string[]>("take_startup_files"),
   /** `record: false` keeps a session restore from rewriting the recent-files history. */
-  openFile: (path: string, record = true) => invoke<OpenedFile>("open_file", { path, record }),
-  saveFile: (path: string, content: string) => invoke<SavedFile>("save_file", { path, content }),
+  openFile: (path: string, record = true, encoding?: string) =>
+    invoke<OpenedFile>("open_file", { path, record, encoding: encoding ?? null }),
+  saveFile: (path: string, content: string, encoding?: string, bom?: boolean) =>
+    invoke<SavedFile>("save_file", { path, content, encoding: encoding ?? null, bom: bom ?? null }),
   getDraft: (path: string) => invoke<Draft | null>("get_draft", { path }),
   saveDraft: (path: string, content: string, cursor: number) =>
     invoke<Draft>("save_draft", { path, content, cursor }),
   clearDraft: (path: string) => invoke<boolean>("clear_draft", { path }),
   listDir: (path: string) => invoke<FsEntry[]>("list_dir", { path }),
+  fileSettingsView: (path: string) => invoke<FileSettingsView>("file_settings_view", { path }),
+  saveFileSettings: (path: string, settings: FileSettings) =>
+    invoke<FileSettings>("save_file_settings", { path, settings }),
+  clearFileSettings: (path: string) => invoke<void>("clear_file_settings", { path }),
   getHistory: () => invoke<HistoryEntry[]>("get_history"),
   removeHistory: (path: string) => invoke<HistoryEntry[]>("remove_history", { path }),
   getSettings: () => invoke<Settings>("get_settings"),

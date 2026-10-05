@@ -862,6 +862,17 @@ body.resizing .editor-host {
   height: 16px;
   accent-color: var(--accent);
 }
+/* Only the box toggles, so the row must not look like a click target. */
+.setting-check {
+  cursor: default;
+}
+.setting-check input[type="checkbox"] {
+  cursor: pointer;
+  flex: 0 0 16px;
+}
+.setting-check .setting-desc {
+  flex: 1 1 100%;
+}
 .setting-row input[type="number"] {
   width: 72px;
   padding: 5px 8px;
@@ -952,6 +963,15 @@ body.resizing .editor-host {
   flex: 1;
 }
 /* Saved is the resting state, so it stays muted; only unsaved earns the colour. */
+.statusbar .sb-selection {
+  color: #d7d7e8;
+}
+.statusbar .sb-total {
+  color: #9a9a9a;
+}
+.statusbar .sb-size {
+  color: #9a9a9a;
+}
 .statusbar .sb-dirty {
   color: var(--muted);
 }

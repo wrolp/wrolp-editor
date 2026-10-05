@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { LANGUAGES, t } from "../lib/i18n";
+import SettingCheck from "./SettingCheck";
 import type { MenuTarget, Settings } from "../lib/tauri";
 
 type Category = "context" | "general" | "about";
@@ -17,6 +18,19 @@ const NAV: { cat: Category; key: string }[] = [
   { cat: "context", key: "settings.catContext" },
   { cat: "general", key: "settings.catGeneral" },
   { cat: "about", key: "settings.catAbout" },
+];
+
+const WHITESPACE_MODES = ["none", "boundary", "selection", "all", "trailing"] as const;
+const ENCODINGS = [
+  "auto",
+  "utf-8",
+  "gbk",
+  "gb18030",
+  "big5",
+  "shift-jis",
+  "euc-kr",
+  "utf-16le",
+  "utf-16be",
 ];
 
 export default function SettingsPanel({
@@ -54,18 +68,13 @@ export default function SettingsPanel({
           <div className="settings-cat">
             <h2>{t("settings.contextHeading")}</h2>
             <div className="setting-group">
-              <label className="setting-row">
-                <input
-                  type="checkbox"
-                  checked={menu?.installed ?? false}
-                  disabled={menuBusy}
-                  onChange={(e) => onSetMenu(e.target.checked)}
-                />
-                <div>
-                  <div className="setting-title">{t("settings.contextAdd")}</div>
-                  <div className="setting-desc">{t("settings.contextDesc")}</div>
-                </div>
-              </label>
+              <SettingCheck
+                label={t("settings.contextAdd")}
+                checked={menu?.installed ?? false}
+                disabled={menuBusy}
+                onChange={onSetMenu}
+                description={t("settings.contextDesc")}
+              />
               <p className="muted">
                 {menuBusy
                   ? t("settings.contextBusy")
@@ -119,32 +128,63 @@ export default function SettingsPanel({
                   }}
                 />
               </label>
-              <label className="setting-row">
-                <input
-                  type="checkbox"
-                  checked={settings.minimap}
-                  onChange={(e) => onSaveSettings({ minimap: e.target.checked })}
-                />
-                <span>{t("settings.minimap")}</span>
-              </label>
-              <label className="setting-row">
-                <input
-                  type="checkbox"
-                  checked={settings.restoreSession}
-                  onChange={(e) => onSaveSettings({ restoreSession: e.target.checked })}
-                />
-                <span>{t("settings.restoreSession")}</span>
-              </label>
+              <SettingCheck
+                label={t("settings.minimap")}
+                checked={settings.minimap}
+                onChange={(v) => onSaveSettings({ minimap: v })}
+              />
+              <SettingCheck
+                label={t("settings.restoreSession")}
+                checked={settings.restoreSession}
+                onChange={(v) => onSaveSettings({ restoreSession: v })}
+              />
               <p className="muted">{t("settings.restoreSessionDesc")}</p>
-              <label className="setting-row">
-                <input
-                  type="checkbox"
-                  checked={settings.compactMode}
-                  onChange={(e) => onSaveSettings({ compactMode: e.target.checked })}
-                />
-                <span>{t("settings.compactMode")}</span>
-              </label>
+              <SettingCheck
+                label={t("settings.compactMode")}
+                checked={settings.compactMode}
+                onChange={(v) => onSaveSettings({ compactMode: v })}
+              />
               <p className="muted">{t("settings.compactModeDesc")}</p>
+              <label className="setting-row">
+                <span className="setting-title">{t("settings.renderWhitespace")}</span>
+                <select
+                  className="select"
+                  value={settings.renderWhitespace}
+                  onChange={(e) => onSaveSettings({ renderWhitespace: e.target.value })}
+                >
+                  {WHITESPACE_MODES.map((mode) => (
+                    <option key={mode} value={mode}>
+                      {t(`settings.whitespace.${mode}`)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <SettingCheck
+                label={t("settings.wordWrap")}
+                checked={settings.wordWrap}
+                onChange={(v) => onSaveSettings({ wordWrap: v })}
+              />
+              <SettingCheck
+                label={t("settings.stickyScroll")}
+                checked={settings.stickyScroll}
+                onChange={(v) => onSaveSettings({ stickyScroll: v })}
+              />
+              <p className="muted">{t("settings.stickyScrollDesc")}</p>
+              <label className="setting-row">
+                <span className="setting-title">{t("settings.encoding")}</span>
+                <select
+                  className="select"
+                  value={settings.encoding}
+                  onChange={(e) => onSaveSettings({ encoding: e.target.value })}
+                >
+                  {ENCODINGS.map((enc) => (
+                    <option key={enc} value={enc}>
+                      {t(`settings.enc.${enc}`)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p className="muted">{t("settings.encodingDesc")}</p>
               <p className="muted">{t("settings.persisted")}</p>
             </div>
           </div>

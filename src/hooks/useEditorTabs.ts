@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState, type RefObject } from "react";
 import { t } from "../lib/i18n";
-import { api, errorMessage, pickSaveAs, type Draft, type GroupTab } from "../lib/tauri";
+import { api, errorMessage, pickSaveAs, EMPTY_FILE_SETTINGS, type Draft, type FileSettings, type GroupTab } from "../lib/tauri";
 import { basename, dirname, isUntitled, langOf, modelUri } from "../lib/path";
 import { tabKey, toStoredTab } from "../lib/group";
 import { pathKey, type EditorHandle, type PendingRestore, type Tab } from "../lib/types";
@@ -17,9 +17,15 @@ interface Options {
   editorRef: RefObject<EditorHandle | null>;
   /** Called after a file opens so the sidebar can follow its folder. */
   onFileOpened?: (dir: string) => void;
+  /**
+   * Preferred encoding for opening files. `auto` lets the backend sniff each one; a
+   * fixed value forces it. Kept in a ref so changing the setting never rebuilds the
+   * callbacks that depend on it.
+   */
+  encodingPref?: string;
 }
 
-export function useEditorTabs({ toast, draft, editorRef, onFileOpened }: Options) {
+export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingPref }: Options) {
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [restoreQueue, setRestoreQueue] = useState<PendingRestore[]>([]);
@@ -42,6 +48,8 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened }: Options
   const cursors = useRef(new Map<string, number>());
   /** Restored offsets waiting for their tab to be mounted. */
   const pendingCursors = useRef(new Set<string>());
+  const encodingRef = useRef(encodingPref ?? "auto");
+  encodingRef.current = encodingPref ?? "auto";
 
   const currentOffset = useCallback(() => {
     const h = editorRef.current;
@@ -83,7 +91,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened }: Options
       const record = opts?.record !== false;
       let disk;
       try {
-        disk = await api.openFile(raw, record);
+        disk = await api.openFile(raw, record, encodingRef.current);
       } catch (e) {
         if (record) toast(errorMessage(e));
         return false;
@@ -105,6 +113,10 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened }: Options
           language: langOf(disk.path),
           original: disk.content,
           dirty: false,
+          encoding: disk.encoding,
+          bom: disk.bom,
+          bytes: disk.bytes,
+          fileSettings: EMPTY_FILE_SETTINGS,
         };
         setTabs((prev) => [...prev, target]);
         await activate(target.id);
@@ -116,6 +128,16 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened }: Options
       } catch (e) {
         toast(errorMessage(e));
         return false;
+      }
+      // Per-file overrides are needed before the first paint, not lazily: word wrap and
+      // whitespace rendering are read while the model is being attached.
+      try {
+        const overrides = await api.fileSettingsView(disk.path);
+        setTabs((prev) =>
+          prev.map((t) => (t.id === target.id ? { ...t, fileSettings: overrides.overrides } : t))
+        );
+      } catch {
+        // A missing override file is a normal first run; keep the global defaults.
       }
       if (draftInfo && draftInfo.content !== disk.content) {
         // One prompt per file: a tab can be reached twice during startup (context menu
@@ -137,6 +159,24 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened }: Options
     [activate, onFileOpened, toast]
   );
 
+  /**
+   * Persist this file's overrides, then reflect them on the tab. The backend drops
+   * entries that match the default, so "reset" is a normal save with nulls.
+   */
+  const setFileSettings = useCallback(
+    async (path: string, next: FileSettings) => {
+      try {
+        const saved = await api.saveFileSettings(path, next);
+        setTabs((prev) =>
+          prev.map((t) => (t.path === path ? { ...t, fileSettings: saved } : t))
+        );
+      } catch (e) {
+        toast(errorMessage(e));
+      }
+    },
+    [toast]
+  );
+
   const openUntitled = useCallback(async () => {
     const name = t("tab.untitled", { n: ++untitledSeq.current });
     const tab: Tab = {
@@ -146,6 +186,10 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened }: Options
       language: "plaintext",
       original: "",
       dirty: false,
+      encoding: "UTF-8",
+      bom: false,
+      bytes: null,
+      fileSettings: EMPTY_FILE_SETTINGS,
     };
     setTabs((prev) => [...prev, tab]);
     await activate(tab.id);
@@ -169,7 +213,11 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened }: Options
         // Unsaved by definition: it never reached a file.
         dirty: content !== "",
         initialValue: content,
-      };
+        encoding: "UTF-8",
+        bom: false,
+        bytes: null,
+        fileSettings: EMPTY_FILE_SETTINGS,
+        };
       setTabs((prev) => [...prev, tab]);
       await activate(tab.id);
     },
@@ -275,6 +323,10 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened }: Options
       original: "",
       dirty: false,
       isSettings: true,
+      encoding: "UTF-8",
+      bom: false,
+      bytes: null,
+      fileSettings: EMPTY_FILE_SETTINGS,
     };
     setTabs((prev) => [...prev, tab]);
     await activate(tab.id);
@@ -383,7 +435,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened }: Options
       if (isUntitled(tab.path)) {
         const target = await pickSaveAs(tab.name);
         if (!target) return;
-        const saved = await api.saveFile(target, content);
+        const saved = await api.saveFile(target, content, encodingRef.current, false);
         draft.forget(tab.path);
         const oldUri = h.monaco.Uri.parse(modelUri(tab.path));
         const oldModel = h.monaco.editor.getModel(oldUri);
@@ -397,6 +449,9 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened }: Options
                   language: langOf(saved.path),
                   original: content,
                   dirty: false,
+                  encoding: saved.encoding,
+                  bom: false,
+                  bytes: saved.bytes,
                 }
               : t
           )
@@ -407,10 +462,25 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened }: Options
         return;
       }
 
-      await api.saveFile(tab.path, content);
+      // Write back in the encoding this file was read in, or a GBK file would be
+      // saved as UTF-8 and read as garbage by every other Windows tool.
+      const saved = await api.saveFile(tab.path, content, tab.encoding, tab.bom);
       draft.forget(tab.path);
       await api.clearDraft(tab.path);
-      setTabs((prev) => prev.map((t) => (t.id === tab.id ? { ...t, original: content, dirty: false } : t)));
+      setTabs((prev) =>
+        prev.map((t) =>
+          t.id === tab.id
+            ? {
+                ...t,
+                original: content,
+                dirty: false,
+                encoding: saved.encoding,
+                bom: t.bom,
+                bytes: saved.bytes,
+              }
+            : t
+        )
+      );
       toast(t("menu.saved", { name: tab.name }));
     } catch (e) {
       toast(errorMessage(e));
@@ -500,6 +570,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened }: Options
     saveActive,
     onEditorChange,
     onCursorChange,
+    setFileSettings,
     resolveRestore,
     resolveAllRestores,
     snapshotTabs,

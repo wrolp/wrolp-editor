@@ -27,7 +27,9 @@ export default function TabBar({ tabs, activeId, onSelect, onClose, onContextMen
   if (tabs.length === 0) {
     return (
       <div className="tabbar" ref={barRef} data-tauri-drag-region>
-        <div className="tab empty">{t("tab.empty")}</div>
+        <div className="tab empty" data-tauri-drag-region="false">
+          {t("tab.empty")}
+        </div>
       </div>
     );
   }
@@ -57,6 +59,11 @@ export default function TabBar({ tabs, activeId, onSelect, onClose, onContextMen
         <div
           key={tab.id}
           data-id={tab.id}
+          // The tab strip lives inside the title bar's drag region, and Tauri resolves
+          // that with closest(), so a tab counts as a drag region too. Without this
+          // opt-out, right-clicking a tab starts a window drag and the context menu
+          // never opens. "false" is Tauri's documented way to exclude a subtree.
+          data-tauri-drag-region="false"
           className={`tab${tab.id === activeId ? " active" : ""}`}
           onClick={() => onSelect(tab.id)}
           title={tab.isSettings ? t("tab.settings") : tab.path}

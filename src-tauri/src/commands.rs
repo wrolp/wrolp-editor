@@ -27,6 +27,12 @@ pub struct OpenedFile {
   pub content: String,
   /// Modification time on disk, epoch milliseconds.
   pub mtime: u64,
+  /// What the bytes actually turned out to be, so a save can write the same encoding.
+  pub encoding: String,
+  /// The file carried a byte-order mark that was stripped from `content`.
+  pub bom: bool,
+  /// Size on disk, epoch-agnostic byte count. Shown in the status bar.
+  pub bytes: u64,
 }
 
 #[derive(Serialize)]
@@ -34,6 +40,10 @@ pub struct OpenedFile {
 pub struct SavedFile {
   pub path: String,
   pub mtime: u64,
+  /// Encoding actually written, after resolving aliases like "utf8".
+  pub encoding: String,
+  /// Bytes actually written, which differs from the text length for legacy encodings.
+  pub bytes: u64,
 }
 
 #[derive(Serialize)]
@@ -70,6 +80,12 @@ pub struct Settings {
   pub sidebar_root: String,
   /// Tighten the app chrome (title bar, tabs, sidebar rows, status bar, menus).
   pub compact_mode: bool,
+  /// One of the `encoding::CHOICES` labels; `auto` sniffs each file instead.
+  pub encoding: String,
+  /// Monaco whitespace rendering: none | boundary | selection | all | trailing.
+  pub render_whitespace: String,
+  pub word_wrap: bool,
+  pub sticky_scroll: bool,
 }
 
 /// Used when settings.json is absent or a key is missing, so a first run must not
@@ -86,15 +102,21 @@ impl Default for Settings {
       restore_session: true,
       sidebar_root: String::new(),
       compact_mode: false,
+      encoding: "auto".into(),
+      render_whitespace: "selection".into(),
+      word_wrap: false,
+      sticky_scroll: true,
     }
   }
 }
 
 const SIDEBAR_MIN_WIDTH: f64 = 180.0;
 const SIDEBAR_MAX_WIDTH: f64 = 640.0;
+/// Whitespace rendering modes Monaco understands.
+const RENDER_WHITESPACE: [&str; 5] = ["none", "boundary", "selection", "all", "trailing"];
 
 impl Settings {
-  fn filled(self) -> Self {
+  pub(crate) fn filled(self) -> Self {
     Self {
       font_size: if self.font_size > 0.0 {
         self.font_size
@@ -123,6 +145,20 @@ impl Settings {
       restore_session: self.restore_session,
       sidebar_root: self.sidebar_root.trim().to_string(),
       compact_mode: self.compact_mode,
+      // An unknown encoding or whitespace mode is a stale or hand-edited settings file.
+      // Falling back here keeps the editor openable instead of refusing to start.
+      encoding: if crate::encoding::is_known(&self.encoding) {
+        self.encoding.trim().to_ascii_lowercase()
+      } else {
+        "auto".into()
+      },
+      render_whitespace: if RENDER_WHITESPACE.contains(&self.render_whitespace.as_str()) {
+        self.render_whitespace.clone()
+      } else {
+        "selection".into()
+      },
+      word_wrap: self.word_wrap,
+      sticky_scroll: self.sticky_scroll,
     }
   }
 }
@@ -144,7 +180,7 @@ fn read_json<T: for<'de> Deserialize<'de>>(
 /// Replace `path` with `bytes` without ever leaving a half-written file behind:
 /// the whole payload goes to a sibling temp file first, then gets renamed over the target.
 /// Renaming onto an existing file fails on Windows, so the target is removed first.
-fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
   let tmp = path.with_extension("json.tmp");
   std::fs::write(&tmp, bytes).map_err(|e| format!("tmp_write:{e}"))?;
   if path.exists() {
@@ -166,7 +202,12 @@ pub fn take_startup_files(state: State<'_, PendingFiles>) -> Vec<String> {
 }
 
 #[tauri::command]
-pub fn open_file(app: AppHandle, path: String, record: Option<bool>) -> Result<OpenedFile, String> {
+pub fn open_file(
+  app: AppHandle,
+  path: String,
+  record: Option<bool>,
+  encoding: Option<String>,
+) -> Result<OpenedFile, String> {
   let normalized = draft::normalize_path(&path);
   if normalized.is_empty() {
     return Err("path_empty".into());
@@ -180,7 +221,14 @@ pub fn open_file(app: AppHandle, path: String, record: Option<bool>) -> Result<O
     return Err(format!("file_too_large:{}", meta.len() / (1024 * 1024)));
   }
   let bytes = std::fs::read(file).map_err(|e| format!("file_read:{e}"))?;
-  let content = String::from_utf8(bytes).map_err(|_| "file_not_utf8".to_string())?;
+  // A per-file encoding override wins over the global default, so a file that needs
+  // GBK forced on it is honoured before we decode rather than after.
+  let global = match encoding.filter(|e| !e.trim().is_empty()) {
+    Some(choice) => choice,
+    None => stored_encoding(&app),
+  };
+  let preference = crate::file_settings::encoding_for(&app, &normalized, &global);
+  let decoded = crate::encoding::decode(&bytes, &preference)?;
   let mtime = meta
     .modified()
     .ok()
@@ -195,13 +243,36 @@ pub fn open_file(app: AppHandle, path: String, record: Option<bool>) -> Result<O
   }
   Ok(OpenedFile {
     path: normalized,
-    content,
+    content: decoded.text,
     mtime,
+    encoding: decoded.encoding,
+    bom: decoded.bom,
+    bytes: meta.len(),
   })
 }
 
+/// The stored settings, cleaned. Missing file is a clean first run, not an error.
+pub(crate) fn settings_of(app: &AppHandle) -> Settings {
+  read_json::<Settings>(app, "settings.json")
+    .ok()
+    .flatten()
+    .map(|s| s.filled())
+    .unwrap_or_default()
+}
+
+/// The configured encoding, for callers that were not handed one.
+fn stored_encoding(app: &AppHandle) -> String {
+  settings_of(app).encoding
+}
+
 #[tauri::command]
-pub fn save_file(app: AppHandle, path: String, content: String) -> Result<SavedFile, String> {
+pub fn save_file(
+  app: AppHandle,
+  path: String,
+  content: String,
+  encoding: Option<String>,
+  bom: Option<bool>,
+) -> Result<SavedFile, String> {
   let normalized = draft::normalize_path(&path);
   if normalized.is_empty() {
     return Err("path_empty".into());
@@ -210,7 +281,16 @@ pub fn save_file(app: AppHandle, path: String, content: String) -> Result<SavedF
   if let Some(parent) = file.parent() {
     std::fs::create_dir_all(parent).map_err(|e| format!("dir_create:{e}"))?;
   }
-  std::fs::write(file, content.as_bytes()).map_err(|e| format!("file_write:{e}"))?;
+  // Write back in the encoding the file was read in, so a legacy file stays legacy.
+  let target = match encoding.filter(|e| !e.trim().is_empty()) {
+    Some(choice) => choice,
+    None => stored_encoding(&app),
+  };
+  let written = crate::encoding::encode(&content, &target, bom.unwrap_or(false))?;
+  if written.len() as u64 > MAX_FILE_BYTES {
+    return Err(format!("file_too_large:{}", written.len() / (1024 * 1024)));
+  }
+  std::fs::write(file, &written).map_err(|e| format!("file_write:{e}"))?;
   let mtime = std::fs::metadata(file)
     .ok()
     .and_then(|m| m.modified().ok())
@@ -221,14 +301,39 @@ pub fn save_file(app: AppHandle, path: String, content: String) -> Result<SavedF
   Ok(SavedFile {
     path: normalized,
     mtime,
+    encoding: crate::encoding::resolve(&target)?.name().to_string(),
+    bytes: written.len() as u64,
   })
+}
+
+/// Overrides for one file; every field absent means "follow the global default".
+#[tauri::command]
+pub fn get_file_settings(
+  app: AppHandle,
+  path: String,
+) -> Result<crate::file_settings::FileSettings, String> {
+  crate::file_settings::get(&app, &path)
+}
+
+#[tauri::command]
+pub fn save_file_settings(
+  app: AppHandle,
+  path: String,
+  settings: crate::file_settings::FileSettings,
+) -> Result<crate::file_settings::FileSettings, String> {
+  crate::file_settings::save(&app, &path, settings)
+}
+
+/// Back to the global defaults for this file.
+#[tauri::command]
+pub fn clear_file_settings(app: AppHandle, path: String) -> Result<(), String> {
+  crate::file_settings::clear(&app, &path)
 }
 
 #[tauri::command]
 pub fn get_draft(app: AppHandle, path: String) -> Result<Option<Draft>, String> {
   draft::load(&app, &path)
 }
-
 #[tauri::command]
 pub fn save_draft(
   app: AppHandle,

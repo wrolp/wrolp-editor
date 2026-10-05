@@ -1,6 +1,6 @@
 import type { Monaco } from "@monaco-editor/loader";
 import type { editor } from "monaco-editor";
-import type { Draft } from "./tauri";
+import type { Draft, FileSettings } from "./tauri";
 
 export interface Tab {
   id: number;
@@ -17,6 +17,16 @@ export interface Tab {
    */
   initialValue?: string;
   isSettings?: boolean;
+  /**
+   * Encoding the file on disk turned out to be, and whether it carried a BOM. A save
+   * must write the same encoding back or a legacy file comes out mangled.
+   */
+  encoding: string;
+  bom: boolean;
+  /** Size on disk in bytes; null when there is no file yet (untitled, settings). */
+  bytes: number | null;
+  /** This file's overrides of the global editor view settings; null means "inherit". */
+  fileSettings: FileSettings;
 }
 
 export interface EditorHandle {
@@ -40,4 +50,17 @@ export interface PendingRestore {
 /** Comparison key for paths: Windows is case-insensitive, separators unified. */
 export function pathKey(path: string): string {
   return path.replace(/\\/g, "/").toLowerCase();
+}
+
+/**
+ * Live counters shown in the status bar. Reported as one snapshot so the selection
+ * figures and the document total can never disagree for a frame.
+ */
+export interface EditStats {
+  /** Selected characters across all cursors; 0 when nothing is selected. */
+  selectionChars: number;
+  /** Line span of the selection; 1 for a single-line selection, 0 when empty. */
+  selectionLines: number;
+  /** Whole-document length, newlines included. */
+  totalChars: number;
 }

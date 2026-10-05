@@ -1,6 +1,8 @@
 mod commands;
 mod context_menu;
 mod draft;
+mod encoding;
+mod file_settings;
 mod group;
 
 use tauri::Manager;
@@ -26,6 +28,10 @@ pub fn run() {
       commands::save_draft,
       commands::clear_draft,
       commands::list_dir,
+      commands::get_file_settings,
+      commands::save_file_settings,
+      commands::clear_file_settings,
+      file_settings::file_settings_view,
       commands::get_history,
       commands::remove_history,
       commands::get_settings,

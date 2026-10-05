@@ -4,6 +4,7 @@ import Editor from "./components/Editor";
 import DraftRestoreDialog from "./components/DraftRestoreDialog";
 import NewGroupDialog from "./components/NewGroupDialog";
 import SettingsPanel from "./components/SettingsPanel";
+import FileSettingsDialog from "./components/FileSettingsDialog";
 import Sidebar from "./components/Sidebar";
 import SidebarResizer from "./components/SidebarResizer";
 import StatusBar from "./components/StatusBar";
@@ -15,8 +16,8 @@ import { useDraft } from "./hooks/useDraft";
 import { useEditorTabs } from "./hooks/useEditorTabs";
 import { useGroups } from "./hooks/useGroups";
 import { setLang, t } from "./lib/i18n";
-import { basename, dirname } from "./lib/path";
-import type { EditorHandle } from "./lib/types";
+import { basename, dirname, isUntitled } from "./lib/path";
+import type { EditStats, EditorHandle } from "./lib/types";
 import {
   api,
   errorMessage,
@@ -39,7 +40,21 @@ const DEFAULT_SETTINGS: Settings = {
   restoreSession: true,
   sidebarRoot: "",
   compactMode: false,
+  encoding: "auto",
+  renderWhitespace: "selection",
+  wordWrap: false,
+  stickyScroll: true,
 };
+
+/** The only values Monaco accepts for `renderWhitespace`. */
+const WHITESPACE_MODES = ["none", "boundary", "selection", "all", "trailing"] as const;
+
+/** Narrows the stored setting; the backend already rejects anything else. */
+function whitespaceMode(value: string): (typeof WHITESPACE_MODES)[number] {
+  return (WHITESPACE_MODES as readonly string[]).includes(value)
+    ? (value as (typeof WHITESPACE_MODES)[number])
+    : "selection";
+}
 
 /** Never let a save-on-close turn into a window that cannot be closed. */
 const CLOSE_FLUSH_TIMEOUT_MS = 2000;
@@ -75,8 +90,14 @@ export default function App() {
   const [rootDir, setRootDir] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [cursor, setCursor] = useState({ line: 1, column: 1 });
+  const [stats, setStats] = useState<EditStats>({
+    selectionChars: 0,
+    selectionLines: 0,
+    totalChars: 0,
+  });
   const [menuTarget, setMenuTarget] = useState<MenuTarget | null>(null);
   const [menuBusy, setMenuBusy] = useState(false);
+  const [fileSettingsPath, setFileSettingsPath] = useState<string | null>(null);
   const [tabMenu, setTabMenu] = useState<{
     tabId: number;
     x: number;
@@ -97,7 +118,13 @@ export default function App() {
   const fileOpened = useRef<(dir: string) => void>(() => {});
   const onFileOpened = useCallback((dir: string) => fileOpened.current(dir), []);
 
-  const tabs = useEditorTabs({ toast, draft, editorRef, onFileOpened });
+  const tabs = useEditorTabs({
+    toast,
+    draft,
+    editorRef,
+    onFileOpened,
+    encodingPref: settings.encoding,
+  });
   const groups = useGroups({ onError: toast });
   /** Startup must finish before the live state is mirrored into the store. */
   const [booted, setBooted] = useState(false);
@@ -105,6 +132,11 @@ export default function App() {
   const refreshHistory = useCallback(() => {
     api.getHistory().then(setHistory).catch((e) => toast(errorMessage(e)));
   }, [toast]);
+
+  /** The per-file panel only makes sense for a real file, not an untitled buffer. */
+  const setFileSettingsFor = useCallback((path: string) => {
+    setFileSettingsPath(isUntitled(path) ? null : path);
+  }, []);
 
   const refreshMenu = useCallback(() => {
     api
@@ -412,10 +444,14 @@ export default function App() {
     };
     window.addEventListener("click", hide);
     window.addEventListener("contextmenu", hide);
-    window.addEventListener("blur", () => setTabMenu(null));
+    const onBlur = () => setTabMenu(null);
+    window.addEventListener("blur", onBlur);
+    // The blur handler has to come back off too: as an inline arrow it was left
+    // attached forever, so every open stacked another one on the window.
     return () => {
       window.removeEventListener("click", hide);
       window.removeEventListener("contextmenu", hide);
+      window.removeEventListener("blur", onBlur);
     };
   }, [tabMenu]);
 
@@ -544,6 +580,16 @@ export default function App() {
   const showSettings = tabs.activeTab?.isSettings === true;
   const sidebarShown = sidebarVisible && !showSettings;
   const editorTab = tabs.editorTab;
+  // Per-file overrides win over the global defaults, one field at a time.
+  const fileSettingsTab =
+    fileSettingsPath === null
+      ? null
+      : tabs.tabs.find((t) => t.path === fileSettingsPath) ?? null;
+  const renderWhitespaceMode = whitespaceMode(
+    editorTab?.fileSettings.renderWhitespace ?? settings.renderWhitespace
+  );
+  const wordWrap = editorTab?.fileSettings.wordWrap ?? settings.wordWrap;
+  const stickyScroll = editorTab?.fileSettings.stickyScroll ?? settings.stickyScroll;
 
   return (
     <div className="app" data-density={settings.compactMode ? "compact" : "cozy"}>
@@ -606,11 +652,15 @@ export default function App() {
                 tab={editorTab}
                 fontSize={settings.fontSize}
                 minimap={settings.minimap}
+                renderWhitespace={renderWhitespaceMode}
+                wordWrap={wordWrap}
+                stickyScroll={stickyScroll}
                 onChange={tabs.onEditorChange}
                 onCursor={(position, offset) => {
                   setCursor({ line: position.lineNumber, column: position.column });
                   tabs.onCursorChange(offset);
                 }}
+                onStats={setStats}
                 onReady={(handle) => {
                   editorRef.current = handle;
                 }}
@@ -632,7 +682,12 @@ export default function App() {
         </div>
       </div>
 
-      <StatusBar tab={tabs.activeTab} line={cursor.line} column={cursor.column} />
+      <StatusBar
+        tab={tabs.activeTab}
+        line={cursor.line}
+        column={cursor.column}
+        stats={stats}
+      />
 
       {tabMenu && menuTabPath && (
         <div
@@ -669,6 +724,15 @@ export default function App() {
               >
                 {t("title.menuSidebar")}
               </div>
+              <div
+                className="ctx-item"
+                onClick={() => {
+                  setTabMenu(null);
+                  setFileSettingsFor(menuTabPath);
+                }}
+              >
+                {t("title.menuFileSettings")}
+              </div>
               <div className="ws-sep" />
               {(["move", "copy", "moveAll"] as const).map((panel) => (
                 <div key={panel} className="ctx-item" onClick={() => setTabMenu({ ...tabMenu, panel })}>
@@ -700,6 +764,17 @@ export default function App() {
             </>
           )}
         </div>
+      )}
+
+      {fileSettingsTab && (
+        <FileSettingsDialog
+          path={fileSettingsTab.path}
+          name={fileSettingsTab.name}
+          detectedEncoding={fileSettingsTab.encoding}
+          onSave={(p, next) => tabs.setFileSettings(p, next)}
+          onClose={() => setFileSettingsPath(null)}
+          onError={toast}
+        />
       )}
 
       {newGroupOpen && (
