@@ -1,5 +1,6 @@
-//! Workspace storage: a workspace is the sidebar root plus the tabs opened in it,
-//! so switching workspaces swaps the whole editing context inside the one window.
+//! Workspace storage: a workspace is a **named group of open tabs**, not a folder.
+//! Which folder the Explorer shows is a global view setting (`Settings.sidebar_root`),
+//! so two groups may sit on the same directory and the same directory is never a group.
 
 use crate::draft::normalize_path;
 use chrono::Utc;
@@ -45,15 +46,11 @@ impl WorkspaceTab {
 #[serde(rename_all = "camelCase", default)]
 pub struct Workspace {
   pub id: String,
+  /// Label chosen by the user; the only thing that distinguishes one group from another.
   pub name: String,
-  /// True while the name follows the root; a manual rename must survive root changes.
-  pub auto_name: bool,
-  /// Normalized directory shown by the Explorer, or empty when none.
-  pub root: String,
   pub tabs: Vec<WorkspaceTab>,
   /// `WorkspaceTab::key()` of the selected tab, empty when none.
   pub active: String,
-  pub sidebar_view: String,
   pub updated_at: String,
 }
 
@@ -61,7 +58,7 @@ pub struct Workspace {
 #[serde(rename_all = "camelCase", default)]
 pub struct WorkspaceStore {
   pub version: u32,
-  /// Id of the workspace shown in the window, empty when the session starts clean.
+  /// Id of the group shown in the window, empty when the session starts clean.
   pub active: String,
   pub items: Vec<Workspace>,
 }
@@ -72,39 +69,19 @@ fn keys_equal(a: &str, b: &str) -> bool {
   a.replace('\\', "/").to_lowercase() == b.replace('\\', "/").to_lowercase()
 }
 
-/// Last path segment of a directory path, for auto-naming a workspace.
-fn basename(path: &str) -> String {
-  let trimmed = path.trim_end_matches(|c| c == '\\' || c == '/');
-  trimmed
-    .rsplit(|c| c == '\\' || c == '/')
-    .next()
-    .unwrap_or(trimmed)
-    .to_string()
-}
-
 impl WorkspaceStore {
-  /// Normalize and bound whatever the frontend sent: dedupe roots, drop unusable tabs,
-  /// cap sizes, and repair dangling pointers. Reads use it too, so a hand-edited or
-  /// half-written file cannot push the app into a state it would not produce itself.
+  /// Normalize and bound whatever the frontend sent: drop unusable tabs, cap sizes, and
+  /// repair dangling pointers. Reads use it too, so a hand-edited or half-written file
+  /// cannot push the app into a state it would not produce itself.
+  ///
+  /// Names are labels, not identity: two groups may carry the same name or point at the
+  /// same folder, and nothing here merges them.
   pub fn filled(self) -> Self {
     let mut items: Vec<Workspace> = Vec::new();
-    let mut roots: Vec<String> = Vec::new();
 
     for item in self.items {
       if item.id.is_empty() {
         continue;
-      }
-      let root = if item.root.is_empty() {
-        String::new()
-      } else {
-        normalize_path(&item.root)
-      };
-      if !root.is_empty() {
-        // Two workspaces on the same folder are one workspace with a duplicate entry.
-        if roots.iter().any(|r| r == &root) {
-          continue;
-        }
-        roots.push(root.clone());
       }
 
       let mut tabs: Vec<WorkspaceTab> = Vec::new();
@@ -142,12 +119,9 @@ impl WorkspaceStore {
         Some(t) => t.key(),
         None => String::new(),
       };
-      let name = if item.auto_name || item.name.trim().is_empty() {
-        if root.is_empty() {
-          format!("Workspace {}", item.id)
-        } else {
-          basename(&root)
-        }
+      // Only a hand-edited or empty record can lack a name; the UI always supplies one.
+      let name = if item.name.trim().is_empty() {
+        format!("Group {}", items.len() + 1)
       } else {
         item.name.trim().to_string()
       };
@@ -155,15 +129,8 @@ impl WorkspaceStore {
       items.push(Workspace {
         id: item.id,
         name,
-        auto_name: item.auto_name,
-        root,
         tabs,
         active,
-        sidebar_view: if item.sidebar_view.is_empty() {
-          "explorer".into()
-        } else {
-          item.sidebar_view
-        },
         updated_at: if item.updated_at.is_empty() {
           Utc::now().to_rfc3339()
         } else {
@@ -195,8 +162,8 @@ impl WorkspaceStore {
     }
   }
 
-  /// Record the write time of the workspace actually in use, which is what makes the
-  /// overflow rule above "drop the least recently used" instead of "drop the last saved".
+  /// Record the write time of the group actually in use, which is what makes the overflow
+  /// rule above "drop the least recently used" instead of "drop the last saved".
   pub fn stamp_active(mut self) -> Self {
     let now = Utc::now().to_rfc3339();
     for item in &mut self.items {
@@ -231,7 +198,7 @@ pub enum TabTransfer {
   },
 }
 
-/// Move or copy tabs between two workspaces of the same store.
+/// Move or copy tabs between two groups of the same store.
 ///
 /// Takes the whole store and returns the whole store, so the caller writes once: a
 /// two-step "remove from A" then "add to B" could fail in between and lose the tab.
@@ -330,12 +297,19 @@ mod tests {
     }
   }
 
-  fn ws(id: &str, root: &str, tabs: Vec<WorkspaceTab>) -> Workspace {
+  fn ws(id: &str, name: &str, tabs: Vec<WorkspaceTab>) -> Workspace {
     Workspace {
       id: id.to_string(),
-      root: root.to_string(),
-      auto_name: true,
+      name: name.to_string(),
       tabs,
+      ..Default::default()
+    }
+  }
+
+  fn store(items: Vec<Workspace>) -> WorkspaceStore {
+    WorkspaceStore {
+      active: "a".into(),
+      items,
       ..Default::default()
     }
   }
@@ -349,37 +323,48 @@ mod tests {
   }
 
   #[test]
-  fn same_root_collapses_to_the_first_entry() {
-    let store = WorkspaceStore {
-      active: "b".into(),
-      items: vec![
-        ws("a", r"C:\notes", vec![tab(r"C:\notes\a.txt")]),
-        // Same folder, different spelling and separator style.
-        ws("b", "c:/NOTES/", vec![tab(r"C:\notes\b.txt")]),
-      ],
-      ..Default::default()
-    }
+  fn same_name_is_not_merged_because_a_name_is_only_a_label() {
+    let filled = store(vec![
+      ws("a", "notes", vec![tab(r"C:\notes\a.txt")]),
+      ws("b", "notes", vec![tab(r"C:\other\b.txt")]),
+    ])
     .filled();
-    assert_eq!(store.items.len(), 1);
-    assert_eq!(store.items[0].id, "a");
-    assert_eq!(store.items[0].name, "notes");
-    // The dangling pointer was repaired to the surviving entry, not left as "b".
-    assert_eq!(store.active, "");
+    assert_eq!(filled.items.len(), 2);
+    assert_eq!(filled.items[1].tabs.len(), 1);
+  }
+
+  #[test]
+  fn a_missing_name_falls_back_to_a_placeholder() {
+    let filled = store(vec![ws("a", "   ", vec![]), ws("b", "scratch", vec![])]).filled();
+    assert_eq!(filled.items[0].name, "Group 1");
+    assert_eq!(filled.items[1].name, "scratch");
+    assert_eq!(filled.items[0].id, "a");
+  }
+
+  #[test]
+  fn records_without_an_id_are_dropped() {
+    let filled = store(vec![
+      ws("", "no id", vec![tab(r"C:\a.txt")]),
+      ws("b", "ok", vec![]),
+    ])
+    .filled();
+    assert_eq!(filled.items.len(), 1);
+    assert_eq!(filled.items[0].id, "b");
   }
 
   #[test]
   fn dangling_pointers_are_repaired() {
-    let store = WorkspaceStore {
+    let filled = WorkspaceStore {
       active: "gone".into(),
       items: vec![Workspace {
         active: r"C:\notes\missing.txt".into(),
-        ..ws("a", r"C:\notes", vec![tab(r"C:\notes\a.txt")])
+        ..ws("a", "notes", vec![tab(r"C:\notes\a.txt")])
       }],
       ..Default::default()
     }
     .filled();
-    assert_eq!(store.active, "");
-    assert_eq!(store.items[0].active, "");
+    assert_eq!(filled.active, "");
+    assert_eq!(filled.items[0].active, "");
   }
 
   #[test]
@@ -392,42 +377,36 @@ mod tests {
   #[test]
   fn oversized_scratch_text_is_dropped_but_the_tab_kept() {
     let big = "x".repeat(MAX_UNTITLED_BYTES + 1);
-    let store = WorkspaceStore {
-      items: vec![ws(
-        "a",
-        "",
-        vec![
-          untitled("Untitled-1", &big),
-          untitled("Untitled-2", "short"),
-        ],
-      )],
-      ..Default::default()
-    }
+    let filled = store(vec![ws(
+      "a",
+      "notes",
+      vec![
+        untitled("Untitled-1", &big),
+        untitled("Untitled-2", "short"),
+      ],
+    )])
     .filled();
-    assert_eq!(store.items[0].tabs.len(), 2);
-    assert_eq!(store.items[0].tabs[0].content, "");
-    assert_eq!(store.items[0].tabs[0].untitled, "Untitled-1");
-    assert_eq!(store.items[0].tabs[1].content, "short");
+    assert_eq!(filled.items[0].tabs.len(), 2);
+    assert_eq!(filled.items[0].tabs[0].content, "");
+    assert_eq!(filled.items[0].tabs[0].untitled, "Untitled-1");
+    assert_eq!(filled.items[0].tabs[1].content, "short");
   }
 
   #[test]
   fn untitled_tabs_never_carry_a_path_and_file_tabs_never_carry_content() {
-    let store = WorkspaceStore {
-      items: vec![ws(
-        "a",
-        "",
-        vec![WorkspaceTab {
-          // A file tab must not smuggle a second copy of unsaved text.
-          path: r"C:\notes\a.txt".into(),
-          untitled: "Untitled-1".into(),
-          content: "stale".into(),
-          cursor: 4,
-        }],
-      )],
-      ..Default::default()
-    }
+    let filled = store(vec![ws(
+      "a",
+      "notes",
+      vec![WorkspaceTab {
+        // A file tab must not smuggle a second copy of unsaved text.
+        path: r"C:\notes\a.txt".into(),
+        untitled: "Untitled-1".into(),
+        content: "stale".into(),
+        cursor: 4,
+      }],
+    )])
     .filled();
-    let t = &store.items[0].tabs[0];
+    let t = &filled.items[0].tabs[0];
     assert_eq!(t.untitled, "");
     assert_eq!(t.content, "");
     assert_eq!(t.cursor, 4);
@@ -435,21 +414,18 @@ mod tests {
 
   #[test]
   fn duplicate_tabs_and_blank_entries_are_dropped() {
-    let store = WorkspaceStore {
-      items: vec![ws(
-        "a",
-        "",
-        vec![
-          tab(r"C:\notes\a.txt"),
-          tab("c:/NOTES/A.TXT"),
-          WorkspaceTab::default(),
-          tab(r"C:\notes\b.txt"),
-        ],
-      )],
-      ..Default::default()
-    }
+    let filled = store(vec![ws(
+      "a",
+      "notes",
+      vec![
+        tab(r"C:\notes\a.txt"),
+        tab("c:/NOTES/A.TXT"),
+        WorkspaceTab::default(),
+        tab(r"C:\notes\b.txt"),
+      ],
+    )])
     .filled();
-    assert_eq!(store.items[0].tabs.len(), 2);
+    assert_eq!(filled.items[0].tabs.len(), 2);
   }
 
   #[test]
@@ -458,150 +434,113 @@ mod tests {
       tabs: (0..MAX_TABS + 40)
         .map(|i| tab(&format!(r"C:\notes\f{i}.txt")))
         .collect(),
-      ..ws("a", r"C:\notes", vec![])
+      ..ws("a", "notes", vec![])
     };
-    let store = WorkspaceStore {
-      items: vec![many],
-      ..Default::default()
-    }
-    .filled();
-    assert_eq!(store.items[0].tabs.len(), MAX_TABS);
+    let filled = store(vec![many]).filled();
+    assert_eq!(filled.items[0].tabs.len(), MAX_TABS);
 
-    // 33 workspaces, each with a distinct root and a monotonically newer timestamp.
     let mut items = Vec::new();
     for i in 0..MAX_WORKSPACES + 1 {
       items.push(Workspace {
         updated_at: format!("2026-01-01T00:00:{i:02}Z"),
         ..ws(
           &format!("w{i}"),
-          &format!(r"C:\root{i}"),
-          vec![tab(&format!(r"C:\root{i}\a.txt"))],
+          &format!("group {i}"),
+          vec![tab(r"C:\a.txt")],
         )
       });
     }
-    let store = WorkspaceStore {
+    let filled = WorkspaceStore {
       items,
       ..Default::default()
     }
     .filled();
-    assert_eq!(store.items.len(), MAX_WORKSPACES);
+    assert_eq!(filled.items.len(), MAX_WORKSPACES);
     // The oldest timestamp lost the tie-break, not the newest.
-    assert!(store.workspace("w0").is_none());
-    assert!(store.workspace("w32").is_some());
+    assert!(filled.workspace("w0").is_none());
+    assert!(filled.workspace("w32").is_some());
   }
 
   #[test]
-  fn manual_names_survive_a_root_change() {
-    let renamed = Workspace {
-      name: "scratchpad".into(),
-      auto_name: false,
-      ..ws("a", r"C:\notes", vec![])
-    };
-    let store = WorkspaceStore {
-      items: vec![renamed],
-      ..Default::default()
-    }
-    .filled();
-    assert_eq!(store.items[0].name, "scratchpad");
-  }
-
-  #[test]
-  fn only_the_active_workspace_is_retimestamped() {
-    let store = WorkspaceStore {
+  fn only_the_active_group_is_retimestamped() {
+    let stamped = WorkspaceStore {
       active: "a".into(),
       items: vec![
         Workspace {
           updated_at: "2026-01-01T00:00:00Z".into(),
-          ..ws("a", r"C:\a", vec![])
+          ..ws("a", "one", vec![])
         },
         Workspace {
           updated_at: "2026-01-01T00:00:00Z".into(),
-          ..ws("b", r"C:\b", vec![])
+          ..ws("b", "two", vec![])
         },
       ],
       ..Default::default()
     }
     .stamp_active();
-    assert_ne!(store.items[0].updated_at, "2026-01-01T00:00:00Z");
-    assert_eq!(store.items[1].updated_at, "2026-01-01T00:00:00Z");
+    assert_ne!(stamped.items[0].updated_at, "2026-01-01T00:00:00Z");
+    assert_eq!(stamped.items[1].updated_at, "2026-01-01T00:00:00Z");
   }
 
-  #[test]
-  fn basename_handles_both_separators_and_trailing_slashes() {
-    assert_eq!(basename(r"C:\Users\x\wrolp-editor\"), "wrolp-editor");
-    assert_eq!(basename("C:/Users/x/wrolp-editor"), "wrolp-editor");
-    assert_eq!(basename("C:\\"), "C:");
-  }
-
-  fn two_workspaces() -> WorkspaceStore {
-    WorkspaceStore {
-      active: "a".into(),
-      items: vec![
-        Workspace {
-          active: r"C:\a\x.txt".into(),
-          ..ws(
-            "a",
-            r"C:\a",
-            vec![
-              WorkspaceTab {
-                path: r"C:\a\x.txt".into(),
-                cursor: 9,
-                ..Default::default()
-              },
-              WorkspaceTab {
-                path: r"C:\a\y.txt".into(),
-                cursor: 3,
-                ..Default::default()
-              },
-            ],
-          )
-        },
-        Workspace {
-          ..ws(
-            "b",
-            r"C:\b",
-            vec![WorkspaceTab {
-              path: r"C:\b\z.txt".into(),
-              cursor: 1,
-              ..Default::default()
-            }],
-          )
-        },
-      ],
-      ..Default::default()
-    }
+  fn two_groups() -> WorkspaceStore {
+    store(vec![
+      Workspace {
+        active: r"C:\a\x.txt".into(),
+        tabs: vec![
+          WorkspaceTab {
+            path: r"C:\a\x.txt".into(),
+            cursor: 9,
+            ..Default::default()
+          },
+          WorkspaceTab {
+            path: r"C:\a\y.txt".into(),
+            cursor: 3,
+            ..Default::default()
+          },
+        ],
+        ..ws("a", "first", vec![])
+      },
+      Workspace {
+        tabs: vec![WorkspaceTab {
+          path: r"C:\b\z.txt".into(),
+          cursor: 1,
+          ..Default::default()
+        }],
+        ..ws("b", "second", vec![])
+      },
+    ])
     .filled()
   }
 
-  fn move_one(from: &str, to: &str, tab: &str) -> WorkspaceStore {
+  fn move_one(from: &str, to: &str, key: &str) -> WorkspaceStore {
     apply_transfer(
-      two_workspaces(),
+      two_groups(),
       &TabTransfer::Move {
         from: from.into(),
         to: to.into(),
-        tab: Some(tab.into()),
+        tab: Some(key.into()),
       },
     )
   }
 
   #[test]
   fn moving_a_tab_moves_exactly_one_and_keeps_the_total() {
-    let store = move_one("a", "b", r"C:\a\x.txt");
-    let a = store.workspace("a").unwrap();
-    let b = store.workspace("b").unwrap();
+    let filled = move_one("a", "b", "c:\\a\\x.txt");
+    let a = filled.workspace("a").unwrap();
+    let b = filled.workspace("b").unwrap();
     assert_eq!(a.tabs.len(), 1);
     assert_eq!(b.tabs.len(), 2);
     assert!(b.tabs.iter().any(|t| t.path == r"c:\a\x.txt"));
   }
 
   #[test]
-  fn moving_the_active_tab_falls_back_and_an_empty_workspace_has_no_active() {
-    let store = move_one("a", "b", r"C:\a\x.txt");
+  fn moving_the_active_tab_falls_back_and_an_empty_group_has_no_active() {
+    let filled = move_one("a", "b", "c:\\a\\x.txt");
     // x.txt was active in a, so a now points at what is left.
-    assert_eq!(store.workspace("a").unwrap().active, r"c:\a\y.txt");
+    assert_eq!(filled.workspace("a").unwrap().active, r"c:\a\y.txt");
 
     let emptied = apply_transfer(
-      store,
+      filled,
       &TabTransfer::Move {
         from: "a".into(),
         to: "b".into(),
@@ -614,21 +553,34 @@ mod tests {
 
   #[test]
   fn a_tab_already_open_downstairs_is_not_duplicated() {
-    let store = {
-      let mut s = two_workspaces();
-      s.items[0].tabs[0].path = r"C:\b\z.txt".into();
-      s.items[0].tabs[0].cursor = 42;
-      s.filled()
-    };
-    let moved = apply_transfer(
-      store,
+    let prepared = store(vec![
+      Workspace {
+        tabs: vec![WorkspaceTab {
+          path: r"C:\b\z.txt".into(),
+          cursor: 42,
+          ..Default::default()
+        }],
+        ..ws("a", "first", vec![])
+      },
+      Workspace {
+        tabs: vec![WorkspaceTab {
+          path: r"C:\b\z.txt".into(),
+          cursor: 1,
+          ..Default::default()
+        }],
+        ..ws("b", "second", vec![])
+      },
+    ])
+    .filled();
+    let filled = apply_transfer(
+      prepared,
       &TabTransfer::Move {
         from: "a".into(),
         to: "b".into(),
         tab: Some(r"c:\b\z.txt".into()),
       },
     );
-    let b = moved.workspace("b").unwrap();
+    let b = filled.workspace("b").unwrap();
     assert_eq!(b.tabs.len(), 1);
     // The incoming caret wins over the stale one.
     assert_eq!(b.tabs[0].cursor, 42);
@@ -636,50 +588,46 @@ mod tests {
 
   #[test]
   fn scratch_text_travels_with_its_tab() {
-    let store = WorkspaceStore {
-      active: "a".into(),
-      items: vec![
-        ws(
-          "a",
-          r"C:\a",
-          vec![
-            untitled("Untitled-1", "half-written note"),
-            tab(r"C:\a\x.txt"),
-          ],
-        ),
-        ws("b", r"C:\b", vec![]),
-      ],
-      ..Default::default()
-    }
+    let prepared = store(vec![
+      ws(
+        "a",
+        "first",
+        vec![
+          untitled("Untitled-1", "half-written note"),
+          tab(r"C:\a\x.txt"),
+        ],
+      ),
+      ws("b", "second", vec![]),
+    ])
     .filled();
-    let moved = apply_transfer(
-      store,
+    let filled = apply_transfer(
+      prepared,
       &TabTransfer::Move {
         from: "a".into(),
         to: "b".into(),
         tab: Some("untitled://Untitled-1".into()),
       },
     );
-    assert_eq!(moved.workspace("a").unwrap().tabs.len(), 1);
-    let b = moved.workspace("b").unwrap();
+    assert_eq!(filled.workspace("a").unwrap().tabs.len(), 1);
+    let b = filled.workspace("b").unwrap();
     assert_eq!(b.tabs[0].untitled, "Untitled-1");
     assert_eq!(b.tabs[0].content, "half-written note");
-    // The workspace that had no selection now shows the tab that arrived.
+    // The group that had no selection now shows the tab that arrived.
     assert_eq!(b.active, "untitled://Untitled-1");
   }
 
   #[test]
   fn moving_all_appends_in_source_order_and_empties_the_source() {
-    let store = apply_transfer(
-      two_workspaces(),
+    let filled = apply_transfer(
+      two_groups(),
       &TabTransfer::Move {
         from: "a".into(),
         to: "b".into(),
         tab: None,
       },
     );
-    let b = store.workspace("b").unwrap();
-    assert!(store.workspace("a").unwrap().tabs.is_empty());
+    let b = filled.workspace("b").unwrap();
+    assert!(filled.workspace("a").unwrap().tabs.is_empty());
     assert_eq!(
       b.tabs.iter().map(|t| t.key()).collect::<Vec<_>>(),
       vec![r"c:\b\z.txt", r"c:\a\x.txt", r"c:\a\y.txt"]
@@ -688,22 +636,22 @@ mod tests {
 
   #[test]
   fn copying_leaves_the_source_untouched() {
-    let store = apply_transfer(
-      two_workspaces(),
+    let filled = apply_transfer(
+      two_groups(),
       &TabTransfer::Copy {
         from: "a".into(),
         to: "b".into(),
         tab: Some(r"c:\a\x.txt".into()),
       },
     );
-    assert_eq!(store.workspace("a").unwrap().tabs.len(), 2);
-    assert_eq!(store.workspace("b").unwrap().tabs.len(), 2);
+    assert_eq!(filled.workspace("a").unwrap().tabs.len(), 2);
+    assert_eq!(filled.workspace("b").unwrap().tabs.len(), 2);
   }
 
   #[test]
   fn nonsense_transfers_return_the_store_unchanged() {
     let same = apply_transfer(
-      two_workspaces(),
+      two_groups(),
       &TabTransfer::Move {
         from: "a".into(),
         to: "a".into(),
@@ -713,7 +661,7 @@ mod tests {
     assert_eq!(same.workspace("a").unwrap().tabs.len(), 2);
 
     let missing = apply_transfer(
-      two_workspaces(),
+      two_groups(),
       &TabTransfer::Move {
         from: "nope".into(),
         to: "b".into(),
@@ -722,14 +670,14 @@ mod tests {
     );
     assert_eq!(missing.workspace("b").unwrap().tabs.len(), 1);
 
-    let absent_tab = apply_transfer(
-      two_workspaces(),
+    let absent = apply_transfer(
+      two_groups(),
       &TabTransfer::Move {
         from: "a".into(),
         to: "b".into(),
         tab: Some(r"c:\a\gone.txt".into()),
       },
     );
-    assert_eq!(absent_tab.workspace("a").unwrap().tabs.len(), 2);
+    assert_eq!(absent.workspace("a").unwrap().tabs.len(), 2);
   }
 }

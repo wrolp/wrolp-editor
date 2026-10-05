@@ -17,7 +17,7 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | Single instance | Launching a second time hands the path to the running window, adds a tab and focuses it |
 | Settings | Context-menu switch, editor font size, minimap, UI language; persisted and applied live. The context-menu page also shows the command the entry currently launches, and warns when it points at a different build or when this is a debug build |
 | Language | English by default, switchable to 中文 from a dropdown in Settings. All strings, including messages coming from the Rust side, resolve through one key table |
-| Workspaces | A workspace is one sidebar folder plus the tabs opened in it. Switching workspaces swaps that whole context inside the same window; tabs and caret positions come back on the next start |
+| Workspaces | A workspace is a **named group of open tabs**. Switching workspaces swaps that whole set inside the same window; tabs and caret positions come back on the next start |
 | Move / copy tabs | A tab can be re-homed into another workspace from its context menu. This changes *where the tab is listed*, never the file on disk |
 
 ## Keyboard shortcuts
@@ -107,30 +107,33 @@ commands, so no broad disk scope is exposed to the frontend.
 
 ## Workspaces
 
-A workspace is **one sidebar folder plus the tabs opened in it**, and the name in the title bar
-switches between them inside the same window. Nothing else in the app is per-workspace: the
-sidebar width and the language are global settings.
+A workspace is a **named group of open tabs** — not a folder. The chip in the title bar shows the
+current name and switches between groups inside the same window. Which folder the Explorer shows is
+a separate, global view setting, so two groups may sit on the same folder and one group may hold
+files from several folders.
 
-- **A workspace appears on its own.** Opening the first file in a bare window makes a workspace
-  for that file's folder. Files opened later from the Explorer context menu join the workspace
-  that is on screen — a right-click never changes your whole context under you. To point at a
-  different folder deliberately, use *Open folder…* or *Show folder in sidebar* on a tab.
-- **What is remembered:** the tab order, which tab was selected, the caret position per tab
-  (`Settings → Reopen tabs from last time` turns this off), the sidebar view, and for untitled
-  tabs their text — scratch tabs have no draft file, so the workspace is their only copy.
-  Capped at 32 workspaces, 200 tabs each and 64 KB of scratch text per tab.
-- **Content is never duplicated.** File-backed tabs store only path + caret; unsaved text stays
-  in the draft file, keyed by path. That is why a tab can be moved to another workspace without
-  touching its draft, and why the draft prompt follows the file there.
-- **Move / copy tab** (tab context menu) re-homes a tab between workspaces. It never renames or
-  moves the file on disk — that would orphan the draft keyed to its path.
-- **A workspace that points at deleted files** skips them on restore with one aggregated notice
-  and drops them from the store. *Remove from list* deletes only the record: files and drafts
-  are left alone.
+- **Names are identity.** *New workspace…* asks for a name and refuses an empty one or a name
+  already in use — two rows reading the same thing could not be told apart. Opening the first file
+  in a bare window starts a group labelled after that file's folder, which you can rename.
+- **Files join the group on screen.** Opening a file from the Explorer context menu adds it to the
+  current group; a right-click never changes your context under you. *Open folder…* and *Show folder
+  in sidebar* move the sidebar only — they do not create or switch a group.
+- **What is remembered:** the tab order, which tab was selected, and the caret position per tab
+  (`Settings → Reopen tabs from last time` turns this off), plus the text of untitled tabs, which
+  have no draft file so the group is their only copy. Capped at 32 groups, 200 tabs each, 64 KB of
+  scratch text per tab. The sidebar folder, its width and the language are global settings.
+- **Content is never duplicated.** File-backed tabs store only path + caret; unsaved text stays in
+  the draft file, keyed by path. That is why a tab can be moved to another group without touching its
+  draft, and why the draft prompt follows the file there.
+- **Move / copy tab** (tab context menu) re-homes a tab between groups. It never renames or moves the
+  file on disk — that would orphan the draft keyed to its path.
+- **Deleted files** are skipped on restore with one aggregated notice and dropped from the group.
+  *Remove from list* deletes only the record: files and drafts are left alone.
 
-`workspaces.json` is whole-store, single-writer (the app is single instance) and written through
-a temp file + rename. Tab paths are the same normalized form the drafts hash, so one file cannot
-appear twice inside a workspace.
+`workspaces.json` is whole-store, single-writer (the app is single instance) and written through a
+temp file + rename. Tab paths use the same normalized form the drafts hash, so one file cannot appear
+twice inside a group. Old records from before groups were renamed-by-name carry extra `root` /
+`autoName` / `sidebarView` fields; unknown fields are ignored, so they load without migration.
 
 ## Interface language
 

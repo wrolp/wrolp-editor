@@ -1,21 +1,20 @@
 import { isUntitled } from "./path";
 import type { Workspace, WorkspaceStore, WorkspaceTab } from "./tauri";
-import { EMPTY_WORKSPACE_STORE } from "./tauri";
 
 /** Tabs are identified by their path; untitled tabs already carry `untitled://<name>`. */
 export function tabKey(path: string): string {
   return path;
 }
 
-/** Compare roots the way the backend normalizes them: unified separators, trailing slash off, case-insensitive. */
-export function rootKey(root: string): string {
-  return root.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
-}
-
 export function basenameOf(path: string): string {
   const trimmed = path.replace(/[\\/]+$/, "");
   const idx = Math.max(trimmed.lastIndexOf("\\"), trimmed.lastIndexOf("/"));
   return idx < 0 ? trimmed : trimmed.slice(idx + 1);
+}
+
+/** Name a brand new group after the folder its first file came from. Only a label. */
+export function groupNameFor(dir: string, fallback: string): string {
+  return basenameOf(dir) || fallback;
 }
 
 export function newWorkspaceId(): string {
@@ -27,40 +26,27 @@ export interface LiveSnapshot {
   tabs: WorkspaceTab[];
   /** Key of the selected tab, empty when none. */
   active: string;
-  /** Omitted when the switch is only about tabs and should leave the folder as stored. */
-  root?: string;
-  sidebarView?: string;
 }
 
 export function emptyStore(): WorkspaceStore {
-  return { ...EMPTY_WORKSPACE_STORE, items: [] };
+  return { version: 1, active: "", items: [] };
 }
 
 /**
- * Write the live screen into the workspace it belongs to, leaving the other workspaces
- * untouched. Returns the same object when nothing changed, so callers can skip a save.
+ * Write the live tab set into the group it belongs to, leaving the other groups untouched.
+ * Returns the same object when nothing changed, so callers can skip a save.
  */
 export function applySnapshot(store: WorkspaceStore, snapshot: LiveSnapshot): WorkspaceStore {
   if (!store.active) {
-    // No context on screen: the window is showing a bare tab set, nothing to remember.
+    // No group on screen: the window is showing loose tabs, nothing to remember.
     return store;
   }
   let changed = false;
   const items = store.items.map((item) => {
     if (item.id !== store.active) return item;
-    const root = snapshot.root ?? item.root;
-    const next: Workspace = {
-      ...item,
-      root,
-      name: item.autoName ? basenameOf(root) || item.name : item.name,
-      tabs: snapshot.tabs,
-      active: snapshot.active,
-      sidebarView: snapshot.sidebarView ?? item.sidebarView,
-    };
+    const next: Workspace = { ...item, tabs: snapshot.tabs, active: snapshot.active };
     if (
-      next.root !== item.root ||
       next.active !== item.active ||
-      next.sidebarView !== item.sidebarView ||
       JSON.stringify(next.tabs) !== JSON.stringify(item.tabs)
     ) {
       changed = true;
@@ -68,6 +54,11 @@ export function applySnapshot(store: WorkspaceStore, snapshot: LiveSnapshot): Wo
     return next;
   });
   return changed ? { ...store, items } : store;
+}
+
+/** Case-insensitive label comparison, because two identically named groups cannot be told apart in the switcher. */
+export function sameName(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
 }
 
 /** Turn a live tab into its stored form. File tabs never carry content: drafts own that. */

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import Editor from "./components/Editor";
 import DraftRestoreDialog from "./components/DraftRestoreDialog";
+import NewWorkspaceDialog from "./components/NewWorkspaceDialog";
 import SettingsPanel from "./components/SettingsPanel";
 import Sidebar from "./components/Sidebar";
 import SidebarResizer from "./components/SidebarResizer";
@@ -15,7 +16,7 @@ import { useEditorTabs } from "./hooks/useEditorTabs";
 import { useWorkspaces } from "./hooks/useWorkspaces";
 import { setLang, t } from "./lib/i18n";
 import { basename, dirname } from "./lib/path";
-import { rootKey } from "./lib/workspace";
+import { groupNameFor } from "./lib/workspace";
 import type { EditorHandle } from "./lib/types";
 import {
   api,
@@ -37,6 +38,7 @@ const DEFAULT_SETTINGS: Settings = {
   sidebarWidth: 240,
   language: "en",
   restoreSession: true,
+  sidebarRoot: "",
 };
 
 /** Never let a save-on-close turn into a window that cannot be closed. */
@@ -84,6 +86,8 @@ export default function App() {
   const tabMenuRef = useRef<HTMLDivElement>(null);
   /** "Review individually" in the batch dialog: walk the queue one file at a time. */
   const [reviewEach, setReviewEach] = useState(false);
+  /** A group is named by the user, so creating one needs a name first. */
+  const [newGroupOpen, setNewGroupOpen] = useState(false);
 
   const editorRef = useRef<EditorHandle | null>(null);
   const draft = useDraft(toast);
@@ -133,20 +137,17 @@ export default function App() {
       setSidebarVisible(loadedSettings.sidebarVisible);
       setSidebarView(loadedSettings.sidebarView === "history" ? "history" : "explorer");
       setSidebarWidth(loadedSettings.sidebarWidth);
+      // The Explorer folder is global view state; a workspace only remembers tabs.
+      setRootDir(loadedSettings.sidebarRoot || null);
 
       const store = await workspaces.load().catch((e) => {
         toast(errorMessage(e));
         return null;
       });
       const active = store?.active ? store.items.find((w) => w.id === store.active) ?? null : null;
-      if (active) {
-        // The workspace remembers its own view and folder; settings only seed a fresh start.
-        setSidebarView(active.sidebarView === "history" ? "history" : "explorer");
-        setRootDir(active.root || null);
-        if (loadedSettings.restoreSession && active.tabs.length > 0) {
-          const result = await tabs.restoreTabs(active.tabs, active.active);
-          if (result.skipped > 0) toast(t("ws.skipped", { n: result.skipped }));
-        }
+      if (active && loadedSettings.restoreSession && active.tabs.length > 0) {
+        const result = await tabs.restoreTabs(active.tabs, active.active);
+        if (result.skipped > 0) toast(t("ws.skipped", { n: result.skipped }));
       }
 
       try {
@@ -178,38 +179,43 @@ export default function App() {
   workspacesRef.current = workspaces;
   const snapshotOf = useRef(tabs.snapshotTabs);
   snapshotOf.current = tabs.snapshotTabs;
+  const rootRef = useRef<string | null>(null);
+  rootRef.current = rootDir;
+  const saveSettingsRef = useRef<(patch: Partial<Settings>) => void>(() => {});
 
-  const commitLive = useCallback(
-    (root: string | null, view: string, immediate?: boolean) => {
-      // Suspended while a workspace switch is rebuilding the tab set, otherwise the
-      // half-cleared tabs would be written into the workspace being switched to.
-      if (pausedCommit.current) return;
-      workspacesRef.current.commit(
-        { ...snapshotOf.current(), root: root ?? "", sidebarView: view },
-        immediate
-      );
-    },
-    []
-  );
+  const commitLive = useCallback((immediate?: boolean) => {
+    // Suspended while a switch is rebuilding the tab set, otherwise the half-cleared tabs
+    // would be written into the group being switched to.
+    if (pausedCommit.current) return;
+    workspacesRef.current.commit(snapshotOf.current(), immediate);
+  }, []);
 
   useEffect(() => {
     if (!booted) return;
-    commitLive(rootDir, sidebarView);
-  }, [booted, commitLive, tabs.tabs, tabs.activeId, tabs.cursorRev, rootDir, sidebarView]);
+    commitLive();
+  }, [booted, commitLive, tabs.tabs, tabs.activeId, tabs.cursorRev]);
 
   fileOpened.current = (dir: string) => {
-    if (rootDir) {
-      // Files handed over from outside join the workspace on screen; they do not repoint
-      // it, or a single right-click would silently replace the whole context.
-      return;
+    // The Explorer follows a file only while it has no folder of its own; after that,
+    // moving it is a deliberate action (Open folder… / Show folder in sidebar).
+    if (!rootRef.current) {
+      rootRef.current = dir;
+      setRootDir(dir);
+      saveSettingsRef.current({ sidebarRoot: dir });
     }
-    setRootDir(dir);
     if (!workspacesRef.current.active()) {
-      // The first file in a bare window becomes a workspace of its own folder; without
-      // that there would be nothing for a session restore to remember.
-      workspacesRef.current.openOrCreate(dir, sidebarView);
+      // The first file in a bare window opens a group named after its folder; without a
+      // group there is nothing for a session restore to remember. The name is only a
+      // label — a group is the set of tabs, not the folder.
+      const preferred = groupNameFor(dir, t("ws.ungrouped"));
+      for (let i = 1; i <= 20; i++) {
+        const candidate = i === 1 ? preferred : `${preferred} (${i})`;
+        const { problem } = workspacesRef.current.create(candidate);
+        if (problem === "ok") break;
+        if (problem === "empty") break;
+      }
     }
-    commitLive(dir, sidebarView, true);
+    commitLive(true);
   };
 
   // Land the caret where the workspace remembered, once the model for that tab is attached.
@@ -224,7 +230,7 @@ export default function App() {
     return () => cancelAnimationFrame(raf);
   }, [tabs, tabs.activeId]);
 
-  /** Replace the whole tab set with another workspace's, keeping the outgoing one intact. */
+  /** Replace the whole tab set with another group's, keeping the outgoing one intact. */
   const switchWorkspace = useCallback(
     async (id: string) => {
       const target = workspacesRef.current.store.items.find((w) => w.id === id);
@@ -235,18 +241,12 @@ export default function App() {
         workspacesRef.current.commit(snapshotOf.current(), true);
         workspacesRef.current.select(id);
         tabs.clearAllTabs();
-        setRootDir(target.root || null);
-        const view = target.sidebarView === "history" ? "history" : "explorer";
-        setSidebarView(view);
         if (target.tabs.length > 0) {
           const result = await tabs.restoreTabs(target.tabs, target.active);
           if (result.skipped > 0) toast(t("ws.skipped", { n: result.skipped }));
         }
         // Files that could not be read must not stay in the store for next startup to retry.
-        workspacesRef.current.commit(
-          { ...snapshotOf.current(), root: target.root, sidebarView: view },
-          true
-        );
+        workspacesRef.current.commit(snapshotOf.current(), true);
       } finally {
         pausedCommit.current = false;
       }
@@ -255,51 +255,43 @@ export default function App() {
     [draft, tabs, toast]
   );
 
-  /** Point the sidebar at a folder: switch to the workspace that owns it, or start a new one. */
-  const openWorkspaceAt = useCallback(
-    async (root: string, view?: string) => {
-      const service = workspacesRef.current;
-      const shown = view ?? sidebarView;
-      const existing = service.store.items.find((w) => rootKey(w.root) === rootKey(root));
-      if (existing) {
-        if (existing.id === service.store.active) {
-          setRootDir(root);
-          return;
-        }
-        await switchWorkspace(existing.id);
-        return;
-      }
+  /**
+   * Open a group with a name the user typed. It starts empty: the tabs on screen belong to
+   * the group they came from, so those are parked first and the window is cleared after.
+   */
+  const createGroup = useCallback(
+    async (name: string) => {
       pausedCommit.current = true;
       try {
         await draft.flushAll();
-        // Park the outgoing tabs in the workspace they came from before leaving it.
-        service.commit(snapshotOf.current(), true);
-        const { workspace } = service.openOrCreate(root, shown);
+        workspacesRef.current.commit(snapshotOf.current(), true);
+        const { workspace, problem } = workspacesRef.current.create(name);
+        if (!workspace) {
+          // The dialog validated the name already; a race here just leaves things as they were.
+          if (problem === "duplicate") toast(t("ws.nameDuplicate"));
+          return null;
+        }
         tabs.clearAllTabs();
-        setRootDir(root);
-        // An explicit empty snapshot, not the live one: the tab list only clears on the
-        // next render, so reading it here would copy the outgoing workspace's tabs into
-        // the new one.
-        service.commit({ tabs: [], active: "", root, sidebarView: shown }, true);
-        toast(t("ws.created", { name: workspace.name }));
+        workspacesRef.current.commit({ tabs: [], active: "" }, true);
+        return workspace;
       } finally {
         pausedCommit.current = false;
       }
     },
-    [draft, sidebarView, switchWorkspace, tabs, toast]
+    [draft, tabs, toast]
   );
 
   /** Forget the current context but keep the entry, per the "Close workspace" menu item. */
+  /** Forget a group's tabs but keep the entry; the sidebar folder is global and stays. */
   const clearWorkspace = useCallback(
     async (id: string) => {
-      const target = workspacesRef.current.active();
+      const target = workspacesRef.current.store.items.find((w) => w.id === id);
       pausedCommit.current = true;
       try {
         await draft.flushAll();
         workspacesRef.current.clearContents(id);
         tabs.clearAllTabs();
-        setRootDir(null);
-        if (target?.id !== id) toast(t("ws.cleared", { name: target?.name ?? "" }));
+        if (target) toast(t("ws.cleared", { name: target.name }));
       } finally {
         pausedCommit.current = false;
       }
@@ -356,6 +348,17 @@ export default function App() {
     },
     [settings, toast]
   );
+  saveSettingsRef.current = saveSettings;
+
+  /** Move the Explorer to another folder. Global view state: it does not open or switch a group. */
+  const setSidebarRoot = useCallback(
+    (dir: string) => {
+      rootRef.current = dir;
+      setRootDir(dir);
+      saveSettings({ sidebarRoot: dir });
+    },
+    [saveSettings]
+  );
 
   const openFiles = useCallback(async () => {
     const paths = await pickFiles().catch((e) => {
@@ -370,8 +373,8 @@ export default function App() {
       toast(errorMessage(e));
       return null;
     });
-    if (dir) await openWorkspaceAt(dir);
-  }, [openWorkspaceAt, toast]);
+    if (dir) setSidebarRoot(dir);
+  }, [setSidebarRoot, toast]);
 
   const setMenu = useCallback(
     async (installed: boolean) => {
@@ -431,12 +434,11 @@ export default function App() {
       } else {
         setSidebarView("explorer");
         setSidebarVisible(true);
-        // The tab menu's folder becomes the current workspace's root, unless another
-        // workspace already owns that folder — two entries on one folder cannot persist.
-        void openWorkspaceAt(dirname(path), "explorer");
+        // A view action only: the folder belongs to the sidebar, not to the group.
+        setSidebarRoot(dirname(path));
       }
     },
-    [menuTabPath, openWorkspaceAt, toast]
+    [menuTabPath, setSidebarRoot, toast]
   );
 
   /**
@@ -451,7 +453,7 @@ export default function App() {
       const tabId = tabMenu?.tabId ?? null;
       pausedCommit.current = true;
       try {
-        commitLive(rootDir, sidebarView, true);
+        commitLive(true);
         const out = await api
           .transferTabs(workspacesRef.current.snapshotStore(), {
             action: panel === "copy" ? "copy" : "move",
@@ -481,7 +483,7 @@ export default function App() {
         setTabMenu(null);
       }
     },
-    [commitLive, menuTabPath, rootDir, sidebarView, tabMenu, tabs, toast]
+    [commitLive, menuTabPath, tabMenu, tabs, toast]
   );
 
   const toggleSidebar = useCallback(() => {
@@ -554,7 +556,7 @@ export default function App() {
             items={workspaces.store.items}
             activeId={workspaces.store.active}
             onSwitch={(id) => void switchWorkspace(id)}
-            onNew={() => void pickRootFolder()}
+            onNew={() => setNewGroupOpen(true)}
             onRename={workspaces.rename}
             onClear={(id) => void clearWorkspace(id)}
             onRemove={workspaces.remove}
@@ -698,6 +700,21 @@ export default function App() {
             </>
           )}
         </div>
+      )}
+
+      {newGroupOpen && (
+        <NewWorkspaceDialog
+          validate={(name) => {
+            if (!name.trim()) return "empty";
+            return workspaces.isNameTaken(name) ? "duplicate" : "ok";
+          }}
+          onConfirm={async (name) => {
+            const workspace = await createGroup(name);
+            setNewGroupOpen(false);
+            if (workspace) toast(t("ws.created", { name: workspace.name }));
+          }}
+          onCancel={() => setNewGroupOpen(false)}
+        />
       )}
 
       {tabs.restoreQueue.length > 1 && !reviewEach ? (

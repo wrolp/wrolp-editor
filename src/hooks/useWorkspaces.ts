@@ -1,15 +1,10 @@
 import { useCallback, useRef, useState } from "react";
 import { api, errorMessage, type Workspace, type WorkspaceStore } from "../lib/tauri";
-import {
-  applySnapshot,
-  basenameOf,
-  emptyStore,
-  newWorkspaceId,
-  rootKey,
-  type LiveSnapshot,
-} from "../lib/workspace";
+import { applySnapshot, newWorkspaceId, sameName, type LiveSnapshot } from "../lib/workspace";
 
 const DEBOUNCE_MS = 400;
+
+export type NameProblem = "ok" | "empty" | "duplicate";
 
 interface Options {
   onError: (message: string) => void;
@@ -17,35 +12,32 @@ interface Options {
 
 export interface WorkspaceCommitter {
   store: WorkspaceStore;
-  loaded: boolean;
   load(): Promise<WorkspaceStore>;
-  /** Mirror what is on screen into the active workspace. */
+  /** Mirror the live tab set into the group on screen. */
   commit(snapshot: LiveSnapshot, immediate?: boolean): void;
   /** Write whatever is pending right now. */
   flush(): Promise<void>;
   active(): Workspace | null;
-  /** The store exactly as it will be written, bypassing React's render lag. */
   snapshotStore(): WorkspaceStore;
   /** Adopt a store produced elsewhere (a transfer) and persist it at once. */
   replace(next: WorkspaceStore): void;
-  /** Returns the workspace for this folder, creating it only if it is genuinely new. */
-  openOrCreate(root: string, sidebarView: string): { workspace: Workspace; created: boolean };
+  create(name: string): { workspace: Workspace | null; problem: NameProblem };
   select(id: string): void;
-  rename(id: string, name: string): void;
-  /** Forget the tabs and root but keep the entry in the list. */
+  rename(id: string, name: string): NameProblem;
+  isNameTaken(name: string, exceptId?: string): boolean;
+  /** Forget the tabs; the group stays in the list. */
   clearContents(id: string): void;
   /** Drop the record. Drafts and files on disk are deliberately left alone. */
   remove(id: string): void;
 }
 
 /**
- * Owns the workspace store: the single source of truth for "which folder and which tabs".
- * Live tab state flows in through commit(); structural operations mutate the store directly.
+ * Owns the group store: a group is a name plus the tabs opened under it. The sidebar
+ * folder is not part of it — that is global view state in settings.
  */
 export function useWorkspaces({ onError }: Options): WorkspaceCommitter {
-  const [store, setStore] = useState<WorkspaceStore>(emptyStore);
+  const [store, setStore] = useState<WorkspaceStore>({ version: 1, active: "", items: [] });
   const storeRef = useRef(store);
-  const [loaded, setLoaded] = useState(false);
   const timer = useRef<number | undefined>(undefined);
   // Serialize writes: two overlapping save_workspaces calls would race on one file.
   const writing = useRef<Promise<void>>(Promise.resolve());
@@ -89,7 +81,6 @@ export function useWorkspaces({ onError }: Options): WorkspaceCommitter {
     const s = await api.getWorkspaces();
     storeRef.current = s;
     setStore(s);
-    setLoaded(true);
     return s;
   }, []);
 
@@ -104,8 +95,7 @@ export function useWorkspaces({ onError }: Options): WorkspaceCommitter {
 
   const flush = useCallback(async () => {
     window.clearTimeout(timer.current);
-    const pending = storeRef.current;
-    await write(pending);
+    await write(storeRef.current);
     await writing.current;
   }, [write]);
 
@@ -118,28 +108,27 @@ export function useWorkspaces({ onError }: Options): WorkspaceCommitter {
 
   const replace = useCallback((next: WorkspaceStore) => schedule(next, true), [schedule]);
 
-  const openOrCreate = useCallback(
-    (root: string, sidebarView: string) => {
+  const isNameTaken = useCallback((name: string, exceptId?: string) => {
+    return storeRef.current.items.some((item) => item.id !== exceptId && sameName(item.name, name));
+  }, []);
+
+  const create = useCallback(
+    (name: string) => {
+      const trimmed = name.trim();
+      if (!trimmed) return { workspace: null, problem: "empty" as NameProblem };
+      if (isNameTaken(trimmed)) return { workspace: null, problem: "duplicate" as NameProblem };
       const s = storeRef.current;
-      const existing = s.items.find((item) => rootKey(item.root) === rootKey(root));
-      if (existing) {
-        schedule({ ...s, active: existing.id });
-        return { workspace: existing, created: false };
-      }
       const workspace: Workspace = {
         id: newWorkspaceId(),
-        name: basenameOf(root),
-        autoName: true,
-        root,
+        name: trimmed,
         tabs: [],
         active: "",
-        sidebarView,
         updatedAt: "",
       };
       schedule({ ...s, active: workspace.id, items: [...s.items, workspace] });
-      return { workspace, created: true };
+      return { workspace, problem: "ok" as NameProblem };
     },
-    [schedule]
+    [isNameTaken, schedule]
   );
 
   const select = useCallback(
@@ -154,16 +143,16 @@ export function useWorkspaces({ onError }: Options): WorkspaceCommitter {
   const rename = useCallback(
     (id: string, name: string) => {
       const trimmed = name.trim();
-      if (!trimmed) return;
+      if (!trimmed) return "empty" as const;
+      if (isNameTaken(trimmed, id)) return "duplicate" as const;
       const s = storeRef.current;
       schedule({
         ...s,
-        items: s.items.map((item) =>
-          item.id === id ? { ...item, name: trimmed, autoName: false } : item
-        ),
+        items: s.items.map((item) => (item.id === id ? { ...item, name: trimmed } : item)),
       });
+      return "ok" as const;
     },
-    [schedule]
+    [isNameTaken, schedule]
   );
 
   const clearContents = useCallback(
@@ -172,7 +161,7 @@ export function useWorkspaces({ onError }: Options): WorkspaceCommitter {
       schedule({
         ...s,
         items: s.items.map((item) =>
-          item.id === id ? { ...item, root: "", tabs: [], active: "" } : item
+          item.id === id ? { ...item, tabs: [], active: "" } : item
         ),
       });
     },
@@ -191,16 +180,16 @@ export function useWorkspaces({ onError }: Options): WorkspaceCommitter {
 
   return {
     store,
-    loaded,
     load,
     commit,
     flush,
     active,
     snapshotStore,
     replace,
-    openOrCreate,
+    create,
     select,
     rename,
+    isNameTaken,
     clearContents,
     remove,
   };

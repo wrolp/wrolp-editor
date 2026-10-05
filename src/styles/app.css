@@ -411,6 +411,24 @@ body {
   outline: none;
   border-color: var(--accent);
 }
+/* The name dialog reuses the modal shell, so its input needs the full width. */
+.modal .ws-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.modal-error,
+.ws-error {
+  color: #e57373;
+  font-size: 12px;
+  margin: 6px 0 0;
+}
+.ws-panel .ws-error {
+  padding: 2px 10px;
+}
+.btn.small {
+  padding: 4px 10px;
+  font-size: 12px;
+}
 
 /* Batch draft dialog */
 .draft-list {

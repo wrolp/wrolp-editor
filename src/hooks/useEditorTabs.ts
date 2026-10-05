@@ -363,9 +363,12 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened }: Options
       // The caret moved under the user, so a restored offset for this tab is now stale.
       pendingCursors.current.delete(key);
       setCursorRev((rev) => rev + 1);
-      if (!tab.dirty || isUntitled(tab.path)) return;
+      if (isUntitled(tab.path)) return;
       const content = editorRef.current?.editor.getValue();
-      if (content === undefined) return;
+      // Compare against the disk baseline instead of tab.dirty: the dirty flag comes from
+      // a React state update, so a caret move that follows the first edit can arrive before
+      // the tab is known to be dirty, and the draft would keep the caret at 0.
+      if (content === undefined || content === tab.original) return;
       draft.schedule(tab.path, { content, cursor: offset, original: tab.original });
     },
     [draft, editorRef]

@@ -61,6 +61,9 @@ pub struct Settings {
   pub language: String,
   /// Reopen the tabs of the active workspace on startup.
   pub restore_session: bool,
+  /// Folder the Explorer shows. Global view state: a workspace is a named group of tabs,
+  /// not a folder, so two groups may sit on the same directory.
+  pub sidebar_root: String,
 }
 
 /// Used when settings.json is absent or a key is missing, so a first run must not
@@ -75,6 +78,7 @@ impl Default for Settings {
       sidebar_width: 240.0,
       language: "en".into(),
       restore_session: true,
+      sidebar_root: String::new(),
     }
   }
 }
@@ -110,6 +114,7 @@ impl Settings {
         self.language
       },
       restore_session: self.restore_session,
+      sidebar_root: self.sidebar_root.trim().to_string(),
     }
   }
 }
@@ -489,12 +494,16 @@ mod tests {
   /// "the user turned session restore off".
   #[test]
   fn missing_settings_keys_fall_back_to_the_defaults() {
-    let s: Settings = serde_json::from_str("{\"fontSize\":16.0,\"minimap\":false}")
-      .expect("parse partial settings");
+    let s: Settings =
+      serde_json::from_str("{\"fontSize\":16.0,\"minimap\":false,\"language\":\"zh\"}")
+        .expect("parse partial settings");
     assert!(s.restore_session);
     assert!(!s.minimap);
     assert_eq!(s.font_size, 16.0);
-    assert_eq!(s.language, "en");
+    assert_eq!(s.language, "zh");
+    // A settings file written before workspaces were groups has no sidebarRoot at all.
+    assert_eq!(s.sidebar_root, "");
+    assert_eq!(s.filled().sidebar_root, "");
   }
 
   fn scratch_dir(name: &str) -> std::path::PathBuf {

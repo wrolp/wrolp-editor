@@ -44,6 +44,8 @@ export interface Settings {
   language: string;
   /** Reopen the tabs of the active workspace on startup. */
   restoreSession: boolean;
+  /** Folder the Explorer shows. Global view state, not part of a workspace: a workspace is a named group of tabs. */
+  sidebarRoot: string;
 }
 
 /** One restored tab: either a file (path + cursor) or scratch text (untitled + content). */
@@ -56,14 +58,11 @@ export interface WorkspaceTab {
 
 export interface Workspace {
   id: string;
+  /** Chosen by the user; the only thing that tells one group from another. */
   name: string;
-  /** True while the name follows the root folder. */
-  autoName: boolean;
-  root: string;
   tabs: WorkspaceTab[];
   /** Key of the selected tab: its path, or `untitled://<name>`. Empty when none. */
   active: string;
-  sidebarView: string;
   updatedAt: string;
 }
 
