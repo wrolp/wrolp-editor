@@ -10,6 +10,8 @@
   --accent-soft: #6366f1;
   --status: #181818;
   --danger: #e5484d;
+  /* Unsaved-changes indicator: shared by the tab marker and the status bar. */
+  --dirty: #4ade80;
 }
 
 * {
@@ -129,7 +131,7 @@ body {
   text-overflow: ellipsis;
 }
 .tab .tab-dirty {
-  color: #9ca3af;
+  color: var(--dirty);
   font-size: 12px;
   font-weight: 600;
   margin-left: 2px;
@@ -949,8 +951,13 @@ body.resizing .editor-host {
 .statusbar .sb-spacer {
   flex: 1;
 }
+/* Saved is the resting state, so it stays muted; only unsaved earns the colour. */
 .statusbar .sb-dirty {
-  color: var(--accent-soft);
+  color: var(--muted);
+}
+.statusbar .sb-dirty.is-dirty {
+  color: var(--dirty);
+  font-weight: 600;
 }
 .statusbar .sb-lang {
   text-transform: uppercase;
