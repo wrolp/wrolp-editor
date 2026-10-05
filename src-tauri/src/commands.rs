@@ -86,6 +86,12 @@ pub struct Settings {
   pub render_whitespace: String,
   pub word_wrap: bool,
   pub sticky_scroll: bool,
+  /// Columns per indentation level, 1..=8.
+  pub tab_size: u32,
+  /// Insert spaces instead of a tab character.
+  pub insert_spaces: bool,
+  /// Let a file's own content win over the two settings above.
+  pub detect_indentation: bool,
 }
 
 /// Used when settings.json is absent or a key is missing, so a first run must not
@@ -106,6 +112,9 @@ impl Default for Settings {
       render_whitespace: "selection".into(),
       word_wrap: false,
       sticky_scroll: true,
+      tab_size: 2,
+      insert_spaces: true,
+      detect_indentation: true,
     }
   }
 }
@@ -159,6 +168,14 @@ impl Settings {
       },
       word_wrap: self.word_wrap,
       sticky_scroll: self.sticky_scroll,
+      // 0 would mean "collapse every level to nothing", so fall back rather than clamp.
+      tab_size: if self.tab_size == 0 {
+        2
+      } else {
+        self.tab_size.min(8)
+      },
+      insert_spaces: self.insert_spaces,
+      detect_indentation: self.detect_indentation,
     }
   }
 }
@@ -540,6 +557,34 @@ mod tests {
 
   /// Compact mode is a deliberate opt-in, so a settings.json written before the key
   /// existed must not come back switched on.
+  /// A tab size of 0 would collapse every indentation level, and a huge one is unusable,
+  /// so both ends are clamped instead of being taken at face value.
+  #[test]
+  fn tab_size_is_bounded_and_never_zero() {
+    assert_eq!(Settings::default().tab_size, 2);
+    for (given, expected) in [(0, 2), (1, 1), (4, 4), (8, 8), (99, 8)] {
+      assert_eq!(
+        Settings {
+          tab_size: given,
+          ..Default::default()
+        }
+        .filled()
+        .tab_size,
+        expected,
+        "tab_size {given} should resolve to {expected}"
+      );
+    }
+  }
+
+  #[test]
+  fn missing_indentation_keys_fall_back_to_the_defaults() {
+    let s: Settings = serde_json::from_str("{\"fontSize\":16.0}").expect("parse partial settings");
+    let s = s.filled();
+    assert_eq!(s.tab_size, 2);
+    assert!(s.insert_spaces);
+    assert!(s.detect_indentation);
+  }
+
   #[test]
   fn compact_mode_is_off_by_default_and_survives_missing_keys() {
     assert!(!Settings::default().compact_mode);

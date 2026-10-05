@@ -171,6 +171,30 @@ export default function SettingsPanel({
               />
               <p className="muted">{t("settings.stickyScrollDesc")}</p>
               <label className="setting-row">
+                <span>{t("settings.tabSize")}</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={8}
+                  value={settings.tabSize}
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    if (!Number.isNaN(n) && n >= 1) onSaveSettings({ tabSize: n });
+                  }}
+                />
+              </label>
+              <SettingCheck
+                label={t("settings.insertSpaces")}
+                checked={settings.insertSpaces}
+                onChange={(v) => onSaveSettings({ insertSpaces: v })}
+              />
+              <SettingCheck
+                label={t("settings.detectIndentation")}
+                checked={settings.detectIndentation}
+                onChange={(v) => onSaveSettings({ detectIndentation: v })}
+              />
+              <p className="muted">{t("settings.detectIndentationDesc")}</p>
+              <label className="setting-row">
                 <span className="setting-title">{t("settings.encoding")}</span>
                 <select
                   className="select"

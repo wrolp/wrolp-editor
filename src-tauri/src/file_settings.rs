@@ -32,6 +32,12 @@ pub struct FileSettings {
   /// Minimap is per file: it helps in code and only wastes space in a log.
   #[serde(skip_serializing_if = "Option::is_none")]
   pub minimap: Option<bool>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub tab_size: Option<u32>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub insert_spaces: Option<bool>,
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub detect_indentation: Option<bool>,
   /// Overrides the decode preference. The encoding actually used is still reported
   /// back per tab, so a save always writes back what the file was read in.
   #[serde(skip_serializing_if = "Option::is_none")]
@@ -44,6 +50,10 @@ impl FileSettings {
     self.render_whitespace.is_none()
       && self.word_wrap.is_none()
       && self.sticky_scroll.is_none()
+      && self.minimap.is_none()
+      && self.tab_size.is_none()
+      && self.insert_spaces.is_none()
+      && self.detect_indentation.is_none()
       && self.encoding.is_none()
   }
 
@@ -57,6 +67,11 @@ impl FileSettings {
       word_wrap: self.word_wrap,
       sticky_scroll: self.sticky_scroll,
       minimap: self.minimap,
+      // 0 or a wildly large value would fight the editor, so bound it the same way
+      // the global setting is bounded.
+      tab_size: self.tab_size.filter(|n| (1..=8).contains(n)),
+      insert_spaces: self.insert_spaces,
+      detect_indentation: self.detect_indentation,
       encoding: self.encoding.filter(|v| encoding::is_known(v)),
     }
   }
@@ -175,6 +190,9 @@ pub fn file_settings_view(app: AppHandle, path: String) -> Result<FileSettingsVi
     word_wrap: Some(settings.word_wrap),
     sticky_scroll: Some(settings.sticky_scroll),
     minimap: Some(settings.minimap),
+    tab_size: Some(settings.tab_size),
+    insert_spaces: Some(settings.insert_spaces),
+    detect_indentation: Some(settings.detect_indentation),
     encoding: Some(settings.encoding),
   };
   Ok(FileSettingsView {
@@ -208,6 +226,91 @@ mod tests {
     assert!(s.items.is_empty());
   }
 
+  /// Every field has to appear in `is_empty`. A field added to the struct but forgotten
+  /// there makes a file that sets only that field look empty, and the entry is dropped.
+  #[test]
+  fn a_single_field_is_enough_to_keep_the_entry() {
+    for (field, settings) in [
+      (
+        "minimap",
+        FileSettings {
+          minimap: Some(false),
+          ..Default::default()
+        },
+      ),
+      (
+        "tab_size",
+        FileSettings {
+          tab_size: Some(4),
+          ..Default::default()
+        },
+      ),
+      (
+        "insert_spaces",
+        FileSettings {
+          insert_spaces: Some(false),
+          ..Default::default()
+        },
+      ),
+      (
+        "sticky_scroll",
+        FileSettings {
+          sticky_scroll: Some(true),
+          ..Default::default()
+        },
+      ),
+      (
+        "word_wrap",
+        FileSettings {
+          word_wrap: Some(true),
+          ..Default::default()
+        },
+      ),
+      (
+        "detect_indentation",
+        FileSettings {
+          detect_indentation: Some(false),
+          ..Default::default()
+        },
+      ),
+    ] {
+      assert!(!settings.is_empty(), "{field} missing from is_empty");
+      let s = store(&[("c:\\a.txt", settings)]).filled();
+      assert!(!s.items.is_empty(), "{field}-only entry was dropped");
+    }
+  }
+
+  #[test]
+  fn an_out_of_range_tab_size_is_dropped() {
+    let s = store(&[
+      (
+        "c:\\zero.txt",
+        FileSettings {
+          tab_size: Some(0),
+          ..Default::default()
+        },
+      ),
+      (
+        "c:\\big.txt",
+        FileSettings {
+          tab_size: Some(99),
+          ..Default::default()
+        },
+      ),
+      (
+        "c:\\ok.txt",
+        FileSettings {
+          tab_size: Some(4),
+          ..Default::default()
+        },
+      ),
+    ])
+    .filled();
+    assert!(s.items.get("c:\\zero.txt").is_none());
+    assert!(s.items.get("c:\\big.txt").is_none());
+    assert_eq!(s.items.get("c:\\ok.txt").and_then(|f| f.tab_size), Some(4));
+  }
+
   #[test]
   fn bad_values_are_stripped_but_good_ones_survive() {
     let s = store(&[(
@@ -217,6 +320,9 @@ mod tests {
         word_wrap: Some(true),
         sticky_scroll: Some(false),
         minimap: Some(true),
+        tab_size: Some(4),
+        insert_spaces: Some(false),
+        detect_indentation: Some(false),
         encoding: Some("klingon".into()),
       },
     )])

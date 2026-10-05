@@ -64,6 +64,12 @@ export interface Settings {
   renderWhitespace: string;
   wordWrap: boolean;
   stickyScroll: boolean;
+  /** Columns per indentation level, 1..8. */
+  tabSize: number;
+  /** Insert spaces rather than a tab character. */
+  insertSpaces: boolean;
+  /** Let a file's own content decide the indentation instead of the two settings above. */
+  detectIndentation: boolean;
 }
 
 /** One restored tab: either a file (path + cursor) or scratch text (untitled + content). */
@@ -114,6 +120,9 @@ export interface FileSettings {
   wordWrap: boolean | null;
   stickyScroll: boolean | null;
   minimap: boolean | null;
+  tabSize: number | null;
+  insertSpaces: boolean | null;
+  detectIndentation: boolean | null;
   encoding: string | null;
 }
 
@@ -122,6 +131,9 @@ export const EMPTY_FILE_SETTINGS: FileSettings = {
   wordWrap: null,
   stickyScroll: null,
   minimap: null,
+  tabSize: null,
+  insertSpaces: null,
+  detectIndentation: null,
   encoding: null,
 };
 

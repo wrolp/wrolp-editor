@@ -14,6 +14,9 @@ interface Props {
   renderWhitespace: "none" | "boundary" | "selection" | "all" | "trailing";
   wordWrap: boolean;
   stickyScroll: boolean;
+  tabSize: number;
+  insertSpaces: boolean;
+  detectIndentation: boolean;
   onChange: (value: string) => void;
   onCursor: (position: CursorPos, offset: number) => void;
   /** Selection and document totals, refreshed on every selection or content change. */
@@ -28,6 +31,9 @@ export default function Editor({
   renderWhitespace,
   wordWrap,
   stickyScroll,
+  tabSize,
+  insertSpaces,
+  detectIndentation,
   onChange,
   onCursor,
   onStats,
@@ -109,7 +115,11 @@ export default function Editor({
         fontSize,
         minimap: { enabled: minimap },
         automaticLayout: true,
-        tabSize: 2,
+        tabSize,
+        insertSpaces,
+        // On by default so a file keeps the indentation style it was written with; the
+        // two settings above then act as the fallback for files it cannot guess about.
+        detectIndentation,
         scrollBeyondLastLine: false,
         fontFamily: 'Consolas, "Cascadia Mono", "Courier New", monospace',
         renderWhitespace,

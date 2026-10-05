@@ -72,12 +72,7 @@ export default function FileSettingsDialog({
     onClose();
   };
 
-  const hasOverride =
-    !!overrides &&
-    (overrides.renderWhitespace !== null ||
-      overrides.wordWrap !== null ||
-      overrides.stickyScroll !== null ||
-      overrides.encoding !== null);
+  const hasOverride = !!overrides && Object.values(overrides).some((v) => v !== null);
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -111,6 +106,49 @@ export default function FileSettingsDialog({
                 indeterminate={overrides.stickyScroll === null}
                 hint={overrides.stickyScroll === null ? t("fileSettings.inherits", { value: String(view.defaults.stickyScroll) }) : undefined}
                 onChange={(v) => set({ stickyScroll: v })}
+              />
+              <label className="setting-row">
+                <span className="setting-title">{t("settings.tabSize")}</span>
+                <select
+                  className="select"
+                  value={overrides.tabSize ?? ""}
+                  onChange={(e) =>
+                    set({ tabSize: e.target.value === "" ? null : Number(e.target.value) })
+                  }
+                >
+                  <option value="">
+                    {t("fileSettings.follow", { value: String(view.defaults.tabSize) })}
+                  </option>
+                  {[2, 4, 8].map((n) => (
+                    <option key={n} value={n}>
+                      {String(n)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <SettingCheck
+                label={t("settings.insertSpaces")}
+                checked={overrides.insertSpaces ?? view.defaults.insertSpaces ?? true}
+                indeterminate={overrides.insertSpaces === null}
+                hint={
+                  overrides.insertSpaces === null
+                    ? t("fileSettings.inherits", { value: String(view.defaults.insertSpaces) })
+                    : undefined
+                }
+                onChange={(v) => set({ insertSpaces: v })}
+              />
+              <SettingCheck
+                label={t("settings.detectIndentation")}
+                checked={overrides.detectIndentation ?? view.defaults.detectIndentation ?? true}
+                indeterminate={overrides.detectIndentation === null}
+                hint={
+                  overrides.detectIndentation === null
+                    ? t("fileSettings.inherits", {
+                        value: String(view.defaults.detectIndentation),
+                      })
+                    : undefined
+                }
+                onChange={(v) => set({ detectIndentation: v })}
               />
               <SettingCheck
                 label={t("settings.minimap")}

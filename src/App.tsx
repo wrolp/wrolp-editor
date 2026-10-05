@@ -44,6 +44,9 @@ const DEFAULT_SETTINGS: Settings = {
   renderWhitespace: "selection",
   wordWrap: false,
   stickyScroll: true,
+  tabSize: 2,
+  insertSpaces: true,
+  detectIndentation: true,
 };
 
 /** The only values Monaco accepts for `renderWhitespace`. */
@@ -613,6 +616,10 @@ export default function App() {
   const wordWrap = editorTab?.fileSettings.wordWrap ?? settings.wordWrap;
   const stickyScroll = editorTab?.fileSettings.stickyScroll ?? settings.stickyScroll;
   const minimap = editorTab?.fileSettings.minimap ?? settings.minimap;
+  const tabSize = editorTab?.fileSettings.tabSize ?? settings.tabSize;
+  const insertSpaces = editorTab?.fileSettings.insertSpaces ?? settings.insertSpaces;
+  const detectIndentation =
+    editorTab?.fileSettings.detectIndentation ?? settings.detectIndentation;
 
   return (
     <div className="app" data-density={settings.compactMode ? "compact" : "cozy"}>
@@ -678,6 +685,9 @@ export default function App() {
                 renderWhitespace={renderWhitespaceMode}
                 wordWrap={wordWrap}
                 stickyScroll={stickyScroll}
+                tabSize={tabSize}
+                insertSpaces={insertSpaces}
+                detectIndentation={detectIndentation}
                 onChange={tabs.onEditorChange}
                 onCursor={(position, offset) => {
                   setCursor({ line: position.lineNumber, column: position.column });
