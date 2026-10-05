@@ -63,3 +63,32 @@ export function IconFile({ size = 14 }: IconProps) {
     </svg>
   );
 }
+
+/** Editor only: lines of text, no preview pane. */
+export function IconModeText({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M4 6h16M4 11h16M4 16h10" />
+    </svg>
+  );
+}
+
+/** Editor and preview side by side. */
+export function IconModeSplit({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <line x1="12" y1="4" x2="12" y2="20" />
+    </svg>
+  );
+}
+
+/** Preview only: a rendered page. */
+export function IconModePreview({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <rect x="4" y="3" width="16" height="18" rx="2" />
+      <path d="M8 8h8M8 12h8M8 16h5" />
+    </svg>
+  );
+}

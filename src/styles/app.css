@@ -488,6 +488,43 @@ body {
   background: rgba(255, 255, 255, 0.08);
   color: #fff;
 }
+
+/* ---------- Preview layout segmented control ---------- */
+.mode-seg {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  margin-right: 6px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #2d2d2d;
+}
+.mode-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 22px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: #9a9a9a;
+  cursor: pointer;
+  padding: 0;
+}
+.mode-btn:hover {
+  background: #3a3a3a;
+  color: #fff;
+}
+.mode-btn.active {
+  background: var(--accent-soft);
+  color: #fff;
+}
+.app[data-density="compact"] .mode-btn {
+  width: 24px;
+  height: 20px;
+}
 .tb-icon svg {
   width: 18px;
   height: 18px;
@@ -766,6 +803,21 @@ body.resizing .editor-host {
   min-width: 0;
   position: relative;
   min-height: 0;
+}
+/* Split view: editor and preview share the row instead of overlapping it. */
+.editor-wrap.split,
+.editor-wrap.preview-only {
+  display: flex;
+  align-items: stretch;
+}
+.editor-wrap.split .editor-host {
+  position: relative;
+  inset: auto;
+  flex: 1 1 50%;
+  min-width: 0;
+}
+.editor-wrap.preview-only .md-preview {
+  flex: 1 1 100%;
 }
 .editor-host {
   position: absolute;
@@ -1071,17 +1123,79 @@ body.resizing .editor-host {
   opacity: 1;
 }
 
-/* ---------- Scrollbars ---------- */
-.sidebar ::-webkit-scrollbar,
-.settings-content::-webkit-scrollbar,
-.tab-dropdown::-webkit-scrollbar {
-  width: 10px;
+/* ---------- Custom scrollbars ----------
+   One system for every scroll container the app owns, instead of a width per panel.
+   The bar is content-sized (a 6px thumb floating in a 10px gutter) so it does not
+   steal width from the content, the track is invisible, and the thumb only makes
+   itself obvious on hover. Monaco draws its own, hence the explicit list rather than
+   a `*` reset. */
+:root {
+  --scroll-size: 10px;
+  --scroll-thumb: #4a4a4a;
+  --scroll-thumb-hover: #707070;
 }
-.sidebar ::-webkit-scrollbar-thumb,
+.sidebar,
+.side-view,
+.settings-content,
+.settings-side,
+.tab-dropdown,
+.grp-panel,
+.draft-list,
+.md-preview,
+.md-body pre {
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) transparent;
+}
+.sidebar::-webkit-scrollbar,
+.side-view::-webkit-scrollbar,
+.settings-content::-webkit-scrollbar,
+.settings-side::-webkit-scrollbar,
+.tab-dropdown::-webkit-scrollbar,
+.grp-panel::-webkit-scrollbar,
+.draft-list::-webkit-scrollbar,
+.md-preview::-webkit-scrollbar,
+.md-body pre::-webkit-scrollbar {
+  width: var(--scroll-size);
+  height: var(--scroll-size);
+}
+.sidebar::-webkit-scrollbar-track,
+.side-view::-webkit-scrollbar-track,
+.settings-content::-webkit-scrollbar-track,
+.settings-side::-webkit-scrollbar-track,
+.tab-dropdown::-webkit-scrollbar-track,
+.grp-panel::-webkit-scrollbar-track,
+.draft-list::-webkit-scrollbar-track,
+.md-preview::-webkit-scrollbar-track,
+.md-body pre::-webkit-scrollbar-track,
+.md-body pre::-webkit-scrollbar-corner {
+  background: transparent;
+}
+.sidebar::-webkit-scrollbar-thumb,
+.side-view::-webkit-scrollbar-thumb,
 .settings-content::-webkit-scrollbar-thumb,
-.tab-dropdown::-webkit-scrollbar-thumb {
-  background: #3c3c3c;
-  border-radius: 5px;
+.settings-side::-webkit-scrollbar-thumb,
+.tab-dropdown::-webkit-scrollbar-thumb,
+.grp-panel::-webkit-scrollbar-thumb,
+.draft-list::-webkit-scrollbar-thumb,
+.md-preview::-webkit-scrollbar-thumb,
+.md-body pre::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 6px;
+  transition: background-color 0.15s ease;
+}
+/* Only the hovered panel brightens, so a screenful of panels stays quiet. */
+.sidebar:hover::-webkit-scrollbar-thumb,
+.side-view:hover::-webkit-scrollbar-thumb,
+.settings-content:hover::-webkit-scrollbar-thumb,
+.settings-side:hover::-webkit-scrollbar-thumb,
+.tab-dropdown:hover::-webkit-scrollbar-thumb,
+.grp-panel:hover::-webkit-scrollbar-thumb,
+.draft-list:hover::-webkit-scrollbar-thumb,
+.md-preview:hover::-webkit-scrollbar-thumb,
+.md-body pre:hover::-webkit-scrollbar-thumb {
+  background-color: var(--scroll-thumb-hover);
 }
 
 /* ---------- Compact density ----------
@@ -1202,4 +1316,140 @@ body.resizing .editor-host {
 }
 .app[data-density="compact"] .btn {
   padding: 6px 12px;
+}
+.app[data-density="compact"] {
+  --scroll-size: 8px;
+}
+
+/* ---------- Markdown preview ---------- */
+.md-preview {
+  flex: 1 1 50%;
+  min-width: 0;
+  /* A flex child defaults to min-height:auto, so it grows to fit its content instead of
+     scrolling. Without this the pane cannot be scrolled at all. */
+  min-height: 0;
+  overflow-y: auto;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+/* Preview-only mode: the pane is the whole area, so drop the divider. */
+.editor-wrap.preview-only > .md-preview {
+  border-left: none;
+}
+.md-body {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 24px 28px 40px;
+  font-size: 14px;
+  line-height: 1.7;
+  user-select: text;
+  overflow-wrap: anywhere;
+}
+.md-body > :first-child {
+  margin-top: 0;
+}
+.md-body h1,
+.md-body h2,
+.md-body h3,
+.md-body h4 {
+  margin: 1.4em 0 0.6em;
+  line-height: 1.3;
+  font-weight: 600;
+}
+.md-body h1 {
+  font-size: 1.9em;
+  padding-bottom: 0.3em;
+  border-bottom: 1px solid var(--border);
+}
+.md-body h2 {
+  font-size: 1.45em;
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid var(--border);
+}
+.md-body h3 {
+  font-size: 1.2em;
+}
+.md-body p,
+.md-body ul,
+.md-body ol,
+.md-body blockquote,
+.md-body table {
+  margin: 0 0 1em;
+}
+.md-body ul,
+.md-body ol {
+  padding-left: 1.6em;
+}
+.md-body li + li {
+  margin-top: 0.25em;
+}
+.md-body a {
+  color: #8ab4f8;
+}
+.md-body code {
+  font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+  font-size: 0.92em;
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  background: #2a2a2a;
+}
+.md-body pre {
+  margin: 0 0 1em;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #1a1a1a;
+  overflow-x: auto;
+}
+.md-body pre code {
+  padding: 0;
+  background: none;
+}
+.md-body blockquote {
+  padding: 0 1em;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+}
+.md-body table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.md-body th,
+.md-body td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+}
+.md-body th {
+  background: #252526;
+}
+.md-body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  background: #1a1a1a;
+}
+/* A path the asset scope does not cover should read as missing, not as a broken icon. */
+.md-body img[data-missing] {
+  min-width: 120px;
+  min-height: 40px;
+  border: 1px dashed var(--border);
+}
+.md-body hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1.6em 0;
+}
+.md-foot {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 0 28px 20px;
+  color: #6a6a6a;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
 }

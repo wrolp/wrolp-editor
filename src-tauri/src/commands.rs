@@ -4,7 +4,7 @@
 use crate::draft::{self, Draft};
 use crate::group::{GroupStore, TabTransfer};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
 
@@ -323,6 +323,64 @@ pub fn save_file(
   })
 }
 
+/// Directories a document may never be able to read, however it spells the path.
+/// Generated from the environment so the list follows the machine it runs on.
+fn protected_roots() -> Vec<PathBuf> {
+  [
+    "USERPROFILE",
+    "SystemRoot",
+    "ProgramFiles",
+    "ProgramFiles(x86)",
+  ]
+  .iter()
+  .filter_map(|name| std::env::var(name).ok())
+  .filter(|value| !value.is_empty())
+  .map(PathBuf::from)
+  .collect()
+}
+
+/// True when granting `dir` would hand over a whole drive, the system directory or the
+/// user's entire profile.
+///
+/// A markdown file is allowed to point at images outside its own folder, so the grant
+/// follows the references. That only stays reasonable while a document cannot walk up
+/// to a root and read everything from there: `notes/a.md` reaching `../shared/logo.png`
+/// is a picture next door, whereas reaching the home directory is not. Refusing every
+/// ancestor of a protected root draws that line without needing a full path policy.
+fn refused_by_scope(dir: &Path, protected: &[PathBuf]) -> bool {
+  // A drive root such as "C:\" has no parent to be anything but a whole disk.
+  match dir.parent() {
+    Some(parent) if !parent.as_os_str().is_empty() => {}
+    _ => return true,
+  }
+  protected.iter().any(|root| {
+    let same_length = root.components().count() == dir.components().count();
+    // The root itself, or any folder that contains it.
+    (same_length && root.as_path() == dir) || (root.starts_with(dir) && !same_length)
+  })
+}
+
+/// Let the asset protocol read one directory, so markdown can show relative images.
+///
+/// Called with the folder of each image a document references, so the grant covers the
+/// picture and its siblings rather than a fixed subtree. Every folder that is refused
+/// here stays unreachable no matter how many `..` segments a document uses.
+#[tauri::command]
+pub fn allow_asset_dir(app: AppHandle, dir: String) -> Result<(), String> {
+  let normalized = draft::normalize_path(&dir);
+  let path = Path::new(&normalized);
+  if !path.is_dir() {
+    return Err("not_a_directory".into());
+  }
+  if refused_by_scope(path, &protected_roots()) {
+    return Err("asset_scope_refused".into());
+  }
+  app
+    .asset_protocol_scope()
+    .allow_directory(path, true)
+    .map_err(|e| format!("asset_scope:{e}"))
+}
+
 /// Overrides for one file; every field absent means "follow the global default".
 #[tauri::command]
 pub fn get_file_settings(
@@ -553,6 +611,41 @@ mod tests {
     assert_eq!(s.sidebar_view, "explorer");
     assert_eq!(s.font_size, 14.0);
     assert_eq!(s.sidebar_width, 240.0);
+  }
+
+  /// The asset scope is the one place where a document could ask to read outside its own
+  /// folder, so the line has to be pinned by tests rather than by a comment.
+  #[test]
+  fn asset_scope_allows_neighbours_but_never_a_whole_disk_or_profile() {
+    let home = PathBuf::from(r"C:\Users\x");
+    let protected = vec![home.clone()];
+
+    let ok = [
+      r"C:\Users\x\docs\shared",
+      r"C:\Users\x\docs\notes",
+      r"C:\Users\x\Downloads",
+      r"D:\projects\assets",
+    ];
+    for dir in ok {
+      assert!(
+        !refused_by_scope(Path::new(dir), &protected),
+        "{dir} should be reachable"
+      );
+    }
+
+    let refused = [r"C:\", r"C:\Users", r"C:\Users\x"];
+    for dir in refused {
+      assert!(
+        refused_by_scope(Path::new(dir), &protected),
+        "{dir} must never be granted"
+      );
+    }
+  }
+
+  #[test]
+  fn a_drive_root_is_refused_even_without_protected_roots() {
+    assert!(refused_by_scope(Path::new(r"C:\"), &[]));
+    assert!(refused_by_scope(Path::new(r"\\server\share"), &[]));
   }
 
   /// Compact mode is a deliberate opt-in, so a settings.json written before the key

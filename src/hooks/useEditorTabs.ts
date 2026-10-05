@@ -139,6 +139,9 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
       } catch {
         // A missing override file is a normal first run; keep the global defaults.
       }
+      // A document can show its own pictures, so allow the asset protocol to read the one
+      // folder it sits in. Fire-and-forget: a document without images works either way.
+      void api.allowAssetDir(dirname(disk.path)).catch(() => {});
       if (draftInfo && draftInfo.content !== disk.content) {
         // One prompt per file: a tab can be reached twice during startup (context menu
         // handover plus session restore) and the answer must not be asked twice.

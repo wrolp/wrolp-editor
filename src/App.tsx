@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import Editor from "./components/Editor";
+import MarkdownPreview from "./components/MarkdownPreview";
 import DraftRestoreDialog from "./components/DraftRestoreDialog";
 import NewGroupDialog from "./components/NewGroupDialog";
 import SettingsPanel from "./components/SettingsPanel";
@@ -8,7 +9,7 @@ import FileSettingsDialog from "./components/FileSettingsDialog";
 import Sidebar from "./components/Sidebar";
 import SidebarResizer from "./components/SidebarResizer";
 import StatusBar from "./components/StatusBar";
-import TitleBar from "./components/TitleBar";
+import TitleBar, { type PreviewMode } from "./components/TitleBar";
 import Toast from "./components/Toast";
 import GroupChip from "./components/GroupChip";
 import DraftRestoreSummary from "./components/DraftRestoreSummary";
@@ -16,7 +17,7 @@ import { useDraft } from "./hooks/useDraft";
 import { useEditorTabs } from "./hooks/useEditorTabs";
 import { useGroups } from "./hooks/useGroups";
 import { setLang, t } from "./lib/i18n";
-import { basename, dirname, isUntitled } from "./lib/path";
+import { basename, dirname, isMarkdown, isUntitled, modelUri } from "./lib/path";
 import type { EditStats, EditorHandle } from "./lib/types";
 import {
   api,
@@ -93,6 +94,12 @@ export default function App() {
   const [rootDir, setRootDir] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [cursor, setCursor] = useState({ line: 1, column: 1 });
+  /**
+   * Preview layout per file. A missing key means "auto": markdown opens side by side,
+   * anything else is text only. Storing the choice is what makes it stick per file.
+   */
+  const [previewPref, setPreviewPref] = useState<Record<string, PreviewMode>>({});
+  const [scrollRatio, setScrollRatio] = useState(0);
   const [stats, setStats] = useState<EditStats>({
     selectionChars: 0,
     selectionLines: 0,
@@ -621,6 +628,61 @@ export default function App() {
   const detectIndentation =
     editorTab?.fileSettings.detectIndentation ?? settings.detectIndentation;
 
+  // Markdown opens side by side; anything else defaults to text only. The choice is
+  // remembered per file, so a document left in "preview only" reopens that way.
+  const previewMode: PreviewMode =
+    (editorTab && previewPref[editorTab.path]) || (editorTab && isMarkdown(editorTab.path) ? "split" : "text");
+  const showEditor = previewMode !== "preview";
+  const showPreview = previewMode !== "text" && !!editorTab;
+  const setPreviewMode = useCallback((mode: PreviewMode) => {
+    const path = tabs.activeTab?.path;
+    if (!path) return;
+    setPreviewPref((prev) => ({ ...prev, [path]: mode }));
+  }, [tabs.activeTab?.path]);
+
+  /** Context-menu shortcut: flip between text and split without touching the control. */
+  const togglePreview = useCallback(
+    (path: string) => {
+      setPreviewPref((prev) => {
+        const current = prev[path] ?? (isMarkdown(path) ? "split" : "text");
+        return { ...prev, [path]: current === "text" ? "split" : "text" };
+      });
+    },
+    []
+  );
+
+  /** The preview is the driver when the user scrolls it, so mirror it into the editor. */
+  const scrollEditorToRatio = useCallback((ratio: number) => {
+    setScrollRatio(ratio);
+    const editor = editorRef.current?.editor;
+    if (!editor) return;
+    const max = editor.getScrollHeight() - editor.getLayoutInfo().height;
+    if (max > 0) editor.setScrollTop(max * ratio);
+  }, []);
+
+  // A fresh document starts at the top rather than inheriting the last scroll position.
+  useEffect(() => {
+    setScrollRatio(0);
+  }, [editorTab?.path]);
+
+  // Preview text is read straight off the model on every render rather than mirrored
+  // into state: `editorRef` is only filled in by `onReady`, which lands after the first
+  // render, so an effect that seeds it would see a null handle and never retry. Reading
+  // the model for the *current* path also avoids a one-frame flash of the previous file.
+  // `setStats` fires on every content change, so this stays in step while typing.
+  const docText = (() => {
+    const handle = editorRef.current;
+    const path = editorTab?.path;
+    if (!path) return "";
+    if (!handle) {
+      // The editor can be unmounted (settings tab is showing). Fall back to the tab's
+      // baseline content rather than rendering nothing.
+      return editorTab?.original ?? "";
+    }
+    const model = handle.monaco.editor.getModel(handle.monaco.Uri.parse(modelUri(path)));
+    return model?.getValue() ?? editorTab?.original ?? "";
+  })();
+
   return (
     <div className="app" data-density={settings.compactMode ? "compact" : "cozy"}>
       <TitleBar
@@ -638,6 +700,8 @@ export default function App() {
             onRemove={groups.remove}
           />
         }
+        previewMode={editorTab && isMarkdown(editorTab.path) ? previewMode : null}
+        onPreviewMode={setPreviewMode}
         onSelect={tabs.selectTab}
         onClose={tabs.closeTab}
         onTabContextMenu={(tabId, x, y) => setTabMenu({ tabId, x, y, panel: "root" })}
@@ -675,9 +739,20 @@ export default function App() {
           />
         )}
 
-        <div className="editor-wrap">
+        <div
+          className={`editor-wrap${
+            previewMode === "split" ? " split" : previewMode === "preview" ? " preview-only" : ""
+          }`}
+        >
+          {/* The editor stays mounted in preview-only mode and is only hidden: unmounting
+              would let @monaco-editor/react dispose the model, and the live buffer —
+              unsaved edits and undo stack included — exists only in that model.
+              `automaticLayout` re-measures it once it becomes visible again. */}
           {editorTab && (
-            <div className="editor-host" style={{ display: showSettings ? "none" : "block" }}>
+            <div
+              className="editor-host"
+              style={{ display: showSettings || !showEditor ? "none" : "block" }}
+            >
               <Editor
                 tab={editorTab}
                 fontSize={settings.fontSize}
@@ -694,11 +769,21 @@ export default function App() {
                   tabs.onCursorChange(offset);
                 }}
                 onStats={setStats}
+                onScrollRatio={setScrollRatio}
                 onReady={(handle) => {
                   editorRef.current = handle;
                 }}
               />
             </div>
+          )}
+
+          {showPreview && !showSettings && editorTab && (
+            <MarkdownPreview
+              text={docText}
+              path={editorTab.path}
+              scrollRatio={scrollRatio}
+              onScrollRatio={scrollEditorToRatio}
+            />
           )}
 
           {!editorTab && <div className="editor-empty">{t("app.empty")}</div>}
@@ -775,6 +860,22 @@ export default function App() {
               >
                 <span className="ctx-tick">{menuMinimapOn ? "✓" : ""}</span>
                 {t("title.menuMinimap")}
+              </div>
+              <div
+                className="ctx-item"
+                onClick={() => {
+                  if (menuTabPath) togglePreview(menuTabPath);
+                  setTabMenu(null);
+                }}
+              >
+                <span className="ctx-tick">
+                  {menuTabPath &&
+                  (previewPref[menuTabPath] ?? (isMarkdown(menuTabPath) ? "split" : "text")) !==
+                    "text"
+                    ? "✓"
+                    : ""}
+                </span>
+                {t("title.menuPreview")}
               </div>
               <div className="ws-sep" />
               {(["move", "copy", "moveAll"] as const).map((panel) => (

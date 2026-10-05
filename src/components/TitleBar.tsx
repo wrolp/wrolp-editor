@@ -2,8 +2,25 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import TabBar, { TabGlyph } from "./TabBar";
 import { t } from "../lib/i18n";
-import { IconChevron, IconOpenFolder, IconSettings, IconSidebar } from "./icons";
+import {
+  IconChevron,
+  IconModePreview,
+  IconModeSplit,
+  IconModeText,
+  IconOpenFolder,
+  IconSettings,
+  IconSidebar,
+} from "./icons";
 import type { Tab } from "../lib/types";
+
+/** How the editor and the markdown preview share the space. */
+export type PreviewMode = "text" | "split" | "preview";
+
+const MODE_ICON = {
+  text: IconModeText,
+  split: IconModeSplit,
+  preview: IconModePreview,
+} as const;
 
 interface Props {
   tabs: Tab[];
@@ -11,6 +28,9 @@ interface Props {
   sidebarVisible: boolean;
   /** Rendered at the left of the tab strip: the group switcher. */
   groupSlot?: ReactNode;
+  /** Current preview layout; null hides the control (not a markdown document). */
+  previewMode: PreviewMode | null;
+  onPreviewMode: (mode: PreviewMode) => void;
   onSelect: (id: number) => void;
   onClose: (id: number) => void;
   onTabContextMenu: (id: number, x: number, y: number) => void;
@@ -106,6 +126,30 @@ export default function TitleBar(props: Props) {
       </button>
 
       <div className="titlebar-actions">
+        {props.previewMode && (
+          <div
+            className="mode-seg"
+            role="group"
+            aria-label={t("preview.label")}
+            data-tauri-drag-region="false"
+          >
+            {(["text", "split", "preview"] as const).map((mode) => {
+              const Glyph = MODE_ICON[mode];
+              const active = props.previewMode === mode;
+              return (
+                <button
+                  key={mode}
+                  className={`mode-btn${active ? " active" : ""}`}
+                  title={t(`preview.${mode}`)}
+                  aria-pressed={active}
+                  onClick={() => props.onPreviewMode(mode)}
+                >
+                  <Glyph />
+                </button>
+              );
+            })}
+          </div>
+        )}
         <button className="tb-icon" title={t("title.open")} onClick={props.onOpenFiles}>
           <IconOpenFolder />
         </button>

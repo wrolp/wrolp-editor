@@ -21,6 +21,8 @@ interface Props {
   onCursor: (position: CursorPos, offset: number) => void;
   /** Selection and document totals, refreshed on every selection or content change. */
   onStats: (stats: EditStats) => void;
+  /** Scroll position as 0..1, so a side-by-side preview can track it. */
+  onScrollRatio: (ratio: number) => void;
   onReady: (handle: EditorHandle | null) => void;
 }
 
@@ -37,12 +39,15 @@ export default function Editor({
   onChange,
   onCursor,
   onStats,
+  onScrollRatio,
   onReady,
 }: Props) {
   const cursorRef = useRef(onCursor);
   cursorRef.current = onCursor;
   const statsRef = useRef(onStats);
   statsRef.current = onStats;
+  const scrollRef = useRef(onScrollRatio);
+  scrollRef.current = onScrollRatio;
   const readyRef = useRef(onReady);
   readyRef.current = onReady;
   const instanceRef = useRef<editor.IStandaloneCodeEditor | null>(null);
@@ -86,6 +91,11 @@ export default function Editor({
       // Fires for typing, undo/redo and programmatic setValue (a draft restore), which
       // is why the total is taken from the model event rather than the React onChange.
       instance.onDidChangeModelContent(report);
+      instance.onDidScrollChange((e) => {
+        // The event carries no viewport height, so ask the editor for its layout.
+        const max = e.scrollHeight - instance.getLayoutInfo().height;
+        scrollRef.current(max > 0 ? e.scrollTop / max : 0);
+      });
       report();
     },
     [report]

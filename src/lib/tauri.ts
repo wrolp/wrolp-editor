@@ -161,6 +161,11 @@ export const api = {
   saveFileSettings: (path: string, settings: FileSettings) =>
     invoke<FileSettings>("save_file_settings", { path, settings }),
   clearFileSettings: (path: string) => invoke<void>("clear_file_settings", { path }),
+  /**
+   * Grant the asset protocol read access to one directory, so markdown can render
+   * relative images. Called with the opened file's own folder and nothing wider.
+   */
+  allowAssetDir: (dir: string) => invoke<void>("allow_asset_dir", { dir }),
   getHistory: () => invoke<HistoryEntry[]>("get_history"),
   removeHistory: (path: string) => invoke<HistoryEntry[]>("remove_history", { path }),
   getSettings: () => invoke<Settings>("get_settings"),

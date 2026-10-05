@@ -119,6 +119,11 @@ const EN: Table = {
 
   "title.menuFileSettings": "File settings…",
   "title.menuMinimap": "Show minimap",
+  "title.menuPreview": "Markdown preview",
+  "preview.label": "Preview layout",
+  "preview.text": "Editor only",
+  "preview.split": "Editor and preview side by side",
+  "preview.preview": "Preview only",
   "fileSettings.title": "Settings for {name}",
   "fileSettings.detected": "This file was read as {encoding}. It is always saved back in that encoding.",
   "fileSettings.follow": "Follow global ({value})",
@@ -301,6 +306,11 @@ const ZH: Table = {
 
   "title.menuFileSettings": "文件设置…",
   "title.menuMinimap": "显示缩略图",
+  "title.menuPreview": "Markdown 预览",
+  "preview.label": "预览布局",
+  "preview.text": "只显示文本",
+  "preview.split": "左边文本，右边预览",
+  "preview.preview": "只显示预览",
   "fileSettings.title": "{name} 的设置",
   "fileSettings.detected": "该文件以 {encoding} 读取，保存时始终写回这个编码。",
   "fileSettings.follow": "跟随全局（{value}）",

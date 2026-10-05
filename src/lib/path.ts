@@ -117,3 +117,11 @@ export function tabIcon(name: string): { cls: string; sym: string } {
   const group = EXT_GROUP[extOf(name)] ?? "file";
   return ICON_BY_GROUP[group];
 }
+
+/** Extensions the preview treats as markdown. */
+const MARKDOWN_EXT = new Set(["md", "markdown", "mdown", "mkd"]);
+
+/** True when a path looks like markdown, which is what the preview is for. */
+export function isMarkdown(path: string): boolean {
+  return MARKDOWN_EXT.has(extOf(path).toLowerCase());
+}
