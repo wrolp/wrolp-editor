@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { IconFile, IconFolder } from "./icons";
+import { IconFolder } from "./icons";
+import FileIcon from "./FileIcon";
 import { t } from "../lib/i18n";
 import {
   api,
@@ -112,7 +113,7 @@ function FileRow({
       >
         <span className="chev" />
         <span className="ti">
-          <IconFile />
+          <FileIcon name={entry.name} />
         </span>
         <span className="tn">{entry.name}</span>
       </div>

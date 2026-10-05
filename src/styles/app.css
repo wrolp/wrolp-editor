@@ -116,15 +116,186 @@ body {
   background: #3f3f46;
   color: #fff;
 }
-.tab .tab-icon {
-  display: flex;
+/* ---------- File type glyph ----------
+   One box, one or two characters, colour per type family (see `fileIcon` in
+   lib/path.ts). Sizes are fixed so file names line up in the tab strip, the tab
+   dropdown and the Explorer tree. */
+.file-glyph {
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex: 0 0 16px;
   width: 16px;
   height: 16px;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 700;
-  flex: 0 0 16px;
+  line-height: 1;
+  letter-spacing: -0.3px;
+}
+.tree-row .file-glyph {
+  flex-basis: 15px;
+  width: 15px;
+  height: 15px;
+  font-size: 10px;
+}
+.file-glyph.icon-file,
+.file-glyph.icon-settings {
+  color: #9ca3af;
+}
+
+/* Prose and documents */
+.file-glyph.icon-text {
+  color: #9ca3af;
+}
+.file-glyph.icon-md {
+  color: #f472b6;
+}
+.file-glyph.icon-doc {
+  color: #7aa7f0;
+}
+.file-glyph.icon-sheet {
+  color: #46b06a;
+}
+.file-glyph.icon-slides {
+  color: #d0603a;
+}
+.file-glyph.icon-pdf {
+  color: #e05a5a;
+}
+.file-glyph.icon-license {
+  color: #9aa7b8;
+}
+
+/* Markup and styles */
+.file-glyph.icon-html {
+  color: #e8734a;
+}
+.file-glyph.icon-css {
+  color: #60a5fa;
+}
+.file-glyph.icon-scss {
+  color: #dd7fa8;
+}
+.file-glyph.icon-xml {
+  color: #38bdf8;
+}
+.file-glyph.icon-svg {
+  color: #ffb13b;
+}
+.file-glyph.icon-vue {
+  color: #42b883;
+}
+.file-glyph.icon-svelte {
+  color: #f97316;
+}
+
+/* Structured data and config */
+.file-glyph.icon-json {
+  color: #facc15;
+}
+.file-glyph.icon-yaml {
+  color: #e05555;
+}
+.file-glyph.icon-toml {
+  color: #c08a5a;
+}
+.file-glyph.icon-ini {
+  color: #8fa3b8;
+}
+.file-glyph.icon-sql {
+  color: #eda04a;
+}
+
+/* Shells */
+.file-glyph.icon-sh {
+  color: #4ade80;
+}
+.file-glyph.icon-batch {
+  color: #b8b8b8;
+}
+.file-glyph.icon-ps {
+  color: #3ba3dd;
+}
+
+/* Code */
+.file-glyph.icon-ts {
+  color: #4b9fe1;
+}
+.file-glyph.icon-js {
+  color: #e3d34f;
+}
+.file-glyph.icon-py {
+  color: #60a5fa;
+}
+.file-glyph.icon-rs {
+  color: #d95f3b;
+}
+.file-glyph.icon-go {
+  color: #38b0c9;
+}
+.file-glyph.icon-java {
+  color: #e8a33d;
+}
+.file-glyph.icon-kt {
+  color: #a97bff;
+}
+.file-glyph.icon-swift {
+  color: #f4707a;
+}
+.file-glyph.icon-c {
+  color: #9fb3c8;
+}
+.file-glyph.icon-cpp {
+  color: #e0557f;
+}
+.file-glyph.icon-cs {
+  color: #57ad57;
+}
+.file-glyph.icon-php {
+  color: #8f7ee0;
+}
+.file-glyph.icon-rb {
+  color: #e05555;
+}
+.file-glyph.icon-pl {
+  color: #45a0c8;
+}
+.file-glyph.icon-lua {
+  color: #6f8ce0;
+}
+.file-glyph.icon-r {
+  color: #75aadb;
+}
+
+/* Assets and binaries */
+.file-glyph.icon-image {
+  color: #b07cd8;
+}
+.file-glyph.icon-font {
+  color: #b28cff;
+}
+.file-glyph.icon-audio {
+  color: #f59e0b;
+}
+.file-glyph.icon-video {
+  color: #a78bfa;
+}
+.file-glyph.icon-archive {
+  color: #d4a72c;
+}
+.file-glyph.icon-binary {
+  color: #b0b0b0;
+}
+
+/* Project files without an extension */
+.file-glyph.icon-docker {
+  color: #2496ed;
+}
+.file-glyph.icon-git {
+  color: #f14e32;
+}
+.file-glyph.icon-env {
+  color: #d1a24a;
 }
 .tab .tab-name {
   overflow: hidden;
@@ -164,31 +335,6 @@ body {
 .tab.empty:hover {
   background: transparent;
   color: var(--muted);
-}
-
-.tab-icon.icon-sh {
-  color: #4ade80;
-}
-.tab-icon.icon-json {
-  color: #facc15;
-}
-.tab-icon.icon-list {
-  color: #9ca3af;
-}
-.tab-icon.icon-html {
-  color: #60a5fa;
-}
-.tab-icon.icon-css {
-  color: #60a5fa;
-}
-.tab-icon.icon-md {
-  color: #f472b6;
-}
-.tab-icon.icon-py {
-  color: #60a5fa;
-}
-.tab-icon.icon-file {
-  color: #9ca3af;
 }
 
 .tab-new {
@@ -1315,6 +1461,12 @@ body.resizing .editor-host {
   height: 16px;
   flex-basis: 16px;
   font-size: 13px;
+}
+.app[data-density="compact"] .file-glyph {
+  flex-basis: 14px;
+  width: 14px;
+  height: 14px;
+  font-size: 9px;
 }
 .app[data-density="compact"] .tab-new,
 .app[data-density="compact"] .tab-list-btn {

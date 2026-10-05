@@ -1,12 +1,7 @@
 import { useEffect, useRef } from "react";
 import { t } from "../lib/i18n";
-import { tabIcon } from "../lib/path";
+import FileIcon from "./FileIcon";
 import type { Tab } from "../lib/types";
-
-export function TabGlyph({ name }: { name: string }) {
-  const icon = tabIcon(name);
-  return <span className={`tab-icon ${icon.cls}`}>{icon.sym}</span>;
-}
 
 interface Props {
   tabs: Tab[];
@@ -77,9 +72,9 @@ export default function TabBar({ tabs, activeId, onSelect, onClose, onContextMen
           title={tab.isSettings ? t("tab.settings") : tab.path}
         >
           {tab.isSettings ? (
-            <span className="tab-icon icon-file">⚙</span>
+            <span className="file-glyph icon-settings">⚙</span>
           ) : (
-            <TabGlyph name={tab.name} />
+            <FileIcon name={tab.name} />
           )}
           <span className="tab-name">{tab.name}</span>
           {tab.dirty && !tab.isSettings && <span className="tab-dirty">U</span>}
