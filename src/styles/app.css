@@ -687,9 +687,77 @@ body.resizing .editor-host {
   font-size: 12px;
   cursor: pointer;
   text-align: left;
+  /* One line only: a wrapped two-line button reads as broken. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .side-btn:hover {
   background: #454545;
+}
+
+/* Explorer root: the folder the tree is showing, above the actions. */
+.side-root {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 10px 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #2a2a2a;
+  overflow: hidden;
+}
+.side-root-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #7a7a7a;
+}
+.side-root-path {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Long paths read better from the folder name backwards. */
+  direction: rtl;
+  text-align: left;
+}
+
+/* Two-line tree tooltip: name first, dimmed full path underneath. */
+.tree-tip {
+  position: fixed;
+  z-index: 120;
+  /* Below the row: a tooltip above the pointer covers the item being pointed at. */
+  transform: translateY(3px);
+  max-width: 420px;
+  padding: 6px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: #252526;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  pointer-events: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* Near the right edge there is no room to the right, so the bubble hangs off the
+   cursor's right side instead of being clipped by the window. */
+.tree-tip.align-end {
+  transform: translateY(3px) translateX(-100%);
+}
+.tree-tip-name {
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+}
+.tree-tip-path {
+  font-size: 11px;
+  color: #7f7f7f;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .side-actions {
   display: flex;
@@ -707,6 +775,10 @@ body.resizing .editor-host {
 
 .tree {
   font-size: 12px;
+  /* Room for the tooltip, which opens below the row: two lines of text plus padding come
+     to roughly 40px, so anything less clips the bubble for the last entry once the tree
+     is scrolled to the bottom. Doubles as visual breathing room. */
+  padding-bottom: 48px;
 }
 .tree-row {
   display: flex;

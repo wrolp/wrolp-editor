@@ -1,13 +1,81 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { IconFile, IconFolder } from "./icons";
 import { t } from "../lib/i18n";
-import { api, errorMessage, type FsEntry, type HistoryEntry } from "../lib/tauri";
+import {
+  api,
+  copyText,
+  errorMessage,
+  parentOf,
+  type FsEntry,
+  type HistoryEntry,
+} from "../lib/tauri";
 import { pathKey } from "../lib/types";
+
+/** A tree node the Explorer context menu is acting on. */
+interface MenuTarget {
+  path: string;
+  name: string;
+  isDir: boolean;
+  x: number;
+  y: number;
+}
+
+interface TipProps {
+  children: ReactNode;
+  /** First line: the name as shown in the tree. */
+  name: string;
+  /** Second line: the full path, dimmed so the name reads first. */
+  detail?: string;
+}
+
+/**
+ * Two-line tooltip for the file tree: name on top, full path underneath.
+ *
+ * A native `title` attribute cannot do this — it renders one unstyled string in an
+ * OS-drawn bubble, so the path would end up on the same line and could not be dimmed.
+ * Hence the overlay. It sits below the row unconditionally: a tooltip above the cursor
+ * covers the very thing being pointed at, and the tree reserves room at the bottom.
+ */
+function TreeTooltip({ children, name, detail }: TipProps) {
+  // `alignEnd` right-aligns the bubble to the cursor when there is not enough room to
+  // the right, which is what keeps it on screen near the window edge.
+  const [tip, setTip] = useState<{ x: number; y: number; alignEnd: boolean } | null>(null);
+  return (
+    <>
+      <div
+        onMouseEnter={(e) => {
+          const rect = e.currentTarget.getBoundingClientRect();
+          const widest = 444; // the CSS max-width plus a little breathing room
+          setTip({
+            x: e.clientX,
+            y: rect.bottom,
+            alignEnd: e.clientX > window.innerWidth - widest,
+          });
+        }}
+        onMouseLeave={() => setTip(null)}
+      >
+        {children}
+      </div>
+      {tip && detail && (
+        <div
+          className={`tree-tip${tip.alignEnd ? " align-end" : ""}`}
+          style={{ left: tip.x, top: tip.y }}
+          role="tooltip"
+        >
+          <span className="tree-tip-name">{name}</span>
+          <span className="tree-tip-path">{detail}</span>
+        </div>
+      )}
+    </>
+  );
+}
 
 interface TreeHandlers {
   activePath: string | null;
   onOpenPath: (path: string) => void;
   onError: (message: string) => void;
+  /** Opens the Explorer context menu for a node. */
+  onContextMenu: (target: Omit<MenuTarget, "x" | "y">, x: number, y: number) => void;
 }
 
 interface NodeProps extends TreeHandlers {
@@ -22,25 +90,42 @@ function indent(depth: number) {
   return { paddingLeft: 12 + depth * 16 };
 }
 
-function FileRow({ entry, depth, activePath, onOpenPath }: NodeProps & { entry: FsEntry }) {
+function FileRow({
+  entry,
+  depth,
+  activePath,
+  onOpenPath,
+  onContextMenu: openMenu,
+}: NodeProps & { entry: FsEntry }) {
   const active = !!activePath && pathKey(activePath) === pathKey(entry.path);
   return (
-    <div
-      className={`tree-row file${active ? " ctx-active" : ""}`}
-      style={indent(depth)}
-      title={entry.path}
-      onClick={() => onOpenPath(entry.path)}
-    >
-      <span className="chev" />
-      <span className="ti">
-        <IconFile />
-      </span>
-      <span className="tn">{entry.name}</span>
-    </div>
+    <TreeTooltip name={entry.name} detail={entry.path}>
+      <div
+        className={`tree-row file${active ? " ctx-active" : ""}`}
+        style={indent(depth)}
+        onClick={() => onOpenPath(entry.path)}
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openMenu({ path: entry.path, name: entry.name, isDir: false }, e.clientX, e.clientY);
+        }}
+      >
+        <span className="chev" />
+        <span className="ti">
+          <IconFile />
+        </span>
+        <span className="tn">{entry.name}</span>
+      </div>
+    </TreeTooltip>
   );
 }
 
-function FolderNode({ entry, depth, ...handlers }: NodeProps & { entry: FsEntry }) {
+function FolderNode({
+  entry,
+  depth,
+  onContextMenu: openMenu,
+  ...handlers
+}: NodeProps & { entry: FsEntry }) {
   const [collapsed, setCollapsed] = useState(depth >= 1);
   const [children, setChildren] = useState<FsEntry[] | null>(null);
 
@@ -64,24 +149,36 @@ function FolderNode({ entry, depth, ...handlers }: NodeProps & { entry: FsEntry 
 
   return (
     <>
-      <div
-        className={`tree-row folder${collapsed ? " collapsed" : ""}`}
-        style={indent(depth)}
-        onClick={() => setCollapsed((v) => !v)}
-      >
-        <span className="chev">▾</span>
-        <span className="ti">
-          <IconFolder />
-        </span>
-        <span className="tn">{entry.name.replace(/\/$/, "")}</span>
-      </div>
+      <TreeTooltip name={entry.name.replace(/\/$/, "")} detail={entry.path}>
+        <div
+          className={`tree-row folder${collapsed ? " collapsed" : ""}`}
+          style={indent(depth)}
+          onClick={() => setCollapsed((v) => !v)}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            openMenu({ path: entry.path, name: entry.name, isDir: true }, e.clientX, e.clientY);
+          }}
+        >
+          <span className="chev">▾</span>
+          <span className="ti">
+            <IconFolder />
+          </span>
+          <span className="tn">{entry.name.replace(/\/$/, "")}</span>
+        </div>
+      </TreeTooltip>
       {!collapsed &&
         (children === null ? (
           <div className="empty" style={indent(depth + 1)}>
             {t("side.loading")}
           </div>
         ) : (
-          <TreeLevel {...handlers} entries={children} depth={depth + 1} />
+          <TreeLevel
+            {...handlers}
+            entries={children}
+            depth={depth + 1}
+            onContextMenu={openMenu}
+          />
         ))}
     </>
   );
@@ -101,7 +198,7 @@ function TreeLevel({ entries, depth, ...handlers }: LevelProps) {
   );
 }
 
-interface Props extends TreeHandlers {
+interface Props extends Omit<TreeHandlers, "onContextMenu"> {
   visible: boolean;
   width: number;
   view: "explorer" | "history";
@@ -110,6 +207,10 @@ interface Props extends TreeHandlers {
   onSetView: (view: "explorer" | "history") => void;
   onPickFolder: () => void;
   onRemoveHistory: (path: string) => void;
+  /** Reveals a path in the Windows Explorer. */
+  onReveal: (path: string) => void;
+  /** Points the Explorer at a folder, the same action as the tab menu's. */
+  onSetRoot: (dir: string) => void;
 }
 
 export default function Sidebar(props: Props) {
@@ -125,9 +226,46 @@ export default function Sidebar(props: Props) {
     onSetView,
     onPickFolder,
     onRemoveHistory,
+    onReveal,
+    onSetRoot,
   } = props;
   const [entries, setEntries] = useState<FsEntry[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [menu, setMenu] = useState<MenuTarget | null>(null);
+
+  // Any click elsewhere, a scroll, or losing focus dismisses the menu. `mousedown` rather
+  // than `click` so the click that opened it cannot immediately close it again.
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("wheel", close, { passive: true });
+    window.addEventListener("blur", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("wheel", close);
+      window.removeEventListener("blur", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menu]);
+
+  const copy = async (text: string) => {
+    const ok = await copyText(text);
+    onError(ok ? t("side.copied", { value: text }) : t("side.copyFailed"));
+  };
+
+  /** Path relative to the tree root, which is what a teammate would want pasted. */
+  const relativeToRoot = (path: string) => {
+    if (!rootDir) return path;
+    const root = rootDir.replace(/[\\/]+$/, "");
+    return pathKey(path).startsWith(pathKey(root) + "/")
+      ? path.slice(root.length + 1)
+      : path;
+  };
 
   useEffect(() => {
     if (!rootDir) {
@@ -171,6 +309,10 @@ export default function Sidebar(props: Props) {
       </div>
 
       <div className={`side-view${view === "explorer" ? " active" : ""}`}>
+        <div className="side-root" title={rootDir ?? undefined}>
+          <span className="side-root-label">{t("side.rootLabel")}</span>
+          <span className="side-root-path">{rootDir ?? t("side.noFolder")}</span>
+        </div>
         <div className="side-actions">
           <button className="side-btn" onClick={onPickFolder}>
             {t("side.openFolder")}
@@ -194,6 +336,7 @@ export default function Sidebar(props: Props) {
               activePath={activePath}
               onOpenPath={onOpenPath}
               onError={onError}
+              onContextMenu={(target, x, y) => setMenu({ ...target, x, y })}
             />
           )}
         </div>
@@ -226,6 +369,67 @@ export default function Sidebar(props: Props) {
           ))
         )}
       </div>
+
+      {menu && (
+        <div
+          className="ctx-menu"
+          style={{ display: "block", left: menu.x, top: menu.y }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <div
+            className="ctx-item"
+            onClick={() => {
+              if (menu.isDir) onReveal(menu.path);
+              else onOpenPath(menu.path);
+              setMenu(null);
+            }}
+          >
+            {t("side.menuOpen")}
+          </div>
+          <div
+            className="ctx-item"
+            onClick={() => {
+              onReveal(menu.path);
+              setMenu(null);
+            }}
+          >
+            {t("side.menuReveal")}
+          </div>
+          <div className="ws-sep" />
+          <div className="ctx-item" onClick={() => { void copy(menu.name); setMenu(null); }}>
+            {t("side.menuCopyName")}
+          </div>
+          <div className="ctx-item" onClick={() => { void copy(menu.path); setMenu(null); }}>
+            {t("side.menuCopyPath")}
+          </div>
+          <div
+            className="ctx-item"
+            onClick={() => { void copy(relativeToRoot(menu.path)); setMenu(null); }}
+          >
+            {t("side.menuCopyRelative")}
+          </div>
+          <div
+            className="ctx-item"
+            onClick={() => { void copy(parentOf(menu.path)); setMenu(null); }}
+          >
+            {t("side.menuCopyParent")}
+          </div>
+          {menu.isDir && (
+            <>
+              <div className="ws-sep" />
+              <div
+                className="ctx-item"
+                onClick={() => {
+                  onSetRoot(menu.path);
+                  setMenu(null);
+                }}
+              >
+                {t("side.menuSetRoot")}
+              </div>
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 }

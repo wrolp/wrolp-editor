@@ -21,6 +21,7 @@ import { basename, dirname, isMarkdown, isUntitled, modelUri } from "./lib/path"
 import type { EditStats, EditorHandle } from "./lib/types";
 import {
   api,
+  copyText,
   errorMessage,
   listen,
   pickFiles,
@@ -62,21 +63,6 @@ function whitespaceMode(value: string): (typeof WHITESPACE_MODES)[number] {
 
 /** Never let a save-on-close turn into a window that cannot be closed. */
 const CLOSE_FLUSH_TIMEOUT_MS = 2000;
-
-async function copyText(text: string): Promise<boolean> {
-  try {
-    await navigator.clipboard.writeText(text);
-    return true;
-  } catch {
-    const area = document.createElement("textarea");
-    area.value = text;
-    document.body.appendChild(area);
-    area.select();
-    const ok = document.execCommand("copy");
-    document.body.removeChild(area);
-    return ok;
-  }
-}
 
 export default function App() {
   const [toastState, setToastState] = useState({ message: "", visible: false });
@@ -728,6 +714,14 @@ export default function App() {
               .then(setHistory)
               .catch((e) => toast(errorMessage(e)))
           }
+          onReveal={(path) => {
+            revealItemInDir(path).catch((e) => toast(errorMessage(e)));
+          }}
+          onSetRoot={(dir) => {
+            setSidebarView("explorer");
+            setSidebarVisible(true);
+            setSidebarRoot(dir);
+          }}
           onError={toast}
         />
         {sidebarShown && (

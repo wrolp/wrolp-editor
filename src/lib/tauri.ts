@@ -203,3 +203,32 @@ export function errorMessage(e: unknown): string {
   if (e instanceof Error) return e.message;
   return String(e);
 }
+
+/**
+ * Copy text to the clipboard.
+ *
+ * `navigator.clipboard` is unavailable outside a secure context, which includes a Tauri
+ * window served from a custom scheme, so the `execCommand` path is kept as a real
+ * fallback rather than as legacy. It has to run inside the user gesture, so callers
+ * should invoke this directly from a click handler.
+ */
+export async function copyText(text: string): Promise<boolean> {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const area = document.createElement("textarea");
+    area.value = text;
+    document.body.appendChild(area);
+    area.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(area);
+    return ok;
+  }
+}
+
+/** Path of the directory containing `path`, or "." when there is no parent. */
+export function parentOf(path: string): string {
+  const cut = path.replace(/[\\/][^\\/]*$/, "");
+  return cut || ".";
+}
