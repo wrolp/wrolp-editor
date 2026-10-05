@@ -465,6 +465,14 @@ body {
   color: var(--muted);
 }
 
+.titlebar-drag {
+  /* Grows into the leftover titlebar space so there is always a draggable region,
+     but never crowds the controls: it only ever absorbs free space. */
+  flex: 1 1 0;
+  min-width: 24px;
+  height: 100%;
+}
+
 .titlebar-actions {
   display: flex;
   align-items: center;

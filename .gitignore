@@ -8,6 +8,8 @@ package-lock.json
 
 dist-check
 
+.idea
+
 # Playwright E2E output
 test-results/
 playwright-report/

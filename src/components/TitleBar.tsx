@@ -125,6 +125,10 @@ export default function TitleBar(props: Props) {
         +
       </button>
 
+      {/* Guaranteed drag handle: unlike the tab strip, this stays draggable even when
+          tabs overflow and fill the whole strip. */}
+      <div className="titlebar-drag" data-tauri-drag-region aria-hidden="true" />
+
       <div className="titlebar-actions">
         {props.previewMode && (
           <div
