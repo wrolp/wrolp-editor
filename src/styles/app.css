@@ -1145,6 +1145,15 @@ body.resizing .editor-host {
   font-size: 15px;
   margin-bottom: 12px;
 }
+/* The title is the drag handle (see useModalDrag), so it has to read as one and must not
+   let a drag turn into a text selection. */
+.modal-title {
+  cursor: move;
+  user-select: none;
+}
+.modal[data-dragging] {
+  user-select: none;
+}
 .modal p {
   font-size: 13px;
   line-height: 1.6;

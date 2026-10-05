@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { t } from "../lib/i18n";
+import { useModalDrag } from "../hooks/useModalDrag";
 import type { NameProblem } from "../hooks/useGroups";
 
 interface Props {
@@ -17,6 +18,7 @@ export default function NewGroupDialog({ validate, onConfirm, onCancel }: Props)
   const [value, setValue] = useState("");
   const [problem, setProblem] = useState<NameProblem>("ok");
   const inputRef = useRef<HTMLInputElement>(null);
+  const drag = useModalDrag<HTMLDivElement>();
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -30,8 +32,10 @@ export default function NewGroupDialog({ validate, onConfirm, onCancel }: Props)
 
   return (
     <div className="modal-overlay">
-      <div className="modal">
-        <h3>{t("grp.newTitle")}</h3>
+      <div className="modal" ref={drag.ref}>
+        <h3 className="modal-title" {...drag.handleProps}>
+          {t("grp.newTitle")}
+        </h3>
         <input
           ref={inputRef}
           className="grp-input"

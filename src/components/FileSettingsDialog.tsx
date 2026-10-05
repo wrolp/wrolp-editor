@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { t } from "../lib/i18n";
+import { useModalDrag } from "../hooks/useModalDrag";
 import SettingCheck from "./SettingCheck";
 import { api, errorMessage, EMPTY_FILE_SETTINGS, type FileSettings, type FileSettingsView } from "../lib/tauri";
 
@@ -23,6 +24,7 @@ export default function FileSettingsDialog({
 }: Props) {
   const [view, setView] = useState<FileSettingsView | null>(null);
   const [overrides, setOverrides] = useState<FileSettings | null>(null);
+  const drag = useModalDrag<HTMLDivElement>();
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
 
@@ -76,8 +78,10 @@ export default function FileSettingsDialog({
 
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <h3>{t("fileSettings.title", { name })}</h3>
+      <div className="modal" ref={drag.ref} onClick={(e) => e.stopPropagation()}>
+        <h3 className="modal-title" {...drag.handleProps}>
+          {t("fileSettings.title", { name })}
+        </h3>
         {!view || !overrides ? (
           <p className="muted">{t("app.loading")}</p>
         ) : (
