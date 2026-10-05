@@ -988,7 +988,13 @@ body.resizing .editor-host {
   gap: 10px;
   font-size: 13px;
   margin: 6px 0;
+}
+.setting-row select,
+.setting-row input {
   cursor: pointer;
+}
+.setting-row input[type="number"] {
+  cursor: text;
 }
 .setting-row input[type="checkbox"] {
   width: 16px;

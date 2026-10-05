@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { LANGUAGES, t } from "../lib/i18n";
 import SettingCheck from "./SettingCheck";
+import SettingField from "./SettingField";
 import type { MenuTarget, Settings } from "../lib/tauri";
 
 type Category = "context" | "general" | "about";
@@ -100,8 +101,7 @@ export default function SettingsPanel({
           <div className="settings-cat">
             <h2>{t("settings.generalHeading")}</h2>
             <div className="setting-group">
-              <label className="setting-row">
-                <span className="setting-title">{t("settings.language")}</span>
+              <SettingField label={t("settings.language")}>
                 <select
                   className="select"
                   value={settings.language}
@@ -113,10 +113,9 @@ export default function SettingsPanel({
                     </option>
                   ))}
                 </select>
-              </label>
+              </SettingField>
               <p className="muted">{t("settings.languageDesc")}</p>
-              <label className="setting-row">
-                <span>{t("settings.fontSize")}</span>
+              <SettingField label={t("settings.fontSize")}>
                 <input
                   type="number"
                   min={10}
@@ -127,7 +126,7 @@ export default function SettingsPanel({
                     if (!Number.isNaN(size)) onSaveSettings({ fontSize: size });
                   }}
                 />
-              </label>
+              </SettingField>
               <SettingCheck
                 label={t("settings.minimap")}
                 checked={settings.minimap}
@@ -145,8 +144,7 @@ export default function SettingsPanel({
                 onChange={(v) => onSaveSettings({ compactMode: v })}
               />
               <p className="muted">{t("settings.compactModeDesc")}</p>
-              <label className="setting-row">
-                <span className="setting-title">{t("settings.renderWhitespace")}</span>
+              <SettingField label={t("settings.renderWhitespace")}>
                 <select
                   className="select"
                   value={settings.renderWhitespace}
@@ -158,7 +156,7 @@ export default function SettingsPanel({
                     </option>
                   ))}
                 </select>
-              </label>
+              </SettingField>
               <SettingCheck
                 label={t("settings.wordWrap")}
                 checked={settings.wordWrap}
@@ -170,8 +168,7 @@ export default function SettingsPanel({
                 onChange={(v) => onSaveSettings({ stickyScroll: v })}
               />
               <p className="muted">{t("settings.stickyScrollDesc")}</p>
-              <label className="setting-row">
-                <span>{t("settings.tabSize")}</span>
+              <SettingField label={t("settings.tabSize")}>
                 <input
                   type="number"
                   min={1}
@@ -182,7 +179,7 @@ export default function SettingsPanel({
                     if (!Number.isNaN(n) && n >= 1) onSaveSettings({ tabSize: n });
                   }}
                 />
-              </label>
+              </SettingField>
               <SettingCheck
                 label={t("settings.insertSpaces")}
                 checked={settings.insertSpaces}
@@ -200,8 +197,7 @@ export default function SettingsPanel({
                 onChange={(v) => onSaveSettings({ scrollBeyondLastLine: v })}
               />
               <p className="muted">{t("settings.scrollBeyondLastLineDesc")}</p>
-              <label className="setting-row">
-                <span className="setting-title">{t("settings.encoding")}</span>
+              <SettingField label={t("settings.encoding")}>
                 <select
                   className="select"
                   value={settings.encoding}
@@ -213,7 +209,7 @@ export default function SettingsPanel({
                     </option>
                   ))}
                 </select>
-              </label>
+              </SettingField>
               <p className="muted">{t("settings.encodingDesc")}</p>
               <p className="muted">{t("settings.persisted")}</p>
             </div>
