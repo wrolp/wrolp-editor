@@ -45,24 +45,32 @@ export default function TabBar({ tabs, activeId, onSelect, onClose, onContextMen
         if (max <= 0 || e.deltaY === 0) return;
         bar.scrollLeft = Math.max(0, Math.min(max, bar.scrollLeft + e.deltaY));
       }}
+      onPointerDown={(e) => {
+        // Open on the right-button press rather than on `contextmenu`. Same gesture, but
+        // `contextmenu` is passive and fires late, so anything that swallows it (a drag
+        // region, an embedded webview, a future overlay) leaves no fallback at all. The
+        // `contextmenu` handler below stays solely to suppress the native menu.
+        if (e.button !== 2) return;
+        const el = (e.target as HTMLElement).closest?.(".tab") as HTMLElement | null;
+        if (!el || el.classList.contains("empty")) return;
+        const id = Number(el.getAttribute("data-id"));
+        if (!Number.isNaN(id)) onContextMenu(id, e.clientX, e.clientY);
+      }}
       onContextMenu={(e) => {
-        const target = (e.target as HTMLElement).closest(".tab");
-        if (!target || target.classList.contains("empty")) return;
-        const id = Number(target.getAttribute("data-id"));
-        if (!Number.isNaN(id)) {
-          e.preventDefault();
-          onContextMenu(id, e.clientX, e.clientY);
-        }
+        // Only swallow the native menu when it was aimed at a tab; the empty strip
+        // should still get the usual browser menu.
+        const el = (e.target as HTMLElement).closest?.(".tab") as HTMLElement | null;
+        if (!el || el.classList.contains("empty")) return;
+        e.preventDefault();
       }}
     >
       {tabs.map((tab) => (
         <div
           key={tab.id}
           data-id={tab.id}
-          // The tab strip lives inside the title bar's drag region, and Tauri resolves
-          // that with closest(), so a tab counts as a drag region too. Without this
-          // opt-out, right-clicking a tab starts a window drag and the context menu
-          // never opens. "false" is Tauri's documented way to exclude a subtree.
+          // Not a drag region: Tauri's drag.js only drags on a bare attribute hit by the
+          // event target, and a tab is always a descendant. Marking it false states the
+          // intent and keeps it that way if the strip ever becomes "deep".
           data-tauri-drag-region="false"
           className={`tab${tab.id === activeId ? " active" : ""}`}
           onClick={() => onSelect(tab.id)}

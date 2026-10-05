@@ -437,9 +437,13 @@ export default function App() {
   useEffect(() => {
     if (!tabMenu) return;
     const hide = (e: MouseEvent) => {
-      // Panel switching happens by clicking inside the menu; that must not close it.
       const target = e.target as Node | null;
+      // Panel switching happens by clicking inside the menu; that must not close it.
       if (target && tabMenuRef.current?.contains(target)) return;
+      // A right-click on a tab is TabBar's business: it opens or re-points the menu.
+      // Closing here would race the pointerdown that just opened it, because the native
+      // contextmenu event arrives after React has already committed the menu.
+      if ((target as HTMLElement | null)?.closest?.(".tab")) return;
       setTabMenu(null);
     };
     window.addEventListener("click", hide);
