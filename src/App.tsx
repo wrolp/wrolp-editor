@@ -770,20 +770,15 @@ export default function App() {
   // it is always the picture, and the controls that would change it are not offered.
   const lockedToPicture = !!editorTab && isBitmapImage(editorTab.path);
   // The choice is remembered per file, so a document left in "preview only" reopens that way.
-  // A stored "text" is not remembered for a picture, though: there is nothing useful about
-  // looking at a photo as characters, and honoring it is how the pane ends up blank with no
-  // explanation. Markdown keeps the choice either way — "editor only" is a real preference
-  // for prose.
+  // A picture cannot opt out of the preview the way a document can: the bytes behind it are
+  // not text, and "editor only" would put an editable-looking buffer in front of a photo.
+  // A comparison is text and nothing else: it already has two panes of its own.
   const previewMode: PreviewMode = lockedToPicture
     ? "preview"
     : editorTab?.compare
       ? "text"
-      : (() => {
-          const stored = editorTab ? previewPref[editorTab.path] : undefined;
-          const auto = editorTab ? autoPreviewMode(editorTab.path) : "text";
-          if (stored && !(previewKind === "image" && stored === "text")) return stored;
-          return auto;
-        })();
+      : (editorTab && previewPref[editorTab.path]) ||
+        (editorTab ? autoPreviewMode(editorTab.path) : "text");
   const showEditor = previewMode !== "preview";
   const showPreview = previewMode !== "text" && !!editorTab;
   /** A comparison owns the pane; the text editor is only hidden behind it. */
@@ -801,12 +796,18 @@ export default function App() {
     setPreviewPref((prev) => ({ ...prev, [path]: mode }));
   }, [tabs.activeTab?.path]);
 
-  /** Context-menu shortcut: flip between text and the side-by-side view. */
+  /**
+   * Context-menu shortcut: walks the layouts this file actually has instead of a fixed
+   * pair, so an SVG reaches every one of them — it is a picture, but it is also text the user
+   * may well want to read and edit.
+   */
   const togglePreview = useCallback(
     (path: string) => {
       setPreviewPref((prev) => {
         const current = prev[path] ?? autoPreviewMode(path);
-        return { ...prev, [path]: current === "text" ? "split" : "text" };
+        if (current === "text") return { ...prev, [path]: autoPreviewMode(path) };
+        if (current === "preview") return { ...prev, [path]: "split" };
+        return { ...prev, [path]: "text" };
       });
     },
     [autoPreviewMode]
