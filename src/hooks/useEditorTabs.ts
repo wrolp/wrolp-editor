@@ -201,6 +201,29 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
     await activate(tab.id);
   }, [activate]);
 
+  /**
+   * Move a tab to another position in the strip. Only the order changes: the active tab is
+   * tracked by id, so dropping it elsewhere does not disturb what is on screen.
+   *
+   * `toIndex` is the gap to drop into, counted with the dragged tab still in place: 0 is
+   * before the first tab and `length` is after the last, so it may equal the length. Removing
+   * the tab first shifts everything after it along, which is why a drop later in the strip
+   * has to land one place earlier than the gap it pointed at.
+   */
+  const moveTab = useCallback((id: number, toIndex: number) => {
+    setTabs((prev) => {
+      const from = prev.findIndex((t) => t.id === id);
+      if (from < 0) return prev;
+      const to = Math.max(0, Math.min(prev.length, toIndex));
+      // Already there: either side of the gap it is sitting in means the same position.
+      if (from === to || from === to - 1) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(from, 1);
+      next.splice(from < to ? to - 1 : to, 0, moved);
+      return next;
+    });
+  }, []);
+
   /** Restored scratch tab: its text lives in the group file, so seed the model with it. */
   const openScratch = useCallback(
     async (name: string, content: string) => {
@@ -676,6 +699,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
     openUntitled,
     openSettings,
     closeTab,
+    moveTab,
     clearAllTabs,
     selectTab: activate,
     saveActive,

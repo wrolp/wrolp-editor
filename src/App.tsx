@@ -882,6 +882,7 @@ export default function App() {
         onPreviewMode={setPreviewMode}
         onSelect={tabs.selectTab}
         onClose={tabs.closeTab}
+        onReorder={tabs.moveTab}
         onTabContextMenu={(tabId, x, y) => setTabMenu({ tabId, x, y, panel: "root" })}
         onToggleSidebar={toggleSidebar}
         onNewFile={openUntitled}

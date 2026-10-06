@@ -39,6 +39,8 @@ interface Props {
   onSelect: (id: number) => void;
   onClose: (id: number) => void;
   onTabContextMenu: (id: number, x: number, y: number) => void;
+  /** Drop a dragged tab at this position in the strip. */
+  onReorder: (id: number, toIndex: number) => void;
   onToggleSidebar: () => void;
   onNewFile: () => void;
   onOpenFiles: () => void;
@@ -105,6 +107,7 @@ export default function TitleBar(props: Props) {
         onSelect={props.onSelect}
         onClose={props.onClose}
         onContextMenu={props.onTabContextMenu}
+        onReorder={props.onReorder}
       />
 
       {/* Drag handle for the empty space at the end of the tab strip. It sits before the

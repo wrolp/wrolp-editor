@@ -79,6 +79,8 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
+  /* The drop marker is placed against the strip, which is also the thing that scrolls. */
+  position: relative;
   overflow-x: auto;
   overflow-y: hidden;
   padding: 0 6px 0 12px;
@@ -103,7 +105,10 @@ body {
   background: transparent;
   color: #9ca3af;
   font-size: 13px;
-  cursor: pointer;
+  /* Not a pointer: a tab is the current document as much as it is a button, and the strip
+     also drags — a hand over the whole tab over-promises both. The × keeps the pointer,
+     because closing is the one thing here that is only ever a command. */
+  cursor: default;
   white-space: nowrap;
   max-width: 200px;
   transition: background 0.15s ease, color 0.15s ease;
@@ -115,6 +120,31 @@ body {
 .tab.active {
   background: #3f3f46;
   color: #fff;
+}
+/* Held down and on its way somewhere: still visible, but clearly not where it belongs. */
+.tab.dragging {
+  opacity: 0.45;
+}
+/* The hand is back for the length of a drag: the tab is being picked up rather than read.
+   It covers the strip as well as the tabs, because the strip does not rearrange itself
+   mid-gesture — the drop position *is* a gap between tabs, and the pointer spends the whole
+   drag sitting in gaps, where a flat cursor would read as the drag having ended. Both
+   selectors are needed: `.tab` sets its own `cursor`, which inheritance cannot reach. */
+.tabbar.dragging,
+.tabbar.dragging .tab {
+  cursor: pointer;
+}
+/* Where the dragged tab would land. Against the strip, not the viewport, because the strip
+   is what scrolls. */
+.tab-drop-line {
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent-soft);
+  pointer-events: none;
+  z-index: 1;
 }
 /* ---------- File type glyph ----------
    One box, one or two characters, colour per type family (see `fileIcon` in
