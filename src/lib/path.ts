@@ -365,3 +365,33 @@ const MARKDOWN_EXT = new Set(["md", "markdown", "mdown", "mkd"]);
 export function isMarkdown(path: string): boolean {
   return MARKDOWN_EXT.has(extOf(path).toLowerCase());
 }
+
+/** Raster images: bytes with no text in them, so the editor has nothing to show. */
+const BITMAP_EXT = new Set([
+  "png",
+  "jpg",
+  "jpeg",
+  "gif",
+  "webp",
+  "avif",
+  "bmp",
+  "ico",
+  "tif",
+  "tiff",
+  "heic",
+]);
+
+/** A raster image, as opposed to SVG, which is text that renders as a picture. */
+export function isBitmapImage(path: string): boolean {
+  return BITMAP_EXT.has(extOf(path));
+}
+
+/** SVG is a text file, so it is worth editing — and worth seeing rendered. */
+export function isSvg(path: string): boolean {
+  return extOf(path) === "svg";
+}
+
+/** Everything the preview pane can draw, whether or not it is also editable text. */
+export function isPreviewableImage(path: string): boolean {
+  return isBitmapImage(path) || isSvg(path);
+}

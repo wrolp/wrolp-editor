@@ -113,6 +113,9 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
           language: langOf(disk.path),
           original: disk.content,
           dirty: false,
+          // A picture arrives with no text, and the preview is the only view of it that
+          // means anything. Marking it here is what keeps the editor out of the way.
+          isBinary: disk.binary,
           encoding: disk.encoding,
           bom: disk.bom,
           bytes: disk.bytes,
@@ -516,7 +519,9 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
   const saveActive = useCallback(async () => {
     const tab = tabsRef.current.find((t) => t.id === activeRef.current);
     const h = editorRef.current;
-    if (!tab || !isFileTab(tab) || !h) return;
+    // A picture has no buffer to write. Saving one would write the empty text that stands
+    // in for it and destroy the file, so this is refused rather than merely discouraged.
+    if (!tab || !isFileTab(tab) || tab.isBinary || !h) return;
     const content = h.editor.getValue();
     try {
       if (isUntitled(tab.path)) {
@@ -589,6 +594,13 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
         } catch (e) {
           toast(errorMessage(e));
         }
+        return;
+      }
+
+      // A picture is never restored into: the "buffer" here is the empty stand-in, and
+      // writing text over an image would destroy it.
+      if (tabsRef.current.find((t) => t.id === req.tabId)?.isBinary) {
+        await api.clearDraft(req.path).catch((e) => toast(errorMessage(e)));
         return;
       }
 

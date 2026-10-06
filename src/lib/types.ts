@@ -18,6 +18,11 @@ export interface Tab {
   initialValue?: string;
   isSettings?: boolean;
   /**
+   * A picture rather than a document. Its buffer is never decoded, so `original` is empty
+   * and any edit would be nonsense: the file is only ever drawn, never saved from the tab.
+   */
+  isBinary?: boolean;
+  /**
    * A read-only side-by-side diff of two files. The text is a snapshot taken when the
    * comparison was started: the pair has no model of its own, so it is never dirty and
    * never carries a draft.

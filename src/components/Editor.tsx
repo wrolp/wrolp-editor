@@ -85,6 +85,11 @@ export default function Editor({
     (instance: editor.IStandaloneCodeEditor, m: Monaco) => {
       instanceRef.current = instance;
       readyRef.current({ editor: instance, monaco: m });
+      // `automaticLayout` watches for size changes, but a pane that was `display: none`
+      // and is now shown has no size to watch from, so the editor keeps the zero it
+      // measured while hidden: the content overflows a viewport it believes is empty and
+      // the wheel does nothing. One re-measure after the frame that reveals it is the fix.
+      requestAnimationFrame(() => instance.layout());
       instance.onDidChangeCursorPosition((e) => {
         const model = instance.getModel();
         if (!model) return;

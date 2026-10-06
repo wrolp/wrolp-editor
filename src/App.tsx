@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import ImagePreview from "./components/ImagePreview";
 import Editor from "./components/Editor";
 import DiffView from "./components/DiffView";
 import MarkdownPreview from "./components/MarkdownPreview";
@@ -22,7 +23,10 @@ import { setLang, t } from "./lib/i18n";
 import {
   basename,
   dirname,
+  isBitmapImage,
   isMarkdown,
+  isPreviewableImage,
+  isSvg,
   isUntitled,
   modelUri,
   openableExtensions,
@@ -81,6 +85,9 @@ function whitespaceMode(value: string): (typeof WHITESPACE_MODES)[number] {
 
 /** Never let a save-on-close turn into a window that cannot be closed. */
 const CLOSE_FLUSH_TIMEOUT_MS = 2000;
+
+/** What fills the preview pane: rendered markdown, or a picture. */
+type PreviewKind = "markdown" | "image" | null;
 
 export default function App() {
   const [toastState, setToastState] = useState({ message: "", visible: false });
@@ -734,32 +741,75 @@ export default function App() {
   const detectIndentation =
     editorTab?.fileSettings.detectIndentation ?? settings.detectIndentation;
 
-  // Markdown opens side by side; anything else defaults to text only. The choice is
-  // remembered per file, so a document left in "preview only" reopens that way.
-  // A comparison is text and nothing else: it already has two panes of its own.
-  const previewMode: PreviewMode = editorTab?.compare
-    ? "text"
-    : (editorTab && previewPref[editorTab.path]) ||
-      (editorTab && isMarkdown(editorTab.path) ? "split" : "text");
+  /**
+   * What the preview pane can draw for this file, or null when it has nothing to preview.
+   * Markdown and images share the pane; only what fills it differs.
+   */
+  const previewKind: PreviewKind = editorTab
+    ? isMarkdown(editorTab.path)
+      ? "markdown"
+      : isPreviewableImage(editorTab.path)
+        ? "image"
+        : null
+    : null;
+  /**
+   * Markdown and SVG open side by side, a raster image on its own, anything else as text.
+   * The reasoning differs per kind: markdown is read as prose, SVG is edited as source and
+   * read as a picture, and a photo has no text worth a pane of its own.
+   */
+  const autoPreviewMode = useCallback(
+    (path: string): PreviewMode => {
+      if (isMarkdown(path) || isSvg(path)) return "split";
+      if (isBitmapImage(path)) return "preview";
+      return "text";
+    },
+    []
+  );
+  // A photo has no text to edit, and showing its bytes decoded as text is how an image
+  // gets corrupted by a stray keystroke. So for a raster image the layout is not a choice:
+  // it is always the picture, and the controls that would change it are not offered.
+  const lockedToPicture = !!editorTab && isBitmapImage(editorTab.path);
+  // The choice is remembered per file, so a document left in "preview only" reopens that way.
+  // A stored "text" is not remembered for a picture, though: there is nothing useful about
+  // looking at a photo as characters, and honoring it is how the pane ends up blank with no
+  // explanation. Markdown keeps the choice either way — "editor only" is a real preference
+  // for prose.
+  const previewMode: PreviewMode = lockedToPicture
+    ? "preview"
+    : editorTab?.compare
+      ? "text"
+      : (() => {
+          const stored = editorTab ? previewPref[editorTab.path] : undefined;
+          const auto = editorTab ? autoPreviewMode(editorTab.path) : "text";
+          if (stored && !(previewKind === "image" && stored === "text")) return stored;
+          return auto;
+        })();
   const showEditor = previewMode !== "preview";
   const showPreview = previewMode !== "text" && !!editorTab;
   /** A comparison owns the pane; the text editor is only hidden behind it. */
   const showDiff = !!editorTab?.compare;
+  /**
+   * A picture that is being shown as text, and the editor is not what should be on screen.
+   * Reachable by switching the layout — which used to be a silent no-op from the user's
+   * point of view, since the pane simply stayed empty. The hint names the cause and offers
+   * the way back, instead of leaving a file that looks broken.
+   */
+  const showPictureAsText = previewKind === "image" && previewMode === "text" && !lockedToPicture;
   const setPreviewMode = useCallback((mode: PreviewMode) => {
     const path = tabs.activeTab?.path;
     if (!path) return;
     setPreviewPref((prev) => ({ ...prev, [path]: mode }));
   }, [tabs.activeTab?.path]);
 
-  /** Context-menu shortcut: flip between text and split without touching the control. */
+  /** Context-menu shortcut: flip between text and the side-by-side view. */
   const togglePreview = useCallback(
     (path: string) => {
       setPreviewPref((prev) => {
-        const current = prev[path] ?? (isMarkdown(path) ? "split" : "text");
+        const current = prev[path] ?? autoPreviewMode(path);
         return { ...prev, [path]: current === "text" ? "split" : "text" };
       });
     },
-    []
+    [autoPreviewMode]
   );
 
   /** The preview is the driver when the user scrolls it, so mirror it into the editor. */
@@ -777,6 +827,18 @@ export default function App() {
     // The previous comparison's totals must not linger while the next one computes.
     setDiffStats(null);
   }, [editorTab?.path]);
+
+  /**
+   * Monaco measures its own box once and then trusts it, so a pane that changed width
+   * without the window changing size — the preview opening beside the editor, or the editor
+   * coming back from behind the picture — leaves it scrolling against stale dimensions and
+   * the wheel does nothing. Re-measuring on the next frame is the fix, and it has to wait
+   * for the browser to have laid the new size out.
+   */
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => editorRef.current?.editor.layout());
+    return () => cancelAnimationFrame(raf);
+  }, [previewMode, showDiff, editorTab?.path]);
 
   // Preview text is read straight off the model on every render rather than mirrored
   // into state: `editorRef` is only filled in by `onReady`, which lands after the first
@@ -813,7 +875,9 @@ export default function App() {
             onRemove={groups.remove}
           />
         }
-        previewMode={editorTab && !editorTab.compare && isMarkdown(editorTab.path) ? previewMode : null}
+        previewMode={
+          editorTab && !editorTab.compare && previewKind && !lockedToPicture ? previewMode : null
+        }
         onPreviewMode={setPreviewMode}
         onSelect={tabs.selectTab}
         onClose={tabs.closeTab}
@@ -927,7 +991,23 @@ export default function App() {
             </div>
           )}
 
-          {showPreview && !showSettings && editorTab && (
+          {showPreview && !showSettings && editorTab && previewKind === "image" && (
+            <ImagePreview path={editorTab.path} text={isSvg(editorTab.path) ? docText : null} />
+          )}
+
+          {showPictureAsText && editorTab && (
+            <div className="pane-hint">
+              <span>{t("preview.hintImage")}</span>
+              <button
+                className="btn small"
+                onClick={() => setPreviewMode(autoPreviewMode(editorTab.path))}
+              >
+                {t("preview.hintShow")}
+              </button>
+            </div>
+          )}
+
+          {showPreview && !showSettings && editorTab && previewKind === "markdown" && (
             <MarkdownPreview
               text={docText}
               path={editorTab.path}
@@ -1052,22 +1132,24 @@ export default function App() {
                 <span className="ctx-tick">{menuMinimapOn ? "✓" : ""}</span>
                 {t("title.menuMinimap")}
               </div>
-              <div
-                className="ctx-item"
-                onClick={() => {
-                  if (menuTabPath) togglePreview(menuTabPath);
-                  setTabMenu(null);
-                }}
-              >
-                <span className="ctx-tick">
-                  {menuTabPath &&
-                  (previewPref[menuTabPath] ?? (isMarkdown(menuTabPath) ? "split" : "text")) !==
-                    "text"
-                    ? "✓"
-                    : ""}
-                </span>
-                {t("title.menuPreview")}
-              </div>
+              {/* A raster image has no text pane to toggle to, so it is not offered. */}
+              {!isBitmapImage(menuTabPath) && (
+                <div
+                  className="ctx-item"
+                  onClick={() => {
+                    if (menuTabPath) togglePreview(menuTabPath);
+                    setTabMenu(null);
+                  }}
+                >
+                  <span className="ctx-tick">
+                    {menuTabPath &&
+                    (previewPref[menuTabPath] ?? autoPreviewMode(menuTabPath)) !== "text"
+                      ? "✓"
+                      : ""}
+                  </span>
+                  {t("title.menuPreview")}
+                </div>
+              )}
               <div className="ws-sep" />
               {(["move", "copy", "moveAll"] as const).map((panel) => (
                 <div key={panel} className="ctx-item" onClick={() => setTabMenu({ ...tabMenu, panel })}>

@@ -1063,8 +1063,18 @@ body.resizing .editor-host {
   flex: 1 1 50%;
   min-width: 0;
 }
-.editor-wrap.preview-only .md-preview {
+.editor-wrap.preview-only .md-preview,
+.editor-wrap.preview-only .img-preview {
   flex: 1 1 100%;
+}
+/* The editor host is absolutely positioned, and a positioned box is painted above a static
+   one whatever the DOM order says. In split mode the host is switched back to `relative`
+   and the row orders itself; in preview-only it is not, so a preview has to be positioned
+   too — otherwise the editor is drawn straight over it. */
+.md-preview,
+.img-preview {
+  position: relative;
+  z-index: 1;
 }
 .editor-host {
   position: absolute;
@@ -1075,6 +1085,10 @@ body.resizing .editor-host {
   position: absolute;
   inset: 0;
   display: flex;
+  /* Column, so a message and the buttons under it stack instead of sitting side by side in
+     one row — a flex row would place them left and right of each other however narrow the
+     pane gets. */
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   color: var(--muted);
@@ -1170,6 +1184,134 @@ body.resizing .editor-host {
 }
 
 /* ---------- Settings panel ---------- */
+/* ---------- Image preview ---------- */
+/* Floats above the editor, which is absolutely positioned, so it is taken out of the flow
+   and given a backdrop of its own. */
+.pane-hint {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  /* Above the editor host (auto) and the preview panes (1). */
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #2d2d2d;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  font-size: 12px;
+  color: var(--text);
+  white-space: nowrap;
+}
+.img-preview {
+  display: flex;
+  flex-direction: column;
+  /* Matches `.md-preview`: the split row shares the width, preview-only stretches to the full
+     pane, and `min-height: 0` is what lets the stage scroll instead of growing past it. */
+  flex: 1 1 50%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.img-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--titlebar);
+  font-size: 11px;
+  color: var(--muted);
+}
+.img-tool {
+  min-width: 24px;
+  height: 22px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+}
+.img-tool:hover:not(:disabled) {
+  background: #3a3a3a;
+}
+.img-tool:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.img-zoom {
+  min-width: 52px;
+  text-align: center;
+}
+.img-dims {
+  margin-left: 4px;
+}
+.img-note {
+  margin-left: auto;
+  color: #e0a060;
+}
+/* A checkerboard, so a transparent PNG or an SVG with no background reads as transparent
+   rather than as white. Two flat tones are enough; a gradient would fight the picture. */
+.img-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  /* `safe` matters once the picture is larger than the pane: plain centring in an overflow
+     container clips its top-left with no way to scroll back, which reads as a broken image
+     rather than a zoomed one. */
+  align-items: safe center;
+  justify-content: safe center;
+  padding: 14px;
+  background-color: #1b1b1b;
+  background-image: linear-gradient(45deg, #232323 25%, transparent 25%),
+    linear-gradient(-45deg, #232323 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #232323 75%),
+    linear-gradient(-45deg, transparent 75%, #232323 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+}
+/* The failure actions sit under a centred message in a pane that can be narrow, so they
+   wrap and their buttons are allowed to wrap too. */
+.img-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  /* Full width inside the column above, so the buttons centre under the message rather than
+     lining up with its left edge. */
+  width: 100%;
+  gap: 10px;
+  margin-top: 12px;
+  max-width: 100%;
+}
+/* A flex item will not shrink below its content, so a long label — 「在资源管理器中显示」 is
+   nine characters — would stretch the button past the edge of the pane instead of wrapping
+   inside it. `min-width: 0` is what lets it shrink at all; `height: auto` lets the extra
+   line grow the button instead of being clipped. */
+.img-actions .btn {
+  min-width: 0;
+  max-width: 100%;
+  height: auto;
+  white-space: normal;
+  line-height: 1.5;
+  text-align: center;
+}
+.img-frame {
+  max-width: 100%;
+  max-height: 100%;
+  /* Nearest-neighbour would show the pixels but turns the picture to mush at 200%. What is
+     being looked at is the image, not the pixel grid. */
+  image-rendering: auto;
+  box-shadow: 0 2px 14px rgba(0, 0, 0, 0.5);
+  background: transparent;
+}
+
 .settings-panel {
   position: absolute;
   inset: 0;

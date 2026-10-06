@@ -1,4 +1,5 @@
 import { t } from "../lib/i18n";
+import { isBitmapImage } from "../lib/path";
 import { isFileTab, type DiffStats, type EditStats, type Tab } from "../lib/types";
 
 interface Props {
@@ -31,6 +32,10 @@ export default function StatusBar({ tab, line, column, stats, diff }: Props) {
   // the single caret readout do not apply to it; it gets the diff totals instead.
   const file = tab && isFileTab(tab);
   const comparing = tab?.compare ?? null;
+  // A picture is not text: its "character count" is the byte decoder's opinion, and the
+  // caret belongs to an editor that is not on screen. Only the size on disk is real.
+  const picture = !!tab && !tab.isSettings && isBitmapImage(tab.path);
+  const counters = file && !picture;
   return (
     <div className="statusbar">
       <span className="sb-path">
@@ -43,7 +48,7 @@ export default function StatusBar({ tab, line, column, stats, diff }: Props) {
           : t("status.noFile")}
       </span>
       <span className="sb-spacer" />
-      {file && stats.selectionChars > 0 && (
+      {counters && stats.selectionChars > 0 && (
         <span className="sb-selection">
           {stats.selectionLines > 1
             ? t("status.selectionLines", {
@@ -53,14 +58,14 @@ export default function StatusBar({ tab, line, column, stats, diff }: Props) {
             : t("status.selection", { n: stats.selectionChars.toLocaleString() })}
         </span>
       )}
-      {file && (
+      {counters && (
         <span className="sb-total">{t("status.totalChars", { n: stats.totalChars.toLocaleString() })}</span>
       )}
       {file && tab.bytes !== null && (
         <span className="sb-size">{formatBytes(tab.bytes)}</span>
       )}
-      {file && tab.dirty && <span className="sb-dirty is-dirty">{t("status.dirty")}</span>}
-      {file && !tab.dirty && <span className="sb-dirty">{t("status.saved")}</span>}
+      {counters && tab.dirty && <span className="sb-dirty is-dirty">{t("status.dirty")}</span>}
+      {counters && !tab.dirty && <span className="sb-dirty">{t("status.saved")}</span>}
       {comparing && (
         <span className="sb-diff">
           {diff && (diff.added > 0 || diff.removed > 0) ? (
@@ -74,9 +79,9 @@ export default function StatusBar({ tab, line, column, stats, diff }: Props) {
         </span>
       )}
       <span className="sb-cursor">
-        {file ? t("status.cursor", { line, column }) : ""}
+        {counters ? t("status.cursor", { line, column }) : ""}
       </span>
-      <span className="sb-lang">{file ? tab.language : ""}</span>
+      <span className="sb-lang">{counters ? tab.language : ""}</span>
     </div>
   );
 }

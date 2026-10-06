@@ -12,6 +12,19 @@ use tauri::{AppHandle, Manager, State};
 const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
 
 const GROUPS_FILE: &str = "groups.json";
+/// Raster images: bytes with no text in them, so decoding them as text fails and the file
+/// could not be opened at all. SVG is deliberately absent — it is text, and is edited as
+/// source.
+const BINARY_EXT: [&str; 11] = [
+  "png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "ico", "tif", "tiff", "heic",
+];
+
+fn is_binary_ext(path: &str) -> bool {
+  match path.rsplit_once('.') {
+    Some((_, ext)) => BINARY_EXT.contains(&ext.to_ascii_lowercase().as_str()),
+    None => false,
+  }
+}
 /// Name used before a group was understood as a named set of tabs rather than a folder.
 const LEGACY_GROUPS_FILE: &str = "workspaces.json";
 
@@ -33,6 +46,10 @@ pub struct OpenedFile {
   pub bom: bool,
   /// Size on disk, epoch-agnostic byte count. Shown in the status bar.
   pub bytes: u64,
+  /// The file is a picture, so `content` is empty and nothing on screen is text. The
+  /// frontend shows the image itself and keeps the editor out of the way, so a stray
+  /// keystroke cannot write a decoded picture back over the original.
+  pub binary: bool,
 }
 
 #[derive(Serialize)]
@@ -274,6 +291,10 @@ pub fn open_file(
     return Err(format!("file_too_large:{}", meta.len() / (1024 * 1024)));
   }
   let bytes = std::fs::read(file).map_err(|e| format!("file_read:{e}"))?;
+  // A picture is not text: decoding one either fails outright (which used to make the file
+  // unopenable) or succeeds into a mojibake buffer that must never be written back. It is
+  // read for its metadata only, and the frontend renders it through the preview.
+  let binary = is_binary_ext(&normalized);
   // A per-file encoding override wins over the global default, so a file that needs
   // GBK forced on it is honoured before we decode rather than after.
   let global = match encoding.filter(|e| !e.trim().is_empty()) {
@@ -281,7 +302,11 @@ pub fn open_file(
     None => stored_encoding(&app),
   };
   let preference = crate::file_settings::encoding_for(&app, &normalized, &global);
-  let decoded = crate::encoding::decode(&bytes, &preference)?;
+  let decoded = if binary {
+    None
+  } else {
+    Some(crate::encoding::decode(&bytes, &preference)?)
+  };
   let mtime = meta
     .modified()
     .ok()
@@ -296,11 +321,12 @@ pub fn open_file(
   }
   Ok(OpenedFile {
     path: normalized,
-    content: decoded.text,
+    content: decoded.as_ref().map(|d| d.text.clone()).unwrap_or_default(),
     mtime,
-    encoding: decoded.encoding,
-    bom: decoded.bom,
+    encoding: decoded.as_ref().map(|d| d.encoding.clone()).unwrap_or_default(),
+    bom: decoded.as_ref().is_some_and(|d| d.bom),
     bytes: meta.len(),
+    binary,
   })
 }
 
@@ -632,9 +658,32 @@ where
 mod tests {
   use super::*;
 
+  /// Pictures are read for their metadata only. SVG counts as text on purpose: it is edited
+  /// as source, and it is the one image the editor can legitimately show both ways.
   #[test]
-  fn startup_args_skip_program_and_flags() {
-    let got = paths_from_args([
+  fn only_raster_images_are_treated_as_binary() {
+    for name in [
+      r"C:\pics\no-extension",
+      r"C:\pics\a.svg",
+      r"C:\pics\a.md",
+      r"C:\pics\a.txt",
+    ] {
+      assert!(!is_binary_ext(name), "{name} should be read as text");
+    }
+    // The extension decides, not the case of it: a PNG from a camera is still a PNG.
+    for name in [
+      r"C:\pics\a.png",
+      r"C:\pics\a.JPEG",
+      r"C:\pics\a.webp",
+      r"C:\pics\a.PNG",
+      r"C:\pics\a.gif",
+    ] {
+      assert!(is_binary_ext(name), "{name} should be treated as a picture");
+    }
+  }
+
+  #[test]
+  fn startup_args_skip_program_and_flags() {    let got = paths_from_args([
       r"C:\app\wrolp-editor.exe",
       r"C:\notes\a.txt",
       "--internal-flag",

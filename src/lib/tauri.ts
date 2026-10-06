@@ -14,6 +14,8 @@ export interface OpenedFile {
   bom: boolean;
   /** Size on disk in bytes. */
   bytes: number;
+  /** A picture: `content` is empty and the editor must stay out of the way. */
+  binary: boolean;
 }
 
 export interface SavedFile {
