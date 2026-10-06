@@ -107,6 +107,12 @@ export default function TitleBar(props: Props) {
         onContextMenu={props.onTabContextMenu}
       />
 
+      {/* Drag handle for the empty space at the end of the tab strip. It sits before the
+          tab-list and new-file buttons on purpose: they belong with the window controls on
+          the right, and a flexible gap here is what leaves the drag area free without
+          pushing them into the middle of the bar. */}
+      <div className="titlebar-drag" data-tauri-drag-region aria-hidden="true" />
+
       <div className="tab-list-wrap">
         <button
           className="tab-list-btn"
@@ -153,10 +159,6 @@ export default function TitleBar(props: Props) {
       <button className="tab-new" title={t("title.newFile")} onClick={props.onNewFile}>
         +
       </button>
-
-      {/* Guaranteed drag handle: unlike the tab strip, this stays draggable even when
-          tabs overflow and fill the whole strip. */}
-      <div className="titlebar-drag" data-tauri-drag-region aria-hidden="true" />
 
       <div className="titlebar-actions">
         {props.previewMode && (

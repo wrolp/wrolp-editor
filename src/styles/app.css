@@ -621,7 +621,9 @@ body {
 
 .titlebar-drag {
   /* Grows into the leftover titlebar space so there is always a draggable region,
-     but never crowds the controls: it only ever absorbs free space. */
+     but never crowds the controls: it only ever absorbs free space. Sharing that space with
+     the tab strip keeps the strip's empty tail and this reading as one area, and leaves the
+     buttons that follow grouped at the right end of the bar. */
   flex: 1 1 0;
   min-width: 24px;
   height: 100%;
