@@ -60,6 +60,11 @@ export interface Settings {
   expandFolders: boolean;
   /** Levels to expand while `expandFolders` is on: 1 is the folders under the root. */
   expandDepth: number;
+  /**
+   * File types that must not show "Open with WROLP" in Explorer's context menu, as
+   * extensions without the dot. Changing this rewrites the registry entries.
+   */
+  excludedExtensions: string[];
   /** Tighten the app chrome. Does not touch the editor's font size or line height. */
   compactMode: boolean;
   /** `auto` sniffs every file; the rest force one encoding. */
@@ -112,6 +117,13 @@ export interface MenuTarget {
   registered: string | null;
   expected: string;
   matchesCurrent: boolean;
+  /** How many file types are currently masked out of the menu. */
+  excludedCount: number;
+  /**
+   * Entries exist only under a key spelling that never worked, so the menu is invisible
+   * even though the user had it switched on. The app repairs that on startup.
+   */
+  staleLayout: boolean;
   debugBuild: boolean;
 }
 
@@ -180,9 +192,10 @@ export const api = {
   saveGroups: (store: GroupStore) => invoke<GroupStore>("save_groups", { store }),
   transferTabs: (store: GroupStore, transfer: TabTransfer) =>
     invoke<GroupStore>("transfer_tabs", { store, transfer }),
-  contextMenuTarget: () => invoke<MenuTarget>("context_menu_target"),
-  installContextMenu: () => invoke<string>("install_context_menu"),
-  uninstallContextMenu: () => invoke<void>("uninstall_context_menu"),
+  contextMenuTarget: (extensions: string[]) => invoke<MenuTarget>("context_menu_target", { extensions }),
+  installContextMenu: (extensions: string[], excluded: string[]) =>
+    invoke<string>("install_context_menu", { extensions, excluded }),
+  uninstallContextMenu: (extensions: string[]) => invoke<void>("uninstall_context_menu", { extensions }),
 };
 
 export { invoke, listen, open, save, revealItemInDir };

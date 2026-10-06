@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { LANGUAGES, t } from "../lib/i18n";
+import { parseExtensionList } from "../lib/path";
 import SettingCheck from "./SettingCheck";
 import SettingField from "./SettingField";
 import type { MenuTarget, Settings } from "../lib/tauri";
@@ -43,6 +44,25 @@ export default function SettingsPanel({
 }: Props) {
   const [category, setCategory] = useState<Category>("context");
   const [version, setVersion] = useState("…");
+  // The exclusion list is typed as free text, so what is being edited and what is stored
+  // are two things: `excludedText` is the field's own state (it takes `png, JPG` and
+  // `.png` alike) and is only parsed on the way out. The stored value is written back into
+  // the field whenever it changes elsewhere, which is also how a rejected entry gets
+  // corrected instead of being left on screen looking saved.
+  const joined = settings.excludedExtensions.join(", ");
+  const [excludedText, setExcludedText] = useState(joined);
+  useEffect(() => setExcludedText(joined), [joined]);
+
+  const commitExcluded = (text: string) => {
+    const list = parseExtensionList(text);
+    // Compared as text: the order of a list the user cannot see is not a change worth a
+    // registry rewrite.
+    if (list.join(",") === settings.excludedExtensions.join(",")) {
+      setExcludedText(joined);
+      return;
+    }
+    onSaveSettings({ excludedExtensions: list });
+  };
 
   // Read the packaged version instead of hardcoding it, so About cannot drift from tauri.conf.json.
   useEffect(() => {
@@ -80,9 +100,34 @@ export default function SettingsPanel({
                 {menuBusy
                   ? t("settings.contextBusy")
                   : menu?.installed
-                    ? t("settings.contextInstalled")
+                    ? t("settings.contextRegistered", { n: menu.excludedCount })
                     : t("settings.contextMissing")}
               </p>
+              <SettingField label={t("settings.menuExclude")}>
+                <input
+                  className="settings-text"
+                  type="text"
+                  spellCheck={false}
+                  value={excludedText}
+                  placeholder={t("settings.menuExcludePlaceholder")}
+                  onChange={(e) => setExcludedText(e.target.value)}
+                  onBlur={() => commitExcluded(excludedText)}
+                  onKeyDown={(e) => {
+                    // Applied on blur too, so Enter is a shortcut rather than the only way
+                    // to commit — a field that needs Enter would look broken otherwise.
+                    if (e.key === "Enter") {
+                      commitExcluded(excludedText);
+                      e.currentTarget.blur();
+                    }
+                    if (e.key === "Escape") {
+                      setExcludedText(joined);
+                      e.currentTarget.blur();
+                    }
+                  }}
+                />
+              </SettingField>
+              <p className="muted">{t("settings.menuExcludeDesc")}</p>
+              {menu?.staleLayout && <p className="setting-warn">{t("settings.warnLayout")}</p>}
               {menu?.registered && (
                 <div className="setting-target">
                   <div className="setting-desc">{t("settings.currentlyLaunches")}</div>

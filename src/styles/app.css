@@ -1256,6 +1256,21 @@ body.resizing .editor-host {
 .setting-row input[type="number"] {
   cursor: text;
 }
+.settings-text {
+  cursor: text;
+  width: 220px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: #1e1e1e;
+  color: var(--text);
+  font-size: 13px;
+  font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+}
+.settings-text:focus {
+  outline: none;
+  border-color: var(--accent);
+}
 .setting-row input[type="checkbox"] {
   width: 16px;
   height: 16px;

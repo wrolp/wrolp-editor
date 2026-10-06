@@ -330,6 +330,34 @@ export function fileIcon(name: string): FileGlyph {
   return GLYPHS[group];
 }
 
+/**
+ * Every extension the editor claims to handle, sorted. It is derived from `EXT_GLYPH`
+ * rather than kept as a second list: those are the types the app recognizes, so they are
+ * exactly the types the app knows by name, which is what the context-menu integration
+ * walks when it counts exclusions and clears what an earlier build wrote. It is not the
+ * set of types the menu applies to: the verb is registered for every file.
+ */
+export function openableExtensions(): string[] {
+  return Object.keys(EXT_GLYPH).sort();
+}
+
+/**
+ * Turns what the user typed into a list of extensions: `PNG, .jpg  gif` is three entries.
+ * Commas (either kind) and whitespace all separate, so a list typed with or without them
+ * reads the same. Entries that cannot be a registry key name are dropped rather than
+ * reported, because the field has no room for per-entry errors and a silently ignored
+ * entry is the smaller problem next to a rejected one.
+ */
+export function parseExtensionList(text: string): string[] {
+  const out: string[] = [];
+  for (const raw of text.split(/[,\s，、]+/)) {
+    const ext = raw.trim().replace(/^\.+/, "").toLowerCase();
+    if (!ext || /[\\/" ]/.test(ext)) continue;
+    if (!out.includes(ext)) out.push(ext);
+  }
+  return out;
+}
+
 /** Extensions the preview treats as markdown. */
 const MARKDOWN_EXT = new Set(["md", "markdown", "mdown", "mkd"]);
 

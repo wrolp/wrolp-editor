@@ -84,6 +84,9 @@ pub struct Settings {
   /// How many levels `expand_folders` opens: 1 is the folders directly under the root,
   /// 2 adds their children, and so on. Only read while `expand_folders` is on.
   pub expand_depth: u32,
+  /// File types that must not show the "Open with WROLP" verb, as extensions without the
+  /// dot (`"png"`). Normalized on save, so what lands in settings.json is what is used.
+  pub excluded_extensions: Vec<String>,
   /// Tighten the app chrome (title bar, tabs, sidebar rows, status bar, menus).
   pub compact_mode: bool,
   /// One of the `encoding::CHOICES` labels; `auto` sniffs each file instead.
@@ -117,6 +120,7 @@ impl Default for Settings {
       sidebar_root: String::new(),
       expand_folders: false,
       expand_depth: 1,
+      excluded_extensions: Vec::new(),
       compact_mode: false,
       encoding: "auto".into(),
       render_whitespace: "selection".into(),
@@ -170,6 +174,19 @@ impl Settings {
         1
       } else {
         self.expand_depth.min(8)
+      },
+      // Normalized here rather than trusted: this list reaches the registry as key names.
+      excluded_extensions: {
+        let mut out: Vec<String> = Vec::new();
+        for ext in self.excluded_extensions {
+          if let Some(clean) = crate::context_menu::sanitize(&ext) {
+            if !out.contains(&clean) {
+              out.push(clean);
+            }
+          }
+        }
+        out.truncate(64);
+        out
       },
       compact_mode: self.compact_mode,
       // An unknown encoding or whitespace mode is a stale or hand-edited settings file.
@@ -561,19 +578,22 @@ pub fn transfer_tabs(store: GroupStore, transfer: TabTransfer) -> GroupStore {
   crate::group::apply_transfer(store, &transfer).filled()
 }
 
+/// The verb covers every file, so these lists are about the exclusion masks and about
+/// cleaning up what earlier builds wrote. The frontend owns both: the extensions are the
+/// types it recognizes, the exclusions are the user's setting.
 #[tauri::command]
-pub fn context_menu_target() -> Result<crate::context_menu::MenuTarget, String> {
-  crate::context_menu::probe()
+pub fn context_menu_target(extensions: Vec<String>) -> Result<crate::context_menu::MenuTarget, String> {
+  crate::context_menu::probe(&extensions)
 }
 
 #[tauri::command]
-pub fn install_context_menu() -> Result<String, String> {
-  crate::context_menu::install()
+pub fn install_context_menu(extensions: Vec<String>, excluded: Vec<String>) -> Result<String, String> {
+  crate::context_menu::install(&extensions, &excluded)
 }
 
 #[tauri::command]
-pub fn uninstall_context_menu() -> Result<(), String> {
-  crate::context_menu::uninstall()
+pub fn uninstall_context_menu(extensions: Vec<String>) -> Result<(), String> {
+  crate::context_menu::uninstall(&extensions)
 }
 
 /// Queue a path and tell an already-running window about it.

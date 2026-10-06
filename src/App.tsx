@@ -19,7 +19,14 @@ import { useDraft } from "./hooks/useDraft";
 import { useEditorTabs } from "./hooks/useEditorTabs";
 import { useGroups } from "./hooks/useGroups";
 import { setLang, t } from "./lib/i18n";
-import { basename, dirname, isMarkdown, isUntitled, modelUri } from "./lib/path";
+import {
+  basename,
+  dirname,
+  isMarkdown,
+  isUntitled,
+  modelUri,
+  openableExtensions,
+} from "./lib/path";
 import { isFileTab, pathKey, type DiffStats, type EditStats, type EditorHandle } from "./lib/types";
 import {
   api,
@@ -48,6 +55,9 @@ const DEFAULT_SETTINGS: Settings = {
   // goes, and costs one directory listing per level before anything is read.
   expandFolders: false,
   expandDepth: 1,
+  // Nothing is excluded out of the box: the verb is registered per recognized type, so a
+  // file the app cannot open has no menu to begin with.
+  excludedExtensions: [],
   compactMode: false,
   encoding: "auto",
   renderWhitespace: "selection",
@@ -146,19 +156,23 @@ export default function App() {
     setFileSettingsPath(isUntitled(path) ? null : path);
   }, []);
 
-  const refreshMenu = useCallback(() => {
-    api
-      .contextMenuTarget()
-      .then((target) => {
-        setMenuTarget(target);
-        if (!target.installed) {
-          toast(t("app.tipMenu"));
-        } else if (!target.matchesCurrent) {
-          toast(t("app.tipStaleMenu"));
-        }
-      })
-      .catch((e) => toast(errorMessage(e)));
-  }, [toast]);
+  const refreshMenu = useCallback(async () => {
+    // The probe walks the known file types to count the exclusion masks, so it needs that
+    // list — but the menu covers every file, so nothing else about the answer depends on it.
+    try {
+      const target = await api.contextMenuTarget(openableExtensions());
+      setMenuTarget(target);
+      if (!target.installed) {
+        toast(t("app.tipMenu"));
+      } else if (!target.matchesCurrent) {
+        toast(t("app.tipStaleMenu"));
+      }
+      return target;
+    } catch (e) {
+      toast(errorMessage(e));
+      return null;
+    }
+  }, [settings.excludedExtensions, toast]);
 
   // Startup: settings, group session, then files from argv or a second instance.
   const bootStarted = useRef(false);
@@ -206,12 +220,29 @@ export default function App() {
   // mount, unlike the boot sequence which must only run once.
   useEffect(() => {
     refreshHistory();
-    refreshMenu();
     const unlisten = listen<string>("open-file", (event) => void tabs.openPath(event.payload));
     return () => {
       unlisten.then((f) => f());
     };
   }, []);
+
+  // Probing the menu means asking about one specific set of file types, so it waits for the
+  // settings that carry the exclusions. Doing it at mount would ask about the wrong set.
+  // The callback is reached through a ref so that changing the exclusion list does not
+  // re-probe — and re-show the "add the menu" tip — every time a setting is saved.
+  const refreshMenuRef = useRef(refreshMenu);
+  refreshMenuRef.current = refreshMenu;
+  useEffect(() => {
+    if (!booted) return;
+    void refreshMenuRef.current().then((target) => {
+      // A build that wrote the entries under a spelling the shell never reads leaves the
+      // user with a menu that cannot appear and a switch that reads "on". Rewriting it here
+      // restores what they asked for, instead of making them toggle it off and on again.
+      if (target?.staleLayout) void reapplyMenu(settingsRef.current.excludedExtensions);
+    });
+    // The settings are read through a ref for the same reason the callback is: this must
+    // run once, when startup finishes.
+  }, [booted]);
 
   /** What the store should remember about the screen right now. */
   const pausedCommit = useRef(false);
@@ -222,6 +253,9 @@ export default function App() {
   const rootRef = useRef<string | null>(null);
   rootRef.current = rootDir;
   const saveSettingsRef = useRef<(patch: Partial<Settings>) => void>(() => {});
+  /** Latest settings, for the one-shot startup work that must not re-run on every change. */
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
 
   const commitLive = useCallback((immediate?: boolean) => {
     // Suspended while a switch is rebuilding the tab set, otherwise the half-cleared tabs
@@ -379,14 +413,38 @@ export default function App() {
     };
   }, []);
 
+  /**
+   * Rewrite the verb for the current exclusion list. Called after that setting changes so
+   * the new list takes effect by itself: the registry entries are the only place an
+   * exclusion is honored, and making the user toggle the switch off and on again would be a
+   * step that exists only because of how the registry works.
+   */
+  const reapplyMenu = useCallback(
+    async (excluded: string[]) => {
+      try {
+        await api.installContextMenu(openableExtensions(), excluded);
+        refreshMenu();
+      } catch (e) {
+        toast(errorMessage(e));
+      }
+    },
+    [refreshMenu, toast]
+  );
+
   const saveSettings = useCallback(
     (patch: Partial<Settings>) => {
       const next = { ...settings, ...patch };
       if (patch.language) setLang(patch.language);
       setSettings(next);
       api.saveSettings(next).catch((e) => toast(errorMessage(e)));
+      // The verb is registered per file type, so a new exclusion only takes effect once the
+      // entries are rewritten — and only if the menu is on; otherwise the list is simply
+      // waiting for the next install.
+      if (patch.excludedExtensions && menuTarget?.installed) {
+        void reapplyMenu(next.excludedExtensions);
+      }
     },
-    [settings, toast]
+    [menuTarget, reapplyMenu, settings, toast]
   );
   saveSettingsRef.current = saveSettings;
 
@@ -465,11 +523,14 @@ export default function App() {
     async (installed: boolean) => {
       setMenuBusy(true);
       try {
+        // Uninstalling clears the verb and every mask, so it gets the full set of known
+        // types: a type excluded now may have been written by an earlier build.
+        const all = openableExtensions();
         if (installed) {
-          const value = await api.installContextMenu();
+          const value = await api.installContextMenu(all, settings.excludedExtensions);
           toast(t("menu.added", { value }));
         } else {
-          await api.uninstallContextMenu();
+          await api.uninstallContextMenu(all);
           toast(t("menu.removed"));
         }
         refreshMenu();
@@ -479,7 +540,7 @@ export default function App() {
         setMenuBusy(false);
       }
     },
-    [refreshMenu, toast]
+    [refreshMenu, settings.excludedExtensions, toast]
   );
 
   const menuTabPath = useMemo(() => {
