@@ -69,6 +69,44 @@ export function IconCompare({ size = 14 }: IconProps) {
   );
 }
 
+/** Window controls, drawn at 16px inside a 46×40 button: anything smaller reads as a
+    smudge next to the 13px labels elsewhere in the bar. The stroke is deliberately heavy
+    — at this size a hairline reads as a rendering glitch rather than a shape. */
+export function IconMinimize({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={2.4}>
+      <line x1="4" y1="19" x2="20" y2="19" />
+    </svg>
+  );
+}
+
+export function IconMaximize({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={2.4}>
+      <rect x="5" y="5" width="14" height="14" rx="1.5" />
+    </svg>
+  );
+}
+
+/** Restore: the maximized box behind, the restored one in front of it. */
+export function IconRestore({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={2.4}>
+      <path d="M5 15V5h10" />
+      <rect x="9" y="9" width="10" height="10" rx="1.5" />
+    </svg>
+  );
+}
+
+export function IconClose({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={2.4}>
+      <line x1="6" y1="6" x2="18" y2="18" />
+      <line x1="18" y1="6" x2="6" y2="18" />
+    </svg>
+  );
+}
+
 export function IconFolder({ size = 14 }: IconProps) {
   return (
     <svg {...base(size)} strokeWidth={1.6}>

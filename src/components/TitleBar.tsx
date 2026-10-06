@@ -5,10 +5,14 @@ import { TabIcon } from "./FileIcon";
 import { t } from "../lib/i18n";
 import {
   IconChevron,
+  IconClose,
+  IconMaximize,
+  IconMinimize,
   IconModePreview,
   IconModeSplit,
   IconModeText,
   IconOpenFolder,
+  IconRestore,
   IconSettings,
   IconSidebar,
 } from "./icons";
@@ -46,6 +50,30 @@ export default function TitleBar(props: Props) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const appWindow = useRef(getCurrentWindow());
+  /**
+   * Whether the window is maximized, which decides whether the middle button offers
+   * "Restore" or "Maximize" and which glyph it draws. It cannot be derived from state:
+   * the window can also be maximized by double-clicking the title bar, by snapping it to
+   * a screen edge, or by the system, none of which go through the button.
+   */
+  const [maximized, setMaximized] = useState(false);
+
+  useEffect(() => {
+    const win = appWindow.current;
+    const sync = () => {
+      win.isMaximized()
+        .then(setMaximized)
+        .catch(() => {});
+    };
+    sync();
+    // Resizing covers maximize, restore, snap and the taskbar jumps alike: one event for
+    // every way the state can change, and it fires for the button press as well.
+    let dispose: (() => void) | undefined;
+    void win.onResized(sync).then((unlisten) => {
+      dispose = unlisten;
+    });
+    return () => dispose?.();
+  }, []);
 
   useEffect(() => {
     if (!dropdownOpen) return;
@@ -163,17 +191,17 @@ export default function TitleBar(props: Props) {
         </button>
         <div className="win-controls">
           <button className="win-btn" title={t("title.minimize")} onClick={() => appWindow.current.minimize()}>
-            —
+            <IconMinimize />
           </button>
           <button
             className="win-btn"
-            title={t("title.maximize")}
+            title={maximized ? t("title.restore") : t("title.maximize")}
             onClick={() => appWindow.current.toggleMaximize()}
           >
-            ▢
+            {maximized ? <IconRestore /> : <IconMaximize />}
           </button>
           <button className="win-btn win-close" title={t("tab.close")} onClick={() => appWindow.current.close()}>
-            ✕
+            <IconClose />
           </button>
         </div>
       </div>

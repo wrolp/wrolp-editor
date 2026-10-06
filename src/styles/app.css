@@ -703,10 +703,15 @@ body {
   border: none;
   color: var(--text);
   cursor: pointer;
-  font-size: 13px;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+/* The glyphs are strokes now, not characters: give them room and let them take the
+   button's own color, so the close button's hover color reaches them. */
+.win-btn svg {
+  width: 16px;
+  height: 16px;
 }
 .win-btn:hover {
   background: #3a3a3a;
