@@ -3,7 +3,7 @@ import { t } from "../lib/i18n";
 import { api, errorMessage, pickSaveAs, EMPTY_FILE_SETTINGS, type Draft, type FileSettings, type GroupTab } from "../lib/tauri";
 import { basename, dirname, isUntitled, langOf, modelUri } from "../lib/path";
 import { tabKey, toStoredTab } from "../lib/group";
-import { pathKey, type EditorHandle, type PendingRestore, type Tab } from "../lib/types";
+import { pathKey, isFileTab, type CompareSide, type EditorHandle, type PendingRestore, type Tab } from "../lib/types";
 import type { DraftWriter } from "./useDraft";
 
 interface RestoreResult {
@@ -65,7 +65,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
   const activate = useCallback(
     async (id: number | null) => {
       const prev = tabsRef.current.find((t) => t.id === activeRef.current);
-      if (prev && !prev.isSettings) {
+      if (prev && isFileTab(prev)) {
         const h = editorRef.current;
         const content = h?.editor.getValue();
         const offset = currentOffset();
@@ -97,7 +97,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
         return false;
       }
       const opened = tabsRef.current.find(
-        (t) => !t.isSettings && pathKey(t.path) === pathKey(disk.path)
+        (t) => isFileTab(t) && pathKey(t.path) === pathKey(disk.path)
       );
       if (record) onFileOpened?.(dirname(disk.path));
 
@@ -227,10 +227,95 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
     [activate]
   );
 
+  /**
+   * Open a read-only comparison of two files as its own tab.
+   *
+   * Both sides are read from disk here and kept in the tab, rather than pointed at the
+   * live models of the two file tabs: a comparison is a snapshot of a question, and
+   * sharing models would make a diff follow every keystroke in either file while dragging
+   * drafts and dirty flags along. The pair is also not part of the group store, so it
+   * never comes back on the next start.
+   */
+  const openCompare = useCallback(
+    async (leftPath: string, rightPath: string) => {
+      if (pathKey(leftPath) === pathKey(rightPath)) {
+        toast(t("cmp.same"));
+        return;
+      }
+      const side = async (path: string): Promise<CompareSide> => {
+        const disk = await api.openFile(path, false, encodingRef.current);
+        return {
+          path: disk.path,
+          name: basename(disk.path),
+          content: disk.content,
+          language: langOf(disk.path),
+        };
+      };
+      let left: CompareSide;
+      let right: CompareSide;
+      try {
+        [left, right] = await Promise.all([side(leftPath), side(rightPath)]);
+      } catch (e) {
+        toast(errorMessage(e));
+        return;
+      }
+      // Same pair in the same order is the same question: show that tab instead of
+      // stacking duplicates. Mirrors openPath, which reuses an already-open file.
+      const existing = tabsRef.current.find(
+        (t) =>
+          !!t.compare &&
+          pathKey(t.compare.left.path) === pathKey(left.path) &&
+          pathKey(t.compare.right.path) === pathKey(right.path)
+      );
+      if (existing) {
+        await activate(existing.id);
+        return;
+      }
+      const tab: Tab = {
+        id: nextId(),
+        // Not a real path, and never treated as one: it is only a key for React and for
+        // telling this tab apart from a file. `isFileTab` keeps it out of every path lookup.
+        path: `compare://${left.path}|${right.path}`,
+        name: `${left.name} ↔ ${right.name}`,
+        language: right.language,
+        original: "",
+        dirty: false,
+        compare: { left, right },
+        encoding: "UTF-8",
+        bom: false,
+        bytes: null,
+        fileSettings: EMPTY_FILE_SETTINGS,
+      };
+      setTabs((prev) => [...prev, tab]);
+      await activate(tab.id);
+    },
+    [activate, toast]
+  );
+
+  /**
+   * Put the right file on the left. Both sides are already in the tab, so this reorders
+   * without touching the disk — and the diff models are keyed by the ordered pair, so
+   * Monaco builds fresh ones instead of reusing the models it already has.
+   */
+  const swapCompare = useCallback((id: number) => {
+    setTabs((prev) =>
+      prev.map((tab) => {
+        if (tab.id !== id || !tab.compare) return tab;
+        const { left, right } = tab.compare;
+        return {
+          ...tab,
+          compare: { left: right, right: left },
+          name: `${right.name} ↔ ${left.name}`,
+          language: left.language,
+        };
+      })
+    );
+  }, []);
+
   /** Serializable view of the open tabs, for the group store. */
   const snapshotTabs = useCallback((): { tabs: GroupTab[]; active: string } => {
     const h = editorRef.current;
-    const live = tabsRef.current.filter((t) => !t.isSettings);
+    const live = tabsRef.current.filter(isFileTab);
     const tabs = live.map((tab) => {
       const model = h?.monaco.editor.getModel(h.monaco.Uri.parse(modelUri(tab.path)));
       return toStoredTab({
@@ -272,7 +357,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
       }
       // openPath activated each tab as it went, so land on the one the user left selected.
       const wanted = tabsRef.current.find(
-        (t) => !t.isSettings && pathKey(t.path) === pathKey(activeKey)
+        (t) => isFileTab(t) && pathKey(t.path) === pathKey(activeKey)
       );
       await activate(wanted?.id ?? tabsRef.current[tabsRef.current.length - 1]?.id ?? null);
       return { restored, skipped };
@@ -288,7 +373,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
   const applyPendingCursor = useCallback(
     (until = 0) => {
       const tab = tabsRef.current.find((t) => t.id === activeRef.current);
-      if (!tab || tab.isSettings) return;
+      if (!tab || !isFileTab(tab)) return;
       const key = pathKey(tab.path);
       if (!pendingCursors.current.has(key)) return;
       const deadline = until || performance.now() + 3000;
@@ -312,8 +397,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
     [editorRef]
   );
 
-  const openSettings = useCallback(async () => {
-    const existing = tabsRef.current.find((t) => t.isSettings);
+  const openSettings = useCallback(async () => {    const existing = tabsRef.current.find((t) => t.isSettings);
     if (existing) {
       await activate(existing.id);
       return;
@@ -346,7 +430,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
       const focus = isActive ? remaining[Math.max(0, index - 1)] ?? null : null;
 
       if (isActive) setActiveId(focus ? focus.id : null);
-      if (!tab.isSettings) {
+      if (isFileTab(tab)) {
         if (isActive && !isUntitled(tab.path)) {
           const content = editorRef.current?.editor.getValue();
           if (content !== undefined && content !== tab.original) {
@@ -363,7 +447,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
       // The active model is disposed by Editor itself on unmount/switch; release the rest
       // so closing tabs does not leak models.
       const h = editorRef.current;
-      if (h && !tab.isSettings) {
+      if (h && isFileTab(tab)) {
         setTimeout(() => {
           const model = h.monaco.editor.getModel(h.monaco.Uri.parse(modelUri(tab.path)));
           if (model && model !== h.editor.getModel()) model.dispose();
@@ -377,7 +461,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
   const clearAllTabs = useCallback(() => {
     const h = editorRef.current;
     for (const tab of tabsRef.current) {
-      if (tab.isSettings) continue;
+      if (!isFileTab(tab)) continue;
       const model = h?.monaco.editor.getModel(h.monaco.Uri.parse(modelUri(tab.path)));
       if (model && model !== h?.editor.getModel()) model.dispose();
     }
@@ -394,7 +478,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
   const onEditorChange = useCallback(
     (value: string) => {
       const tab = tabsRef.current.find((t) => t.id === activeRef.current);
-      if (!tab || tab.isSettings) return;
+      if (!tab || !isFileTab(tab)) return;
       const dirty = value !== tab.original;
       if (dirty !== tab.dirty) {
         setTabs((prev) => prev.map((t) => (t.id === tab.id ? { ...t, dirty } : t)));
@@ -409,7 +493,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
   const onCursorChange = useCallback(
     (offset: number) => {
       const tab = tabsRef.current.find((t) => t.id === activeRef.current);
-      if (!tab || tab.isSettings) return;
+      if (!tab || !isFileTab(tab)) return;
       // Swapping models emits a cursor event for a position nobody chose. Trusting it
       // would erase both the remembered caret and the draft's caret for that tab.
       if (editorRef.current?.editor.hasTextFocus() !== true) return;
@@ -432,7 +516,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
   const saveActive = useCallback(async () => {
     const tab = tabsRef.current.find((t) => t.id === activeRef.current);
     const h = editorRef.current;
-    if (!tab || tab.isSettings || !h) return;
+    if (!tab || !isFileTab(tab) || !h) return;
     const content = h.editor.getValue();
     try {
       if (isUntitled(tab.path)) {
@@ -554,17 +638,29 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
   );
 
   const activeTab = tabs.find((t) => t.id === activeId) ?? null;
-  if (activeTab && !activeTab.isSettings) lastFileTabRef.current = activeTab;
+  // A comparison tab has no buffer of its own, so it must not become the fallback the
+  // editor keeps showing behind the Settings tab.
+  if (activeTab && isFileTab(activeTab)) lastFileTabRef.current = activeTab;
 
   return {
     tabs,
     activeId,
     activeTab,
     cursorRev,
-    /** Where Editor takes path/defaultValue: keeps the last file tab while Settings is active. */
-    editorTab: activeTab && !activeTab.isSettings ? activeTab : lastFileTabRef.current,
+    /** Where Editor takes path/defaultValue: keeps the last file tab while Settings shows. */
+    editorTab:
+      activeTab && !activeTab.isSettings ? activeTab : lastFileTabRef.current,
+    /**
+     * The last real file tab. Editor must stay mounted on this one even while a
+     * comparison is on screen: @monaco-editor/react disposes a model when its editor
+     * unmounts, and that model is the only place a file's unsaved edits and undo stack
+     * live. So a comparison is shown *beside* the hidden editor, never in place of it.
+     */
+    fileTab: lastFileTabRef.current,
     restoreQueue,
     openPath,
+    openCompare,
+    swapCompare,
     openUntitled,
     openSettings,
     closeTab,

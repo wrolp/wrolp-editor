@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import Editor from "./components/Editor";
+import DiffView from "./components/DiffView";
 import MarkdownPreview from "./components/MarkdownPreview";
 import DraftRestoreDialog from "./components/DraftRestoreDialog";
 import NewGroupDialog from "./components/NewGroupDialog";
@@ -13,17 +14,19 @@ import TitleBar, { type PreviewMode } from "./components/TitleBar";
 import Toast from "./components/Toast";
 import GroupChip from "./components/GroupChip";
 import DraftRestoreSummary from "./components/DraftRestoreSummary";
+import ComparePickerDialog from "./components/ComparePickerDialog";
 import { useDraft } from "./hooks/useDraft";
 import { useEditorTabs } from "./hooks/useEditorTabs";
 import { useGroups } from "./hooks/useGroups";
 import { setLang, t } from "./lib/i18n";
 import { basename, dirname, isMarkdown, isUntitled, modelUri } from "./lib/path";
-import type { EditStats, EditorHandle } from "./lib/types";
+import { isFileTab, pathKey, type DiffStats, type EditStats, type EditorHandle } from "./lib/types";
 import {
   api,
   copyText,
   errorMessage,
   listen,
+  pickFile,
   pickFiles,
   pickFolder,
   revealItemInDir,
@@ -41,6 +44,10 @@ const DEFAULT_SETTINGS: Settings = {
   language: "en",
   restoreSession: true,
   sidebarRoot: "",
+  // The Explorer opens folded: showing the whole tree on open hides how deep the folder
+  // goes, and costs one directory listing per level before anything is read.
+  expandFolders: false,
+  expandDepth: 1,
   compactMode: false,
   encoding: "auto",
   renderWhitespace: "selection",
@@ -93,6 +100,8 @@ export default function App() {
     totalChars: 0,
   });
   const [menuTarget, setMenuTarget] = useState<MenuTarget | null>(null);
+  /** Added/removed lines of the comparison on screen; null for every other tab. */
+  const [diffStats, setDiffStats] = useState<DiffStats | null>(null);
   const [menuBusy, setMenuBusy] = useState(false);
   const [fileSettingsPath, setFileSettingsPath] = useState<string | null>(null);
   const [tabMenu, setTabMenu] = useState<{
@@ -106,6 +115,8 @@ export default function App() {
   const [reviewEach, setReviewEach] = useState(false);
   /** A group is named by the user, so creating one needs a name first. */
   const [newGroupOpen, setNewGroupOpen] = useState(false);
+  /** Path of the file a comparison starts from, while the other side is being chosen. */
+  const [compareFrom, setCompareFrom] = useState<string | null>(null);
 
   const editorRef = useRef<EditorHandle | null>(null);
   const draft = useDraft(toast);
@@ -397,6 +408,51 @@ export default function App() {
     for (const path of paths) await tabs.openPath(path);
   }, [tabs, toast]);
 
+  /** Open tabs that can be the other side of a comparison against `left`. */
+  const otherFileTabs = useCallback(
+    (left: string) =>
+      tabs.tabs
+        .filter((tab) => isFileTab(tab) && !isUntitled(tab.path))
+        .filter((tab) => pathKey(tab.path) !== pathKey(left))
+        .map((tab) => ({ path: tab.path, name: tab.name })),
+    [tabs.tabs]
+  );
+
+  /** The system file picker, for a file that is not open in a tab. */
+  const browseCompareWith = useCallback(
+    async (left: string) => {
+      const right = await pickFile().catch((e) => {
+        toast(errorMessage(e));
+        return null;
+      });
+      if (!right) return;
+      if (pathKey(left) === pathKey(right)) {
+        toast(t("cmp.same"));
+        return;
+      }
+      await tabs.openCompare(left, right);
+    },
+    [tabs, toast]
+  );
+
+  /**
+   * Compare one file with another. The first file is the one the user acted on; the
+   * second is picked from the files already open in tabs, because comparing two files you
+   * are working on is the common case and the tab strip already lists them. When nothing
+   * else is open — or the other file lives in another folder — the system file picker
+   * takes over, so the pair is not limited to what happens to be open.
+   */
+  const startCompare = useCallback(
+    async (left: string) => {
+      if (otherFileTabs(left).length > 0) {
+        setCompareFrom(left);
+        return;
+      }
+      await browseCompareWith(left);
+    },
+    [browseCompareWith, otherFileTabs]
+  );
+
   const pickRootFolder = useCallback(async () => {
     const dir = await pickFolder().catch((e) => {
       toast(errorMessage(e));
@@ -606,6 +662,8 @@ export default function App() {
   );
   // The menu acts on the right-clicked tab, which is not necessarily the active one.
   const menuTab = tabs.tabs.find((t) => t.path === menuTabPath) ?? null;
+  /** Only a real file tab has a path for the path actions (reveal, copy, per-file settings). */
+  const menuTabIsFile = !!menuTab && isFileTab(menuTab);
   const menuMinimapOn = menuTab?.fileSettings.minimap ?? settings.minimap;
   const wordWrap = editorTab?.fileSettings.wordWrap ?? settings.wordWrap;
   const stickyScroll = editorTab?.fileSettings.stickyScroll ?? settings.stickyScroll;
@@ -617,10 +675,15 @@ export default function App() {
 
   // Markdown opens side by side; anything else defaults to text only. The choice is
   // remembered per file, so a document left in "preview only" reopens that way.
-  const previewMode: PreviewMode =
-    (editorTab && previewPref[editorTab.path]) || (editorTab && isMarkdown(editorTab.path) ? "split" : "text");
+  // A comparison is text and nothing else: it already has two panes of its own.
+  const previewMode: PreviewMode = editorTab?.compare
+    ? "text"
+    : (editorTab && previewPref[editorTab.path]) ||
+      (editorTab && isMarkdown(editorTab.path) ? "split" : "text");
   const showEditor = previewMode !== "preview";
   const showPreview = previewMode !== "text" && !!editorTab;
+  /** A comparison owns the pane; the text editor is only hidden behind it. */
+  const showDiff = !!editorTab?.compare;
   const setPreviewMode = useCallback((mode: PreviewMode) => {
     const path = tabs.activeTab?.path;
     if (!path) return;
@@ -650,6 +713,8 @@ export default function App() {
   // A fresh document starts at the top rather than inheriting the last scroll position.
   useEffect(() => {
     setScrollRatio(0);
+    // The previous comparison's totals must not linger while the next one computes.
+    setDiffStats(null);
   }, [editorTab?.path]);
 
   // Preview text is read straight off the model on every render rather than mirrored
@@ -687,7 +752,7 @@ export default function App() {
             onRemove={groups.remove}
           />
         }
-        previewMode={editorTab && isMarkdown(editorTab.path) ? previewMode : null}
+        previewMode={editorTab && !editorTab.compare && isMarkdown(editorTab.path) ? previewMode : null}
         onPreviewMode={setPreviewMode}
         onSelect={tabs.selectTab}
         onClose={tabs.closeTab}
@@ -704,11 +769,14 @@ export default function App() {
           width={sidebarWidth}
           view={sidebarView}
           rootDir={rootDir}
+          expandFolders={settings.expandFolders}
+          expandDepth={settings.expandDepth}
           history={history}
           activePath={editorTab?.path ?? null}
           onSetView={changeView}
           onPickFolder={pickRootFolder}
           onOpenPath={tabs.openPath}
+          onCompare={(path) => void startCompare(path)}
           onRemoveHistory={(path) =>
             api
               .removeHistory(path)
@@ -743,13 +811,15 @@ export default function App() {
               would let @monaco-editor/react dispose the model, and the live buffer —
               unsaved edits and undo stack included — exists only in that model.
               `automaticLayout` re-measures it once it becomes visible again. */}
-          {editorTab && (
+          {tabs.fileTab && (
             <div
               className="editor-host"
-              style={{ display: showSettings || !showEditor ? "none" : "block" }}
+              style={{
+                display: showSettings || !showEditor || showDiff ? "none" : "block",
+              }}
             >
               <Editor
-                tab={editorTab}
+                tab={tabs.fileTab}
                 fontSize={settings.fontSize}
                 minimap={minimap}
                 renderWhitespace={renderWhitespaceMode}
@@ -773,6 +843,29 @@ export default function App() {
             </div>
           )}
 
+          {/* A comparison takes the pane but never replaces the editor above: that one
+              holds the file's live buffer, and unmounting it would dispose the model. */}
+          {showDiff && editorTab?.compare && (
+            <div className="editor-host">
+              <DiffView
+                // Keyed by the ordered pair: swapping the sides remounts the view, which
+                // is what releases the two models it had attached. Re-pointing the model
+                // paths alone would detach them without disposing, and the library only
+                // disposes the models attached at unmount.
+                key={`${editorTab.compare.left.path}|${editorTab.compare.right.path}`}
+                pair={editorTab.compare}
+                fontSize={settings.fontSize}
+                renderWhitespace={renderWhitespaceMode}
+                wordWrap={wordWrap}
+                tabSize={tabSize}
+                insertSpaces={insertSpaces}
+                detectIndentation={detectIndentation}
+                scrollBeyondLastLine={settings.scrollBeyondLastLine}
+                onStats={setDiffStats}
+              />
+            </div>
+          )}
+
           {showPreview && !showSettings && editorTab && (
             <MarkdownPreview
               text={docText}
@@ -783,7 +876,7 @@ export default function App() {
             />
           )}
 
-          {!editorTab && <div className="editor-empty">{t("app.empty")}</div>}
+          {!editorTab && !showDiff && <div className="editor-empty">{t("app.empty")}</div>}
 
           {showSettings && (
             <SettingsPanel
@@ -802,6 +895,7 @@ export default function App() {
         line={cursor.line}
         column={cursor.column}
         stats={stats}
+        diff={diffStats}
       />
 
       {tabMenu && menuTabPath && (
@@ -810,7 +904,33 @@ export default function App() {
           ref={tabMenuRef}
           style={{ display: "block", left: tabMenu.x, top: tabMenu.y }}
         >
-          {tabMenu.panel === "root" ? (
+          {tabMenu.panel === "root" && !menuTabIsFile ? (
+            /* A comparison or the Settings panel is not a file, so every path action in
+               the full menu would be meaningless on it. What still applies: swapping the
+               two sides, and closing. */
+            <>
+              {menuTab?.compare && (
+                <div
+                  className="ctx-item"
+                  onClick={() => {
+                    tabs.swapCompare(menuTab.id);
+                    setTabMenu(null);
+                  }}
+                >
+                  {t("cmp.swap")}
+                </div>
+              )}
+              <div
+                className="ctx-item"
+                onClick={() => {
+                  if (menuTab) void closeTab(menuTab.id);
+                  setTabMenu(null);
+                }}
+              >
+                {t("tab.close")}
+              </div>
+            </>
+          ) : tabMenu.panel === "root" ? (
             <>
               <div
                 className="ctx-item"
@@ -839,6 +959,19 @@ export default function App() {
               >
                 {t("title.menuSidebar")}
               </div>
+              {/* Only a file on disk can be the first side: an unsaved buffer has nothing
+                  to read the other file against. */}
+              {menuTabIsFile && !isUntitled(menuTabPath) && (
+                <div
+                  className="ctx-item"
+                  onClick={() => {
+                    void startCompare(menuTabPath);
+                    setTabMenu(null);
+                  }}
+                >
+                  {t("cmp.menu")}
+                </div>
+              )}
               <div
                 className="ctx-item"
                 onClick={() => {
@@ -915,6 +1048,24 @@ export default function App() {
           onSave={(p, next) => tabs.setFileSettings(p, next)}
           onClose={() => setFileSettingsPath(null)}
           onError={toast}
+        />
+      )}
+
+      {compareFrom && (
+        <ComparePickerDialog
+          leftPath={compareFrom}
+          leftName={basename(compareFrom)}
+          candidates={otherFileTabs(compareFrom)}
+          onPick={(right) => {
+            setCompareFrom(null);
+            void tabs.openCompare(compareFrom, right);
+          }}
+          onBrowse={() => {
+            const left = compareFrom;
+            setCompareFrom(null);
+            void browseCompareWith(left);
+          }}
+          onCancel={() => setCompareFrom(null)}
         />
       )}
 

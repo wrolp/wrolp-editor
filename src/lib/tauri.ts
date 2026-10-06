@@ -56,6 +56,10 @@ export interface Settings {
   restoreSession: boolean;
   /** Folder the Explorer shows. Global view state, not part of a group. */
   sidebarRoot: string;
+  /** Expand folders when a directory is opened. Off by default. */
+  expandFolders: boolean;
+  /** Levels to expand while `expandFolders` is on: 1 is the folders under the root. */
+  expandDepth: number;
   /** Tighten the app chrome. Does not touch the editor's font size or line height. */
   compactMode: boolean;
   /** `auto` sniffs every file; the rest force one encoding. */
@@ -189,6 +193,11 @@ export function pickFiles(): Promise<string[]> {
   return open({ multiple: true, filters: fileFilters() }).then((r) =>
     Array.isArray(r) ? r : r ? [r] : []
   );
+}
+
+/** One file, for a flow that needs a second path (currently: pick the other side of a diff). */
+export function pickFile(): Promise<string | null> {
+  return open({ multiple: false, filters: fileFilters() }).then((r) => (typeof r === "string" ? r : null));
 }
 
 export function pickSaveAs(defaultPath?: string): Promise<string | null> {

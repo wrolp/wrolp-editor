@@ -59,6 +59,16 @@ export function IconTreeChevron({ size = 12 }: IconProps) {
   );
 }
 
+/** A comparison tab: two documents, side by side. */
+export function IconCompare({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <rect x="3" y="4" width="8" height="16" rx="1.6" />
+      <rect x="13" y="4" width="8" height="16" rx="1.6" />
+    </svg>
+  );
+}
+
 export function IconFolder({ size = 14 }: IconProps) {
   return (
     <svg {...base(size)} strokeWidth={1.6}>

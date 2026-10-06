@@ -74,7 +74,15 @@ function TreeTooltip({ children, name, detail }: TipProps) {
 interface TreeHandlers {
   activePath: string | null;
   onOpenPath: (path: string) => void;
+  /** Opens a side-by-side comparison between this file and another one. */
+  onCompare: (path: string) => void;
   onError: (message: string) => void;
+  /**
+   * A folder starts collapsed once its depth reaches this. 0 collapses every level, which
+   * is the default: an Explorer that opens already unfolded hides how deep the folder
+   * goes, and a deep tree costs a listing per level before anything is read.
+   */
+  expandLimit: number;
   /** Opens the Explorer context menu for a node. */
   onContextMenu: (target: Omit<MenuTarget, "x" | "y">, x: number, y: number) => void;
 }
@@ -125,9 +133,12 @@ function FolderNode({
   entry,
   depth,
   onContextMenu: openMenu,
+  expandLimit,
   ...handlers
 }: NodeProps & { entry: FsEntry }) {
-  const [collapsed, setCollapsed] = useState(depth >= 1);
+  // The initial state only: a folder the user folded stays folded, so the setting applies
+  // when a directory is opened (or refreshed), not to the tree already on screen.
+  const [collapsed, setCollapsed] = useState(depth >= expandLimit);
   const [children, setChildren] = useState<FsEntry[] | null>(null);
 
   useEffect(() => {
@@ -182,6 +193,7 @@ function FolderNode({
             {...handlers}
             entries={children}
             depth={depth + 1}
+            expandLimit={expandLimit}
             onContextMenu={openMenu}
           />
         ))}
@@ -203,12 +215,16 @@ function TreeLevel({ entries, depth, ...handlers }: LevelProps) {
   );
 }
 
-interface Props extends Omit<TreeHandlers, "onContextMenu"> {
+interface Props extends Omit<TreeHandlers, "onContextMenu" | "expandLimit"> {
   visible: boolean;
   width: number;
   view: "explorer" | "history";
   rootDir: string | null;
   history: HistoryEntry[];
+  /** Expand folders when a directory is opened; off means every folder starts folded. */
+  expandFolders: boolean;
+  /** How many levels to expand when `expandFolders` is on. */
+  expandDepth: number;
   onSetView: (view: "explorer" | "history") => void;
   onPickFolder: () => void;
   onRemoveHistory: (path: string) => void;
@@ -227,6 +243,7 @@ export default function Sidebar(props: Props) {
     history,
     activePath,
     onOpenPath,
+    onCompare,
     onError,
     onSetView,
     onPickFolder,
@@ -237,6 +254,9 @@ export default function Sidebar(props: Props) {
   const [entries, setEntries] = useState<FsEntry[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [menu, setMenu] = useState<MenuTarget | null>(null);
+  // 0 means "collapse everything", which is what having the setting off has to mean: a
+  // negative or missing depth would otherwise expand the top level by accident.
+  const expandLimit = props.expandFolders ? Math.max(1, Math.floor(props.expandDepth)) : 0;
 
   // Any click elsewhere, a scroll, or losing focus dismisses the menu. `mousedown` rather
   // than `click` so the click that opened it cannot immediately close it again.
@@ -340,6 +360,8 @@ export default function Sidebar(props: Props) {
               depth={0}
               activePath={activePath}
               onOpenPath={onOpenPath}
+              onCompare={onCompare}
+              expandLimit={expandLimit}
               onError={onError}
               onContextMenu={(target, x, y) => setMenu({ ...target, x, y })}
             />
@@ -391,6 +413,17 @@ export default function Sidebar(props: Props) {
           >
             {t("side.menuOpen")}
           </div>
+          {!menu.isDir && (
+            <div
+              className="ctx-item"
+              onClick={() => {
+                onCompare(menu.path);
+                setMenu(null);
+              }}
+            >
+              {t("cmp.menu")}
+            </div>
+          )}
           <div
             className="ctx-item"
             onClick={() => {

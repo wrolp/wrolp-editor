@@ -18,6 +18,12 @@ export interface Tab {
   initialValue?: string;
   isSettings?: boolean;
   /**
+   * A read-only side-by-side diff of two files. The text is a snapshot taken when the
+   * comparison was started: the pair has no model of its own, so it is never dirty and
+   * never carries a draft.
+   */
+  compare?: ComparePair;
+  /**
    * Encoding the file on disk turned out to be, and whether it carried a BOM. A save
    * must write the same encoding back or a legacy file comes out mangled.
    */
@@ -27,6 +33,34 @@ export interface Tab {
   bytes: number | null;
   /** This file's overrides of the global editor view settings; null means "inherit". */
   fileSettings: FileSettings;
+}
+
+/** One side of a comparison: the file it is, plus the text to show for it. */
+export interface CompareSide {
+  path: string;
+  name: string;
+  content: string;
+  language: string;
+}
+
+export interface ComparePair {
+  left: CompareSide;
+  right: CompareSide;
+}
+
+/**
+ * A tab backed by a real file the user can edit. Settings and comparison tabs are not:
+ * they have no editable model, so everything that saves, drafts or counts edits must
+ * skip them. Getting this wrong is silent — a comparison would try to save itself.
+ */
+export function isFileTab(tab: Tab): boolean {
+  return !tab.isSettings && !tab.compare;
+}
+
+/** Added and removed line counts of a comparison, as Monaco reports them. */
+export interface DiffStats {
+  added: number;
+  removed: number;
 }
 
 export interface EditorHandle {

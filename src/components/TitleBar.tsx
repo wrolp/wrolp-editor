@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import TabBar from "./TabBar";
-import FileIcon from "./FileIcon";
+import { TabIcon } from "./FileIcon";
 import { t } from "../lib/i18n";
 import {
   IconChevron,
@@ -103,7 +103,7 @@ export default function TitleBar(props: Props) {
                     setDropdownOpen(false);
                   }}
                 >
-                  <FileIcon name={tab.name} />
+                  <TabIcon tab={tab} />
                   <span className="dd-name">{tab.name}</span>
                   <button
                     className="dd-close"

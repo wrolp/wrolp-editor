@@ -1,11 +1,13 @@
 import { t } from "../lib/i18n";
-import type { EditStats, Tab } from "../lib/types";
+import { isFileTab, type DiffStats, type EditStats, type Tab } from "../lib/types";
 
 interface Props {
   tab: Tab | null;
   line: number;
   column: number;
   stats: EditStats;
+  /** Added/removed lines of a comparison tab; null while any other tab is showing. */
+  diff: DiffStats | null;
 }
 
 /**
@@ -24,12 +26,21 @@ function formatBytes(bytes: number): string {
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
 }
 
-export default function StatusBar({ tab, line, column, stats }: Props) {
-  const file = tab && !tab.isSettings;
+export default function StatusBar({ tab, line, column, stats, diff }: Props) {
+  // A comparison tab shows two files, so the file counters (selection, size, dirty) and
+  // the single caret readout do not apply to it; it gets the diff totals instead.
+  const file = tab && isFileTab(tab);
+  const comparing = tab?.compare ?? null;
   return (
     <div className="statusbar">
       <span className="sb-path">
-        {tab ? (tab.isSettings ? t("tab.settings") : tab.path) : t("status.noFile")}
+        {tab
+          ? tab.isSettings
+            ? t("tab.settings")
+            : comparing
+              ? t("cmp.label", { left: comparing.left.name, right: comparing.right.name })
+              : tab.path
+          : t("status.noFile")}
       </span>
       <span className="sb-spacer" />
       {file && stats.selectionChars > 0 && (
@@ -50,6 +61,18 @@ export default function StatusBar({ tab, line, column, stats }: Props) {
       )}
       {file && tab.dirty && <span className="sb-dirty is-dirty">{t("status.dirty")}</span>}
       {file && !tab.dirty && <span className="sb-dirty">{t("status.saved")}</span>}
+      {comparing && (
+        <span className="sb-diff">
+          {diff && (diff.added > 0 || diff.removed > 0) ? (
+            <>
+              {diff.added > 0 && <span className="add">+{diff.added}</span>}
+              {diff.removed > 0 && <span className="del">−{diff.removed}</span>}
+            </>
+          ) : (
+            t("cmp.identical")
+          )}
+        </span>
+      )}
       <span className="sb-cursor">
         {file ? t("status.cursor", { line, column }) : ""}
       </span>

@@ -139,6 +139,25 @@ export default function SettingsPanel({
               />
               <p className="muted">{t("settings.restoreSessionDesc")}</p>
               <SettingCheck
+                label={t("settings.expandFolders")}
+                checked={settings.expandFolders}
+                onChange={(v) => onSaveSettings({ expandFolders: v })}
+              />
+              <SettingField label={t("settings.expandDepth")}>
+                <input
+                  type="number"
+                  min={1}
+                  max={8}
+                  disabled={!settings.expandFolders}
+                  value={settings.expandDepth}
+                  onChange={(e) => {
+                    const depth = Number(e.target.value);
+                    if (!Number.isNaN(depth) && depth >= 1) onSaveSettings({ expandDepth: depth });
+                  }}
+                />
+              </SettingField>
+              <p className="muted">{t("settings.expandFoldersDesc")}</p>
+              <SettingCheck
                 label={t("settings.compactMode")}
                 checked={settings.compactMode}
                 onChange={(v) => onSaveSettings({ compactMode: v })}

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { t } from "../lib/i18n";
-import FileIcon from "./FileIcon";
+import { TabIcon } from "./FileIcon";
 import type { Tab } from "../lib/types";
 
 interface Props {
@@ -69,13 +69,15 @@ export default function TabBar({ tabs, activeId, onSelect, onClose, onContextMen
           data-tauri-drag-region="false"
           className={`tab${tab.id === activeId ? " active" : ""}`}
           onClick={() => onSelect(tab.id)}
-          title={tab.isSettings ? t("tab.settings") : tab.path}
+          title={
+            tab.compare
+              ? `${tab.compare.left.path}\n↔\n${tab.compare.right.path}`
+              : tab.isSettings
+                ? t("tab.settings")
+                : tab.path
+          }
         >
-          {tab.isSettings ? (
-            <span className="file-glyph icon-settings">⚙</span>
-          ) : (
-            <FileIcon name={tab.name} />
-          )}
+          <TabIcon tab={tab} />
           <span className="tab-name">{tab.name}</span>
           {tab.dirty && !tab.isSettings && <span className="tab-dirty">U</span>}
           <button

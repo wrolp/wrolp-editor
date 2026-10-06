@@ -78,6 +78,12 @@ pub struct Settings {
   /// Folder the Explorer shows. Global view state: a group is a named set of tabs, so two
   /// groups may sit on the same directory and one directory is never a group.
   pub sidebar_root: String,
+  /// Expand folders in the Explorer when a directory is opened. Off by default: a tree
+  /// that is already showing what it holds leaves no clue how deep the folder goes.
+  pub expand_folders: bool,
+  /// How many levels `expand_folders` opens: 1 is the folders directly under the root,
+  /// 2 adds their children, and so on. Only read while `expand_folders` is on.
+  pub expand_depth: u32,
   /// Tighten the app chrome (title bar, tabs, sidebar rows, status bar, menus).
   pub compact_mode: bool,
   /// One of the `encoding::CHOICES` labels; `auto` sniffs each file instead.
@@ -109,6 +115,8 @@ impl Default for Settings {
       language: "en".into(),
       restore_session: true,
       sidebar_root: String::new(),
+      expand_folders: false,
+      expand_depth: 1,
       compact_mode: false,
       encoding: "auto".into(),
       render_whitespace: "selection".into(),
@@ -156,6 +164,13 @@ impl Settings {
       },
       restore_session: self.restore_session,
       sidebar_root: self.sidebar_root.trim().to_string(),
+      expand_folders: self.expand_folders,
+      // 0 would mean "expand nothing", which is the same as having the setting off at all.
+      expand_depth: if self.expand_depth == 0 {
+        1
+      } else {
+        self.expand_depth.min(8)
+      },
       compact_mode: self.compact_mode,
       // An unknown encoding or whitespace mode is a stale or hand-edited settings file.
       // Falling back here keeps the editor openable instead of refusing to start.
