@@ -1096,7 +1096,8 @@ body.resizing .editor-host {
   min-width: 0;
 }
 .editor-wrap.preview-only .md-preview,
-.editor-wrap.preview-only .img-preview {
+.editor-wrap.preview-only .img-preview,
+.editor-wrap.preview-only .html-preview {
   flex: 1 1 100%;
 }
 /* The editor host is absolutely positioned, and a positioned box is painted above a static
@@ -1104,7 +1105,8 @@ body.resizing .editor-host {
    and the row orders itself; in preview-only it is not, so a preview has to be positioned
    too — otherwise the editor is drawn straight over it. */
 .md-preview,
-.img-preview {
+.img-preview,
+.html-preview {
   position: relative;
   z-index: 1;
 }
@@ -1895,6 +1897,31 @@ body.resizing .editor-host {
 /* Preview-only mode: the pane is the whole area, so drop the divider. */
 .editor-wrap.preview-only > .md-preview {
   border-left: none;
+}
+
+/* ---------- HTML preview ----------
+   The pane does not scroll: the frame inside it does, because the document has its own
+   height and its own scrolling element, and a wrapper that scrolled as well would give the
+   page two scrollbars for one document. `min-height: 0` is what lets the flex child shrink
+   to the row instead of growing past it, exactly as `.md-preview` needs it. */
+.html-preview {
+  flex: 1 1 50%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-left: 1px solid var(--border);
+}
+.editor-wrap.preview-only > .html-preview {
+  border-left: none;
+}
+.html-preview iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  /* A document with no background of its own would otherwise show the app's own
+     background through it, which reads as a broken page rather than an unstyled one. */
+  background: #fff;
 }
 .md-body {
   max-width: 860px;

@@ -391,6 +391,17 @@ export function isSvg(path: string): boolean {
   return extOf(path) === "svg";
 }
 
+/**
+ * A whole HTML document. Like SVG it is both source and picture, so it gets the same
+ * preview pane treatment rather than being lumped in with the images: what renders here is
+ * a page, with its own stylesheet and behaviour, not a picture of one.
+ */
+const HTML_EXT = new Set(["html", "htm", "xhtml"]);
+
+export function isHtml(path: string): boolean {
+  return HTML_EXT.has(extOf(path).toLowerCase());
+}
+
 /** Everything the preview pane can draw, whether or not it is also editable text. */
 export function isPreviewableImage(path: string): boolean {
   return isBitmapImage(path) || isSvg(path);

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import ImagePreview from "./components/ImagePreview";
+import HtmlPreview from "./components/HtmlPreview";
 import Editor from "./components/Editor";
 import DiffView from "./components/DiffView";
 import MarkdownPreview from "./components/MarkdownPreview";
@@ -25,6 +26,7 @@ import {
   basename,
   dirname,
   isBitmapImage,
+  isHtml,
   isMarkdown,
   isPreviewableImage,
   isSvg,
@@ -90,8 +92,8 @@ function whitespaceMode(value: string): (typeof WHITESPACE_MODES)[number] {
 /** Never let a save-on-close turn into a window that cannot be closed. */
 const CLOSE_FLUSH_TIMEOUT_MS = 2000;
 
-/** What fills the preview pane: rendered markdown, or a picture. */
-type PreviewKind = "markdown" | "image" | null;
+/** What fills the preview pane: rendered markdown, a picture, or a live HTML page. */
+type PreviewKind = "markdown" | "image" | "html" | null;
 
 export default function App() {
   const [toastState, setToastState] = useState({ message: "", visible: false });
@@ -764,23 +766,26 @@ export default function App() {
   const previewKind: PreviewKind = editorTab
     ? isMarkdown(editorTab.path)
       ? "markdown"
-      : isPreviewableImage(editorTab.path)
-        ? "image"
-        : null
+      : isHtml(editorTab.path)
+        ? "html"
+        : isPreviewableImage(editorTab.path)
+          ? "image"
+          : null
     : null;
-  /**
+/**
    * The layout a file opens in when it has no stored choice of its own.
    *
    * A picture is settled before the setting is consulted: its bytes are not text, so
    * "editor only" would put an editable-looking buffer in front of a photo and any keystroke
    * would corrupt it. Everything else that has a preview follows the setting, and a file with
    * nothing to preview is always text. `auto` keeps the per-kind behaviour this replaced —
-   * markdown is read as prose and SVG is edited as source, so both open side by side.
+   * markdown is read as prose, and SVG and HTML are edited as source and read as a rendering
+   * of that source, so all three open side by side.
    */
-  const defaultModeFor = useCallback(
+const defaultModeFor = useCallback(
     (path: string): PreviewMode => {
       if (isBitmapImage(path)) return "preview";
-      if (!isMarkdown(path) && !isSvg(path)) return "text";
+      if (!isMarkdown(path) && !isSvg(path) && !isHtml(path)) return "text";
       if (previewLayout === "split" || previewLayout === "preview") return previewLayout;
       if (previewLayout === "text") return "text";
       return "split";
@@ -1033,6 +1038,16 @@ export default function App() {
 
           {showPreview && !showSettings && editorTab && previewKind === "markdown" && (
             <MarkdownPreview
+              text={docText}
+              path={editorTab.path}
+              scrollRatio={scrollRatio}
+              onScrollRatio={scrollEditorToRatio}
+              beyondEnd={settings.scrollBeyondLastLine}
+            />
+          )}
+
+          {showPreview && !showSettings && editorTab && previewKind === "html" && (
+            <HtmlPreview
               text={docText}
               path={editorTab.path}
               scrollRatio={scrollRatio}
