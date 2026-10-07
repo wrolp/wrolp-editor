@@ -2129,7 +2129,8 @@ body.resizing .editor-host {
 }
 /* A hover toolbar of zoom controls sits over the drawing's corner. It only appears on
    hover so it never crowds a small diagram, and it is absolutely placed so it takes no
-   row of its own. */
+   row of its own. Shown translucent rather than opaque, so the drawing under it still
+   reads instead of being covered by a solid plate. */
 .md-diagram-zoom {
   position: absolute;
   top: 6px;
@@ -2144,6 +2145,9 @@ body.resizing .editor-host {
   border-radius: 6px;
   font-size: 12px;
   color: var(--text);
+  /* `opacity` rather than an alpha background: it carries background, border and the
+     percentage label together, so nothing needs a per-theme translucent colour. */
+  opacity: 0.75;
 }
 .md-body div[data-diagram]:hover .md-diagram-zoom {
   display: flex;
@@ -2169,13 +2173,13 @@ body.resizing .editor-host {
   color: var(--muted);
 }
 /* The drawing lives in a scrollable stage so a zoomed-in diagram can be panned instead of
-   spilling out of the page. */
+   spilling out of the page. Centering is done by the drawing's own auto margins rather than
+   `justify-content` here, for two reasons covered below. */
 .md-diagram-stage {
   width: 100%;
   max-height: 70vh;
   overflow: auto;
   display: flex;
-  justify-content: center;
 }
 /* Only when the drawing overflows (zoomed or just tall) does it become grabbable, so the
    cursor never promises a drag that would do nothing. */
@@ -2188,6 +2192,14 @@ body.resizing .editor-host {
 .md-body div[data-diagram] .md-diagram-stage > svg {
   max-width: 100%;
   height: auto;
+  /* `flex: 0 0 auto`: a flex item shrinks back towards the container width by default, so
+     without this the pixel width the zoom writes is collapsed to the column and only the
+     height grows — the drawing looks unchanged and the width never scales. */
+  flex: 0 0 auto;
+  /* `margin: auto` centers the drawing while it fits, and resolves to 0 once it does not,
+     so a zoomed diagram still scrolls all the way to its own left edge. `justify-content:
+     center` would leave the overflowing start pinned out of reach of `scrollLeft`. */
+  margin: auto;
 }
 .md-body div[data-diagram] > .md-diagram-error {
   color: var(--danger);

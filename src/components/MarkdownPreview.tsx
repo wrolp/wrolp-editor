@@ -321,26 +321,47 @@ export default function MarkdownPreview({
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
+    /**
+     * The level lives in `data-zoom-level`, NOT in `data-zoom` — the zoom *buttons* carry
+     * `data-zoom` ("in" / "out" / "reset"), and the delegated click handler below finds them
+     * by `closest()`. Storing the level under the same name put that attribute on the stage,
+     * so `closest()` starting at the stage matched the stage itself, read "1.44" as an
+     * action, matched neither branch and fell through to reset. The dragged-to-pan click is
+     * retargeted to the stage by pointer capture, so every reset happened right after a pan.
+     */
     const setZoom = (stage: HTMLElement, zoom: number) => {
+      const previous = Number(stage.dataset.zoomLevel ?? "1") || 1;
       const clamped = Math.min(Math.max(Math.round(zoom * 100) / 100, 0.2), 5);
-      stage.dataset.zoom = String(clamped);
+      stage.dataset.zoomLevel = String(clamped);
       const svg = stage.querySelector("svg");
       const val = stage.closest("div[data-diagram]")?.querySelector<HTMLElement>(".md-dz-val");
       if (val) val.textContent = `${Math.round(clamped * 100)}%`;
       if (svg) {
-        // `zoom` is unreliable on an SVG whose width is capped by `max-width: 100%`, so the
-        // size is set from the viewBox instead: explicit pixel width and height scale the
-        // drawing deterministically and let the stage scroll when it outgrows the column.
         if (clamped === 1) {
+          // Hand the drawing back to the stylesheet: it fits its column again.
           svg.style.width = "";
           svg.style.height = "";
           svg.style.maxWidth = "";
         } else {
-          const vb = svg.viewBox?.baseVal;
-          if (vb && vb.width && vb.height) {
+          // Scale from the size the drawing actually occupies unscaled, not from its
+          // viewBox: a drawing wider than the column is already shrunk to fit by
+          // `max-width`, and multiplying its intrinsic width would jump to something
+          // several times the size on the screen. Taking the laid-out size once, then
+          // dividing the current size back out on later steps, keeps every level a plain
+          // multiple of what the user saw at 100% and does not drift as steps repeat.
+          const base = svg.style.width
+            ? {
+                w: parseFloat(svg.style.width) / previous,
+                h: parseFloat(svg.style.height) / previous,
+              }
+            : (() => {
+                const box = svg.getBoundingClientRect();
+                return { w: box.width, h: box.height };
+              })();
+          if (base.w > 0 && base.h > 0) {
             svg.style.maxWidth = "none";
-            svg.style.width = `${Math.round(vb.width * clamped)}px`;
-            svg.style.height = `${Math.round(vb.height * clamped)}px`;
+            svg.style.width = `${Math.round(base.w * clamped)}px`;
+            svg.style.height = `${Math.round(base.h * clamped)}px`;
           }
         }
       }
@@ -350,12 +371,14 @@ export default function MarkdownPreview({
       stage.classList.toggle("md-can-pan", overflow);
     };
     const onClick = (e: MouseEvent) => {
-      const btn = (e.target as Element).closest?.("[data-zoom]");
+      // Matched on the tag too, so a future `data-zoom` on something that is not a control
+      // can never be read as an action. `closest` starts at the target itself.
+      const btn = (e.target as Element).closest?.("button[data-zoom]");
       if (!btn) return;
       const stage = btn.closest("div[data-diagram]")?.querySelector<HTMLElement>(".md-diagram-stage");
       if (!stage) return;
       const action = btn.getAttribute("data-zoom");
-      const current = Number(stage.dataset.zoom ?? "1");
+      const current = Number(stage.dataset.zoomLevel ?? "1");
       setZoom(stage, action === "in" ? current * 1.2 : action === "out" ? current / 1.2 : 1);
     };
     const onWheel = (e: WheelEvent) => {
@@ -363,7 +386,7 @@ export default function MarkdownPreview({
       const stage = (e.target as Element).closest?.(".md-diagram-stage") as HTMLElement | null;
       if (!stage) return;
       e.preventDefault();
-      const current = Number(stage.dataset.zoom ?? "1");
+      const current = Number(stage.dataset.zoomLevel ?? "1");
       setZoom(stage, e.deltaY < 0 ? current * 1.1 : current / 1.1);
     };
     // Press-and-drag pans a diagram that is larger than its column. Pointer events are
