@@ -109,6 +109,28 @@ export interface GroupStore {
   items: Group[];
 }
 
+/** Where the window was left, in physical pixels. `maximized` is the state to enter with. */
+export interface WindowState {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  maximized: boolean;
+}
+
+export interface MonitorRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** A stored rectangle plus the monitors that exist today, judged on the Rust side. */
+export interface Placement extends WindowState {
+  /** True when the saved rectangle could not be used as it was. */
+  adjusted: boolean;
+}
+
 /** Re-homing a tab: `tab` is a tab key, or null for every tab of the source group. */
 export type TabTransfer =
   | { action: "move"; from: string; to: string; tab: string | null }
@@ -194,6 +216,10 @@ export const api = {
   saveGroups: (store: GroupStore) => invoke<GroupStore>("save_groups", { store }),
   transferTabs: (store: GroupStore, transfer: TabTransfer) =>
     invoke<GroupStore>("transfer_tabs", { store, transfer }),
+  getWindowState: () => invoke<WindowState | null>("get_window_state"),
+  saveWindowState: (state: WindowState) => invoke<WindowState>("save_window_state", { state }),
+  planWindowPlacement: (state: WindowState, monitors: MonitorRect[]) =>
+    invoke<Placement>("plan_window_placement", { state, monitors }),
   contextMenuTarget: (extensions: string[]) => invoke<MenuTarget>("context_menu_target", { extensions }),
   installContextMenu: (extensions: string[], excluded: string[]) =>
     invoke<string>("install_context_menu", { extensions, excluded }),

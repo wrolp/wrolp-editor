@@ -204,6 +204,8 @@ const EN: Table = {
   "grp.movedCount": "Moved {n} tabs to {grp}",
   "grp.alreadyThere": "{grp} already has {name} open",
 
+  "win.relocated": "The monitor this window was on is gone, so it moved back onto this one",
+
   "draft.summaryTitle": "{n} files have unsaved drafts",
   "draft.summaryDesc": "Drafts are the text that never made it to disk.",
   "draft.restoreAll": "Restore all",
@@ -431,6 +433,8 @@ const ZH: Table = {
   "grp.copied": "已把 {name} 复制到「{grp}」",
   "grp.movedCount": "已把 {n} 个标签移到「{grp}」",
   "grp.alreadyThere": "「{grp}」已打开 {name}",
+
+  "win.relocated": "上次这个窗口所在的显示器不在了，已把它挪回当前屏幕",
 
   "draft.summaryTitle": "{n} 个文件有未保存的草稿",
   "draft.summaryDesc": "草稿就是没写回磁盘的那部分内容。",

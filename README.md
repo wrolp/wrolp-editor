@@ -19,6 +19,7 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | Language | English by default, switchable to 中文 from a dropdown in Settings. All strings, including messages coming from the Rust side, resolve through one key table |
 | Tab groups | A group is a **named set of open tabs**. The chip in the title bar switches between them inside the same window; tabs and caret positions come back on the next start |
 | Move / copy tabs | A tab can be re-homed into another group from its context menu. This changes *which group lists the tab*, never the file on disk |
+| Window | Size, position and the maximized flag come back on the next start. A window left on a monitor that is no longer connected is pulled back onto a screen you still have, and says so |
 
 ## Keyboard shortcuts
 
@@ -80,7 +81,8 @@ wrolp/
     ├── history.json          recently opened files, newest first, capped at 50
     ├── settings.json         fontSize, minimap, sidebarVisible, sidebarView, sidebarWidth, language,
     │                         restoreSession, sidebarRoot
-    └── groups.json           the tab groups: name, tabs and caret positions
+    ├── groups.json           the tab groups: name, tabs and caret positions
+    └── window.json           x, y, width, height in physical pixels, plus the maximized flag
 ```
 
 `<sha256>` is the hash of the **normalized** path: absolute, `\\?\` verbatim prefix removed, separators unified, lowercased on Windows. A draft looks like:
@@ -101,6 +103,7 @@ wrolp/
 `take_startup_files`, `open_file`, `save_file`, `get_draft`, `save_draft`, `clear_draft`,
 `list_dir`, `get_history`, `remove_history`, `get_settings`, `save_settings`,
 `get_groups`, `save_groups`, `transfer_tabs`,
+`get_window_state`, `save_window_state`, `plan_window_placement`,
 `context_menu_target`, `install_context_menu`, `uninstall_context_menu`.
 
 File IO is deliberately **not** the `fs` plugin: the WebView only ever calls these fixed
@@ -139,6 +142,26 @@ twice inside a group. A build that still has the older `workspaces.json` and no 
 on **read**: the legacy file is parsed, written out under the new name, and only then deleted — so a
 corrupt or unreadable legacy file is never destroyed by a later save. Unknown fields in old records
 (`root`, `autoName`, `sidebarView`) are ignored, which is why the rename needed no migration step.
+
+## Window state
+
+The window reopens where you left it: same size, same spot, same maximized-or-not.
+
+- **Physical pixels.** `window.json` stores `outerPosition`/`outerSize`, which are physical, not
+  DIPs. On a 200 % display a 1193×748 window is recorded as 2386×1495.
+- **Maximized keeps two facts.** While maximized only the flag is written; the last un-maximized
+  rectangle is kept from before the maximize. Unmaximizing therefore returns to the size you chose,
+  and a window that was maximized comes back maximized.
+- **A moved/connected monitor is handled.** The saved rectangle is checked against the monitors that
+  exist *now* before it is applied: only the top strip needs to be reachable, because the frameless
+  window is dragged by that strip. A rectangle that no longer intersects any monitor is clamped back
+  onto the primary at its saved size and a notice says why. Junk or absurdly large sizes fall back to
+  the size a first run gets (1180×740, the same value as `tauri.conf.json`, duplicated as a Rust
+  constant — change one, change the other), clamped to fit the screen.
+- **When it is written:** a ~600 ms debounce after moving or resizing, and a synchronous flush in the
+  close sequence alongside drafts and groups.
+- **First run** keeps the size from `tauri.conf.json` and centers the window — no saved file, no
+  surprise position.
 
 ## Interface language
 

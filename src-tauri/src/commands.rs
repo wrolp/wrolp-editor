@@ -3,6 +3,7 @@
 
 use crate::draft::{self, Draft};
 use crate::group::{GroupStore, TabTransfer};
+use crate::window::{MonitorRect, Placement, WindowState};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -12,6 +13,8 @@ use tauri::{AppHandle, Manager, State};
 const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
 
 const GROUPS_FILE: &str = "groups.json";
+/// Where the window was last left. Separate from settings: it changes on every drag.
+const WINDOW_FILE: &str = "window.json";
 /// Raster images: bytes with no text in them, so decoding them as text fails and the file
 /// could not be opened at all. SVG is deliberately absent — it is text, and is edited as
 /// source.
@@ -323,7 +326,10 @@ pub fn open_file(
     path: normalized,
     content: decoded.as_ref().map(|d| d.text.clone()).unwrap_or_default(),
     mtime,
-    encoding: decoded.as_ref().map(|d| d.encoding.clone()).unwrap_or_default(),
+    encoding: decoded
+      .as_ref()
+      .map(|d| d.encoding.clone())
+      .unwrap_or_default(),
     bom: decoded.as_ref().is_some_and(|d| d.bom),
     bytes: meta.len(),
     binary,
@@ -604,16 +610,44 @@ pub fn transfer_tabs(store: GroupStore, transfer: TabTransfer) -> GroupStore {
   crate::group::apply_transfer(store, &transfer).filled()
 }
 
+/// The rectangle the window was last left in, or `None` on a first run.
+#[tauri::command]
+pub fn get_window_state(app: AppHandle) -> Result<Option<WindowState>, String> {
+  read_json::<WindowState>(&app, WINDOW_FILE)
+}
+
+#[tauri::command]
+pub fn save_window_state(app: AppHandle, state: WindowState) -> Result<WindowState, String> {
+  write_json(&app, WINDOW_FILE, &state)?;
+  Ok(state)
+}
+
+/// Decide what to apply given the monitors that exist right now. The geometry judgement
+/// lives here (and in `window.rs`) so the fallback rules are unit-tested rather than
+/// re-implemented in the page.
+#[tauri::command]
+pub fn plan_window_placement(
+  state: WindowState,
+  monitors: Vec<MonitorRect>,
+) -> Result<Placement, String> {
+  Ok(state.plan(&monitors))
+}
+
 /// The verb covers every file, so these lists are about the exclusion masks and about
 /// cleaning up what earlier builds wrote. The frontend owns both: the extensions are the
 /// types it recognizes, the exclusions are the user's setting.
 #[tauri::command]
-pub fn context_menu_target(extensions: Vec<String>) -> Result<crate::context_menu::MenuTarget, String> {
+pub fn context_menu_target(
+  extensions: Vec<String>,
+) -> Result<crate::context_menu::MenuTarget, String> {
   crate::context_menu::probe(&extensions)
 }
 
 #[tauri::command]
-pub fn install_context_menu(extensions: Vec<String>, excluded: Vec<String>) -> Result<String, String> {
+pub fn install_context_menu(
+  extensions: Vec<String>,
+  excluded: Vec<String>,
+) -> Result<String, String> {
   crate::context_menu::install(&extensions, &excluded)
 }
 
@@ -683,7 +717,8 @@ mod tests {
   }
 
   #[test]
-  fn startup_args_skip_program_and_flags() {    let got = paths_from_args([
+  fn startup_args_skip_program_and_flags() {
+    let got = paths_from_args([
       r"C:\app\wrolp-editor.exe",
       r"C:\notes\a.txt",
       "--internal-flag",

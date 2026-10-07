@@ -4,6 +4,7 @@ mod draft;
 mod encoding;
 mod file_settings;
 mod group;
+mod window;
 
 use tauri::Manager;
 
@@ -40,6 +41,9 @@ pub fn run() {
       commands::get_groups,
       commands::save_groups,
       commands::transfer_tabs,
+      commands::get_window_state,
+      commands::save_window_state,
+      commands::plan_window_placement,
       commands::context_menu_target,
       commands::install_context_menu,
       commands::uninstall_context_menu

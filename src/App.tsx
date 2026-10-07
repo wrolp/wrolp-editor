@@ -19,6 +19,7 @@ import ComparePickerDialog from "./components/ComparePickerDialog";
 import { useDraft } from "./hooks/useDraft";
 import { useEditorTabs } from "./hooks/useEditorTabs";
 import { useGroups } from "./hooks/useGroups";
+import { useWindowFrame } from "./hooks/useWindowFrame";
 import { setLang, t } from "./lib/i18n";
 import {
   basename,
@@ -151,6 +152,8 @@ export default function App() {
     encodingPref: settings.encoding,
   });
   const groups = useGroups({ onError: toast });
+  // The window goes back where it was before anything else measures it.
+  const frame = useWindowFrame({ onError: toast, onNotice: toast });
   /** Startup must finish before the live state is mirrored into the store. */
   const [booted, setBooted] = useState(false);
 
@@ -187,6 +190,9 @@ export default function App() {
     if (bootStarted.current) return;
     bootStarted.current = true;
     const boot = async () => {
+      // Geometry first: measuring tabs and the editor against the wrong width would
+      // just have to be redone a frame later.
+      await frame.restore();
       let loadedSettings = DEFAULT_SETTINGS;
       try {
         loadedSettings = await api.getSettings();
@@ -383,7 +389,8 @@ export default function App() {
   const flushEverything = useCallback(async () => {
     await draft.flushAll();
     await groups.flush();
-  }, [draft, groups]);
+    await frame.flush();
+  }, [draft, frame, groups]);
 
   // Flush pending drafts when the window loses focus to shrink what a kill can lose.
   useEffect(() => {

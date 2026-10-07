@@ -19,6 +19,7 @@
 | 语言 | 默认英文，可在设置里下拉切换成中文。所有文案（含 Rust 侧返回的报错）都走同一张 key 表 |
 | 标签分组 | 一个分组就是**一组有名字的标签**。标题栏上的小牌在同一窗口里切换分组；标签顺序与光标位置在下次启动时还原 |
 | 移动 / 复制标签 | 标签右键菜单可把标签归到另一个分组。改的是「哪个分组列着它」，磁盘上的文件不动 |
+| 窗口 | 大小、位置、是否最大化都在下次启动时还原。上次所在的显示器不在了，窗口会被拉回还在用的屏幕上，并说明原因 |
 
 ## 快捷键
 
@@ -77,7 +78,8 @@ wrolp/
     ├── history.json          最近打开，新的在前，最多 50 条
     ├── settings.json         fontSize、minimap、sidebarVisible、sidebarView、sidebarWidth、language、
     │                         restoreSession、sidebarRoot
-    └── groups.json           标签分组：名字、标签与光标位置
+    ├── groups.json           标签分组：名字、标签与光标位置
+    └── window.json           x、y、width、height（物理像素）与是否最大化
 ```
 
 `<sha256>` 是**规范化**路径的哈希：绝对路径、去掉 `\\?\` 前缀、分隔符统一、Windows 下再转小写。草稿内容形如：
@@ -98,6 +100,7 @@ wrolp/
 `take_startup_files`、`open_file`、`save_file`、`get_draft`、`save_draft`、`clear_draft`、
 `list_dir`、`get_history`、`remove_history`、`get_settings`、`save_settings`、
 `get_groups`、`save_groups`、`transfer_tabs`、
+`get_window_state`、`save_window_state`、`plan_window_placement`、
 `context_menu_target`、`install_context_menu`、`uninstall_context_menu`。
 
 文件读写**故意不用** `fs` 插件：WebView 只能调用上面这些固定命令，不把大范围磁盘 scope 暴露给前端。
@@ -126,6 +129,21 @@ wrolp/
 同一套规范化形式，所以同一个文件在一个分组里不会出现两条。只有旧名 `workspaces.json` 而没有 `groups.json` 时，
 迁移发生在**读取时**：解析旧文件、按新名写出、然后才删掉旧的——所以旧文件损坏时不会被后续保存顺手清掉。旧记录里
 多带的 `root` / `autoName` / `sidebarView` 字段会被忽略、缺的字段取默认值，因此不需要额外迁移步骤。
+
+## 窗口状态
+
+窗口在下次打开时回到你离开时的样子：同样的大小、同样的位置、同样的是否最大化。
+
+- **存的是物理像素。** `window.json` 记的是 `outerPosition`/`outerSize`，物理像素而非 DIP。200% 缩放下
+  一个 1193×748 的窗口会被记成 2386×1495。
+- **最大化时存两件事。** 处于最大化时只写标志位；最大化之前那个普通矩形被保留下来。所以取消最大化会回到
+  你自己选的尺寸，而上次是最大化关闭的，这次就还是最大化。
+- **显示器换了或拔了能兜住。** 保存的矩形在应用之前会先跟**当前**接着的显示器比对：只要顶部那条能碰到就算
+  可达，因为无边框窗口是靠顶部拖动的。哪个屏幕都不挨着的矩形会按原尺寸钳回主屏，并提示原因。尺寸是垃圾值或
+  大到不合理时回落到首次运行那次的尺寸（1180×740，与 `tauri.conf.json` 同值但在 Rust 里另写了一份——改一处
+  要改两处），并按屏幕钳制。
+- **写入时机：** 移动或缩放后约 600 ms 防抖，以及关窗序列里与草稿、分组一起的同步 flush。
+- **首次运行**沿用 `tauri.conf.json` 里的尺寸并居中——没有存档就不给意外位置。
 
 ## 界面语言
 

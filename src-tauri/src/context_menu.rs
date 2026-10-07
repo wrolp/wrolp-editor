@@ -271,6 +271,9 @@ mod tests {
       shell_key_path("md"),
       r"Software\Classes\.md\shell\WROLP Editor"
     );
-    assert_eq!(orphan_key_path("md"), r"Software\Classes\*.md\shell\WROLP Editor");
+    assert_eq!(
+      orphan_key_path("md"),
+      r"Software\Classes\*.md\shell\WROLP Editor"
+    );
   }
 }
