@@ -1,12 +1,12 @@
 node_modules
 src-tauri/target
 src-tauri/gen
-dist
+dist*
 task
 .tauri
 package-lock.json
 
-dist-check
+probe
 
 .idea
 

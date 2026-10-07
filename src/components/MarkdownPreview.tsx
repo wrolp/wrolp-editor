@@ -13,6 +13,8 @@ interface Props {
   /** Fraction 0..1 of the editor's scroll position, so the two panes can track. */
   scrollRatio: number;
   beyondEnd: boolean;
+  /** Resolved scheme (dark | light) so diagrams are not drawn for the wrong background. */
+  theme: string;
   /** Called when the user scrolls the preview, to drive the editor instead. */
   onScrollRatio: (ratio: number) => void;
 }
@@ -31,11 +33,16 @@ export default function MarkdownPreview({
   scrollRatio,
   onScrollRatio,
   beyondEnd,
+  theme,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   /** Set while we move the preview ourselves, so our own scroll event is ignored. */
   const following = useRef(false);
+  // Read through a ref so a theme change re-renders diagrams without rebuilding the
+  // callback or re-running the fence pass for an unrelated reason.
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
 
   /**
    * What the asynchronous pass produced for one fence: highlighted source for a code block,
@@ -71,7 +78,9 @@ export default function MarkdownPreview({
    */
   useEffect(() => {
     let live = true;
-    const todo = fences.filter((f) => !cacheRef.current.has(f.key));
+    // The theme is part of the cache key: the same source drawn for the other scheme is a
+    // different picture, and reusing it would leave a dark diagram in a light preview.
+    const todo = fences.filter((f) => !cacheRef.current.has(cacheKey(f.key, themeRef.current)));
     if (todo.length === 0) return;
     Promise.all(
       todo.map(async (fence) => {
@@ -81,11 +90,11 @@ export default function MarkdownPreview({
           try {
             const svg =
               fence.diagram === "mermaid"
-                ? await renderMermaid(fence.text, fence.key)
+                ? await renderMermaid(fence.text, fence.key, themeRef.current)
                 : await api.renderDiagram(fence.diagram, fence.text);
-            return [fence.key, { svg }] as const;
+            return [cacheKey(fence.key, themeRef.current), { svg }] as const;
           } catch (e) {
-            return [fence.key, { error: errorMessage(e) }] as const;
+            return [cacheKey(fence.key, themeRef.current), { error: errorMessage(e) }] as const;
           }
         }
         const language = monacoLanguage(fence.lang);
@@ -112,7 +121,7 @@ export default function MarkdownPreview({
     return () => {
       live = false;
     };
-  }, [fences]);
+  }, [fences, theme]);
 
   const sanitized = useMemo(() => {
     // A renderer built per call rather than registered globally with `marked.use()`: this is
@@ -122,7 +131,9 @@ export default function MarkdownPreview({
     renderer.code = ({ text: source, lang }) => {
       const info = fenceLang(lang);
       const key = fenceKey(info, source);
-      const hit = cacheRef.current.get(key);
+      // Must be the same key the effect below writes with, or the lookup never hits and
+      // every diagram stays a placeholder no matter how many times it renders.
+      const hit = cacheRef.current.get(cacheKey(key, theme));
       const cls = info ? ` class="language-${escapeHtml(info)}"` : "";
       if (hit?.html !== undefined) return `<pre><code${cls}>${hit.html}</code></pre>\n`;
       if (hit && DIAGRAM_KINDS[info as keyof typeof DIAGRAM_KINDS]) {
@@ -130,7 +141,7 @@ export default function MarkdownPreview({
         // that goes through here is a placeholder. The source rides along so a diagram that
         // never renders still shows what it was meant to be.
         return (
-          `<div data-diagram="${escapeHtml(key)}"><pre><code${cls}>${escapeHtml(source)}</code></pre></div>\n`
+          `<div data-diagram="${escapeHtml(cacheKey(key, theme))}"><pre><code${cls}>${escapeHtml(source)}</code></pre></div>\n`
         );
       }
       return `<pre><code${cls}>${escapeHtml(source)}</code></pre>\n`;
@@ -143,7 +154,7 @@ export default function MarkdownPreview({
       renderer,
     }) as string;
     return DOMPurify.sanitize(raw, SANITIZE);
-  }, [text, resolved]);
+  }, [text, resolved, theme]);
 
   /**
    * Folders the document points images into, resolved to absolute paths. `..` is allowed
@@ -412,6 +423,12 @@ const SANITIZE = {
  */
 DOMPurify.addHook("uponSanitizeAttribute", (node, event) => {
   if (event.attrName !== "class") return;
+  // Diagram SVG keeps its classes. Mermaid colours everything through class selectors in
+  // its embedded `<style>` (`#mmd-x .node rect { fill: … }`), so stripping `class` there
+  // left every rule unmatched: nodes fell back to an inherited grey fill and the labels
+  // lost their layout — grey slabs with no text. SVG content is already fenced off from
+  // the document by its own pass, and a class inside a drawing cannot style the app.
+  if (node.namespaceURI === "http://www.w3.org/2000/svg") return;
   // `closest` matches the element itself, so this covers `<code class="language-x">` as
   // well as the spans inside it.
   if ((node as Element).closest("pre > code")) event.forceKeepAttr = true;
@@ -430,9 +447,25 @@ DOMPurify.addHook("uponSanitizeAttribute", (node, event) => {
  * `xlink:href` is deliberately not forbidden: both mermaid and graphviz reference their own
  * arrowheads with `url(#marker)`, and DOMPurify's default URI check already rejects
  * `javascript:`.
+ *
+ * Residual risk, now that `style` really is let through rather than merely believed to be:
+ * CSS inside an inline `<svg>` applies to the whole document, not just the drawing, so a
+ * crafted document could restyle the app's own chrome through mermaid's `themeCSS`
+ * directive. It is CSS only — no script, and no way to read anything back out — and it
+ * takes a file the user chose to open. Scoping the rules would mean rewriting mermaid's
+ * stylesheet on the way through, which is a bigger change than the problem warrants; if it
+ * ever stops being acceptable, dropping `style` and setting the colours on the container in
+ * app.css is the fallback.
  */
 const SVG_SANITIZE = {
   USE_PROFILES: { svg: true, svgFilters: true },
+  // Naming a profile REPLACES the default allow-list rather than adding to it, and `style`
+  // belongs to the html profile. Without this line mermaid's embedded stylesheet is
+  // stripped, taking every colour with it: the shapes keep the inline fills they carry and
+  // the labels fall back to the app's text colour, which is how a dark diagram ended up
+  // with light boxes and unreadable text. `FORBID_CONTENTS` does not undo this — it only
+  // governs the children of a node that was disallowed in the first place.
+  ADD_TAGS: ["style"],
   FORBID_TAGS: [
     "script", "foreignObject", "iframe", "object", "embed",
     "animate", "animateMotion", "animateTransform", "set", "handler",
@@ -533,19 +566,41 @@ let mermaidModule: Promise<typeof import("mermaid")> | null = null;
  * with no script and no way out of the preview pane, and it requires a document the user
  * chose to open; it is the price of mermaid's own styling, not an oversight.
  */
-async function renderMermaid(source: string, key: string): Promise<string> {
+async function renderMermaid(source: string, key: string, theme: string): Promise<string> {
   mermaidModule ??= import("mermaid");
   const mermaid = (await mermaidModule).default;
   mermaid.initialize({
     startOnLoad: false,
     securityLevel: "strict",
-    theme: "dark",
+    // Mermaid ships a light and a dark theme; the app picks its own so a diagram cannot
+    // arrive as a dark slab inside a light preview. "default" is mermaid light theme.
+    theme: theme === "light" ? "default" : "dark",
     htmlLabels: false,
     flowchart: { htmlLabels: false },
   });
   // The id has to be unique per render and safe as a DOM id.
   const { svg } = await mermaid.render(`mmd-${key}`, source);
   return svg;
+}
+
+/**
+ * Cache key for one fence. The scheme is part of it, so switching themes redraws the
+ * diagram instead of reusing the picture drawn for the other one.
+ *
+ * `RENDER_VERSION` is the third part: it is bumped whenever the rendering pipeline
+ * changes, so a cached picture drawn under old code is invalidated and redrawn without
+ * the user having to restart or edit the document. Without it, the cache — keyed only by
+ * source and theme — would keep serving a stale diagram after a fix like the mermaid
+ * class-stripping one, making the change look like it did nothing.
+ *
+ * Only ever a cache key and a data-diagram attribute value. It must NOT reach
+ * mermaid as a DOM id: the theme separator is not a legal character in a CSS
+ * selector and mermaid looks its drawing up by id, so an id built from this string
+ * fails outright. The id uses the plain fence.key, which is already an id-safe digest.
+ */
+const RENDER_VERSION = 2;
+function cacheKey(key: string, theme: string): string {
+  return key + String.fromCharCode(64) + theme + String.fromCharCode(64) + RENDER_VERSION;
 }
 
 /**

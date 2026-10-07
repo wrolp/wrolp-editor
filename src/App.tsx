@@ -1080,6 +1080,7 @@ const defaultModeFor = useCallback(
               scrollRatio={scrollRatio}
               onScrollRatio={scrollEditorToRatio}
               beyondEnd={settings.scrollBeyondLastLine}
+              theme={theme}
             />
           )}
 
