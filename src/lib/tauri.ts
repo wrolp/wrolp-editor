@@ -295,7 +295,23 @@ export async function copyText(text: string): Promise<boolean> {
 }
 
 /** Path of the directory containing `path`, or "." when there is no parent. */
+/** A UNC share root, e.g. `\\server\share`. There is nothing above one. */
+const UNC_SHARE = /^\\\\[^\\]+\\[^\\]+$/;
+
+/**
+ * Parent directory of a path, or `""` when the path is already a root.
+ *
+ * The awkward cases are all Windows ones. Stripping the last segment from `C:\Users`
+ * leaves `C:`, which is not the root but the drive's *current directory*, so the
+ * separator has to go back on; and `C:\` itself must report no parent rather than
+ * returning itself. A bare `C:` designator and a UNC share root likewise have no parent.
+ */
 export function parentOf(path: string): string {
-  const cut = path.replace(/[\\/][^\\/]*$/, "");
-  return cut || ".";
+  const trimmed = path.replace(/[\\/]+$/, "");
+  if (/^[A-Za-z]:$/.test(trimmed) || UNC_SHARE.test(trimmed)) return "";
+  const cut = trimmed.replace(/[\\/][^\\/]*$/, "");
+  // Nothing was stripped, so the path was a bare name: `foo` is its own non-parent.
+  if (cut === trimmed) return "";
+  if (/^[A-Za-z]:$/.test(cut)) return `${cut}\\`;
+  return UNC_SHARE.test(cut) ? "" : cut;
 }

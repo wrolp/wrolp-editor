@@ -898,22 +898,18 @@ body.resizing .editor-host {
 /* Explorer root: the folder the tree is showing, above the actions. */
 .side-root {
   display: flex;
-  flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 6px;
   margin: 0 10px 6px;
-  padding: 6px 8px;
+  padding: 4px 6px 4px 8px;
   border: 1px solid var(--border);
   border-radius: 7px;
   background: #2a2a2a;
   overflow: hidden;
 }
-.side-root-label {
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: #7a7a7a;
-}
 .side-root-path {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 11px;
   color: var(--muted);
   white-space: nowrap;
@@ -922,6 +918,30 @@ body.resizing .editor-host {
   /* Long paths read better from the folder name backwards. */
   direction: rtl;
   text-align: left;
+}
+/* Go one level up. Kept in the header row rather than the tree, so the tree only ever
+   lists what is inside the current folder. */
+.side-root-up {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.side-root-up:hover:not(:disabled) {
+  background: #454545;
+  color: var(--text);
+}
+.side-root-up:disabled {
+  color: #5a5a5a;
+  cursor: default;
 }
 
 /* Two-line tree tooltip: name first, dimmed full path underneath. */
@@ -1811,6 +1831,10 @@ body.resizing .editor-host {
 .app[data-density="compact"] .side-btn {
   margin: 3px 10px 6px;
   padding: 5px 10px;
+}
+.app[data-density="compact"] .side-root-up {
+  width: 18px;
+  height: 18px;
 }
 .app[data-density="compact"] .tree-row {
   padding: 2px 12px;

@@ -107,6 +107,15 @@ export function IconClose({ size = 16 }: IconProps) {
   );
 }
 
+export function IconGoUp({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.8}>
+      <line x1="12" y1="20" x2="12" y2="5" />
+      <polyline points="6 11 12 5 18 11" />
+    </svg>
+  );
+}
+
 export function IconFolder({ size = 14 }: IconProps) {
   return (
     <svg {...base(size)} strokeWidth={1.6}>

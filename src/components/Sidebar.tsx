@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { IconFolder, IconTreeChevron } from "./icons";
+import { IconFolder, IconGoUp, IconTreeChevron } from "./icons";
 import FileIcon from "./FileIcon";
 import { t } from "../lib/i18n";
 import {
@@ -257,6 +257,12 @@ export default function Sidebar(props: Props) {
   // 0 means "collapse everything", which is what having the setting off has to mean: a
   // negative or missing depth would otherwise expand the top level by accident.
   const expandLimit = props.expandFolders ? Math.max(1, Math.floor(props.expandDepth)) : 0;
+  // `parentOf` answers "" for a drive root and a UNC share, which is what hides the row
+  // there: there is genuinely nowhere to go up to.
+  const parentDir = rootDir ? parentOf(rootDir) : "";
+  // `C:\` is its own name, and a UNC share keeps both segments; only the trailing separator
+  // goes, so the tooltip never names a dangling backslash.
+  const parentName = parentDir ? parentDir.replace(/[\\/]+$/, "") || parentDir : "";
 
   // Any click elsewhere, a scroll, or losing focus dismisses the menu. `mousedown` rather
   // than `click` so the click that opened it cannot immediately close it again.
@@ -335,8 +341,16 @@ export default function Sidebar(props: Props) {
 
       <div className={`side-view${view === "explorer" ? " active" : ""}`}>
         <div className="side-root" title={rootDir ?? undefined}>
-          <span className="side-root-label">{t("side.rootLabel")}</span>
           <span className="side-root-path">{rootDir ?? t("side.noFolder")}</span>
+          <button
+            className="side-root-up"
+            title={parentDir ? t("side.upToParentNamed", { name: parentName }) : t("side.noParent")}
+            aria-label={t("side.upToParent")}
+            disabled={!parentDir}
+            onClick={() => parentDir && onSetRoot(parentDir)}
+          >
+            <IconGoUp size={13} />
+          </button>
         </div>
         <div className="side-actions">
           <button className="side-btn" onClick={onPickFolder}>
