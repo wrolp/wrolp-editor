@@ -19,6 +19,8 @@ interface Props {
   detectIndentation: boolean;
   /** Allow scrolling past the last line instead of stopping at it. */
   scrollBeyondLastLine: boolean;
+  /** Resolved scheme, not the raw setting: system has to have become dark or light. */
+  theme: string;
   onChange: (value: string) => void;
   onCursor: (position: CursorPos, offset: number) => void;
   /** Selection and document totals, refreshed on every selection or content change. */
@@ -39,6 +41,7 @@ export default function Editor({
   insertSpaces,
   detectIndentation,
   scrollBeyondLastLine,
+  theme,
   onChange,
   onCursor,
   onStats,
@@ -125,7 +128,7 @@ export default function Editor({
       path={modelUri(tab.path)}
       defaultValue={tab.initialValue ?? tab.original}
       language={tab.language}
-      theme="vs-dark"
+      theme={theme === "light" ? "vs" : "vs-dark"}
       loading={<div className="editor-empty">{t("app.loading")}</div>}
       onChange={(value) => value !== undefined && onChange(value)}
       onMount={handleMount}

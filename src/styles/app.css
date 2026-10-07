@@ -1,17 +1,116 @@
+/*
+ * Theme palette.
+ *
+ * Every colour the chrome uses is named here, grouped by role rather than by hue, so a
+ * theme is a matter of re-pointing variables instead of hunting hex codes. The dark values
+ * are the ones this app shipped with; `[data-theme="light"]` below re-points the same
+ * names. Anything not listed here is either a file-type glyph colour (decorative, and
+ * legible on both) or inside Monaco, which is themed through its own option.
+ *
+ * `--on-accent` exists because text sitting on an accent-filled surface cannot follow the
+ * theme: the accent stays dark in both themes, so its text stays light in both.
+ */
 :root {
+  color-scheme: dark;
+
+  /* Surfaces, from the window background up to the most raised element. */
   --bg: #1e1e1e;
-  --titlebar: #252526;
-  --tab: #2d2d2d;
-  --tab-active: #1e1e1e;
+  --surface: #252526;
+  --surface-2: #2a2a2a;
+  --surface-3: #2d2d2d;
+  --surface-hover: #2f2f2f;
+  --surface-active: #3a3a3a;
+  --surface-2-hover: #454545;
+  --sunken: #1a1a1a;
+  --sunken-2: #1b1b1b;
+  --status: #181818;
+  --chip: #2d2d30;
+  --tab-hover: #33363d;
+  --tab-active-bg: #3f3f46;
+  --toast-bg: #333333;
+
+  /* Lines. */
   --border: #3c3c3c;
+  --border-soft: #232323;
+  --border-strong: #4a4a4a;
+  --scroll-size: 10px;
+  --scroll-thumb: #4a4a4a;
+  --scroll-thumb-hover: #707070;
+
+  /* Text. */
   --text: #d4d4d4;
-  --muted: #9a9a9a;
+  --text-strong: #ffffff;
+  --text-dim: #cfcfcf;
+  --muted: #9ca3af;
+  --text-faint: #7f7f7f;
+  --text-disabled: #5a5a5a;
+
+  /* Accents. */
   --accent: #4f46e5;
   --accent-soft: #6366f1;
-  --status: #181818;
+  --on-accent: #ffffff;
   --danger: #e5484d;
+  --danger-bg: #4a2a2a;
+  --danger-bg-2: #7a3b3b;
+  --warn: #d9a441;
+  --warn-text: #e6c98a;
+  --warn-code: #f0d9a8;
+  --link: #8ab4f8;
+  --add: #4ade80;
+  --del: #f87171;
   /* Unsaved-changes indicator: shared by the tab marker and the status bar. */
   --dirty: #4ade80;
+
+  /* Kept because rules reference them by name; defined in terms of the scale above. */
+  --titlebar: var(--surface);
+  --tab: var(--surface-3);
+  --tab-active: var(--bg);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #ffffff;
+  --surface: #f3f3f3;
+  --surface-2: #ffffff;
+  --surface-3: #f0f0f0;
+  --surface-hover: #e8e8e8;
+  --surface-active: #dcdcdc;
+  --surface-2-hover: #d4d4d4;
+  --sunken: #f7f7f7;
+  --sunken-2: #fafafa;
+  --status: #f3f3f3;
+  --chip: #ececec;
+  --tab-hover: #e2e2e2;
+  --tab-active-bg: #dcdcdc;
+  --toast-bg: #ffffff;
+
+  --border: #d4d4d4;
+  --border-soft: #e6e6e6;
+  --border-strong: #b0b0b0;
+  --scroll-thumb: #c0c0c0;
+  --scroll-thumb-hover: #9e9e9e;
+
+  --text: #1f1f1f;
+  --text-strong: #141414;
+  --text-dim: #3a3a3a;
+  --muted: #616161;
+  --text-faint: #808080;
+  --text-disabled: #a8a8a8;
+
+  --accent: #4f46e5;
+  --accent-soft: #6366f1;
+  --on-accent: #ffffff;
+  --danger: #c62828;
+  --danger-bg: #fbe3e3;
+  --danger-bg-2: #f6c9c9;
+  --warn: #8a6100;
+  --warn-text: #6d4e00;
+  --warn-code: #5a3f00;
+  --link: #1a5fb4;
+  --add: #1a7f37;
+  --del: #c62828;
+  --dirty: #1a7f37;
 }
 
 * {
@@ -56,14 +155,14 @@ body {
   width: 34px;
   border: none;
   background: transparent;
-  color: #cfcfcf;
+  color: var(--text-dim);
   font-size: 18px;
   cursor: pointer;
   border-radius: 6px;
 }
 .title-toggle:hover {
   background: rgba(255, 255, 255, 0.08);
-  color: #fff;
+  color: var(--text-strong);
 }
 .title-toggle.active {
   color: var(--accent-soft);
@@ -103,7 +202,7 @@ body {
   border: none;
   border-radius: 7px;
   background: transparent;
-  color: #9ca3af;
+  color: var(--muted);
   font-size: 13px;
   /* Not a pointer: a tab is the current document as much as it is a button, and the strip
      also drags — a hand over the whole tab over-promises both. The × keeps the pointer,
@@ -114,12 +213,12 @@ body {
   transition: background 0.15s ease, color 0.15s ease;
 }
 .tab:hover {
-  background: #33363d;
-  color: #fff;
+  background: var(--tab-hover);
+  color: var(--text-strong);
 }
 .tab.active {
-  background: #3f3f46;
-  color: #fff;
+  background: var(--tab-active-bg);
+  color: var(--text-strong);
 }
 /* Held down and on its way somewhere: still visible, but clearly not where it belongs. */
 .tab.dragging {
@@ -352,7 +451,7 @@ body {
   border-radius: 4px;
   border: none;
   background: transparent;
-  color: #9ca3af;
+  color: var(--muted);
   cursor: pointer;
   font-size: 14px;
   line-height: 1;
@@ -362,8 +461,8 @@ body {
   flex: 0 0 18px;
 }
 .tab .tab-close:hover {
-  background: #4a4a4a;
-  color: #fff;
+  background: var(--border-strong);
+  color: var(--text-strong);
 }
 .tab.empty {
   color: var(--muted);
@@ -390,7 +489,7 @@ body {
   cursor: pointer;
 }
 .tab-new:hover {
-  background: #3a3a3a;
+  background: var(--surface-active);
   color: var(--text);
 }
 
@@ -409,7 +508,7 @@ body {
   justify-content: center;
 }
 .tab-list-btn:hover {
-  background: #3a3a3a;
+  background: var(--surface-active);
   color: var(--text);
 }
 
@@ -428,7 +527,7 @@ body {
   min-width: 220px;
   max-height: 320px;
   overflow-y: auto;
-  background: #252526;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
@@ -441,16 +540,16 @@ body {
   padding: 7px 10px;
   border-radius: 7px;
   cursor: pointer;
-  color: #d4d4d4;
+  color: var(--text);
   font-size: 13px;
 }
 .tab-dropdown .dd-row:hover {
-  background: #2f2f2f;
-  color: #fff;
+  background: var(--surface-hover);
+  color: var(--text-strong);
 }
 .tab-dropdown .dd-row.active {
   background: var(--accent-soft);
-  color: #fff;
+  color: var(--on-accent);
 }
 .tab-dropdown .dd-name {
   flex: 1 1 auto;
@@ -464,7 +563,7 @@ body {
   border-radius: 4px;
   border: none;
   background: transparent;
-  color: #9ca3af;
+  color: var(--muted);
   cursor: pointer;
   font-size: 14px;
   line-height: 1;
@@ -474,8 +573,8 @@ body {
   flex: 0 0 18px;
 }
 .tab-dropdown .dd-close:hover {
-  background: #4a4a4a;
-  color: #fff;
+  background: var(--border-strong);
+  color: var(--text-strong);
 }
 .tab-dropdown .dd-empty {
   padding: 10px;
@@ -499,14 +598,14 @@ body {
   padding: 0 10px;
   border: 1px solid var(--border);
   border-radius: 6px;
-  background: #2d2d30;
-  color: #d4d4d4;
+  background: var(--chip);
+  color: var(--text);
   font-size: 12px;
   cursor: pointer;
 }
 .grp-chip:hover {
-  background: #3a3a3a;
-  color: #fff;
+  background: var(--surface-active);
+  color: var(--text-strong);
 }
 .grp-name {
   overflow: hidden;
@@ -521,7 +620,7 @@ body {
   min-width: 260px;
   max-height: 340px;
   overflow-y: auto;
-  background: #252526;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
@@ -542,17 +641,17 @@ body {
   padding: 7px 10px;
   border-radius: 7px;
   cursor: pointer;
-  color: #d4d4d4;
+  color: var(--text);
   font-size: 13px;
 }
 .grp-row:hover,
 .grp-item:hover {
-  background: #2f2f2f;
-  color: #fff;
+  background: var(--surface-hover);
+  color: var(--text-strong);
 }
 .grp-row.active {
   background: var(--accent-soft);
-  color: #fff;
+  color: var(--on-accent);
 }
 .grp-row-name {
   flex: 1 1 auto;
@@ -567,11 +666,11 @@ body {
   font-size: 11px;
 }
 .grp-row.active .grp-row-meta {
-  color: #d7d7e8;
+  color: var(--text-dim);
 }
 .grp-item.danger:hover {
-  background: #4a2a2a;
-  color: #fff;
+  background: var(--danger-bg);
+  color: var(--text-strong);
 }
 .grp-sep {
   height: 1px;
@@ -589,7 +688,7 @@ body {
   padding: 5px 8px;
   border-radius: 6px;
   border: 1px solid var(--border);
-  background: #1e1e1e;
+  background: var(--bg);
   color: var(--text);
   font-size: 13px;
 }
@@ -604,7 +703,7 @@ body {
 }
 .modal-error,
 .grp-error {
-  color: #e57373;
+  color: var(--danger);
   font-size: 12px;
   margin: 6px 0 0;
 }
@@ -634,7 +733,7 @@ body {
   font-size: 12px;
 }
 .draft-row:hover {
-  background: #2f2f2f;
+  background: var(--surface-hover);
 }
 .draft-name {
   flex: 1 1 auto;
@@ -674,13 +773,13 @@ body {
   justify-content: center;
   border: none;
   background: transparent;
-  color: #cfcfcf;
+  color: var(--text-dim);
   cursor: pointer;
   border-radius: 6px;
 }
 .tb-icon:hover {
   background: rgba(255, 255, 255, 0.08);
-  color: #fff;
+  color: var(--text-strong);
 }
 
 /* ---------- Preview layout segmented control ---------- */
@@ -692,7 +791,7 @@ body {
   padding: 2px;
   border: 1px solid var(--border);
   border-radius: 7px;
-  background: #2d2d2d;
+  background: var(--surface-3);
 }
 .mode-btn {
   display: inline-flex;
@@ -703,17 +802,17 @@ body {
   border: none;
   border-radius: 5px;
   background: transparent;
-  color: #9a9a9a;
+  color: var(--muted);
   cursor: pointer;
   padding: 0;
 }
 .mode-btn:hover {
-  background: #3a3a3a;
-  color: #fff;
+  background: var(--surface-active);
+  color: var(--text-strong);
 }
 .mode-btn.active {
   background: var(--accent-soft);
-  color: #fff;
+  color: var(--on-accent);
 }
 .app[data-density="compact"] .mode-btn {
   width: 24px;
@@ -746,11 +845,11 @@ body {
   height: 16px;
 }
 .win-btn:hover {
-  background: #3a3a3a;
+  background: var(--surface-active);
 }
 .win-btn.win-close:hover {
   background: var(--danger);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 /* ---------- Tab context menu ---------- */
@@ -758,7 +857,7 @@ body {
   position: fixed;
   z-index: 100;
   min-width: 200px;
-  background: #252526;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
@@ -767,14 +866,14 @@ body {
 .ctx-item {
   padding: 7px 12px;
   font-size: 13px;
-  color: #e4e4e4;
+  color: var(--text-dim);
   border-radius: 6px;
   cursor: pointer;
   white-space: nowrap;
 }
 .ctx-item:hover {
   background: var(--accent-soft);
-  color: #fff;
+  color: var(--text-strong);
 }
 /* Fixed width so labels stay aligned whether or not the tick is present. */
 .ctx-tick {
@@ -783,7 +882,7 @@ body {
   color: var(--accent-soft);
 }
 .ctx-item:hover .ctx-tick {
-  color: #fff;
+  color: var(--on-accent);
 }
 
 /* ---------- Main area: sidebar + editor ---------- */
@@ -795,7 +894,7 @@ body {
 
 .sidebar {
   flex: 0 0 auto;
-  background: #252526;
+  background: var(--surface);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -844,7 +943,7 @@ body.resizing .editor-host {
   flex: 1;
   padding: 6px 4px;
   font-size: 11px;
-  color: #999;
+  color: var(--muted);
   background: transparent;
   border: none;
   border-radius: 6px;
@@ -852,12 +951,12 @@ body.resizing .editor-host {
   text-align: center;
 }
 .side-tab:hover {
-  background: #2f2f2f;
-  color: #ddd;
+  background: var(--surface-hover);
+  color: var(--text-dim);
 }
 .side-tab.active {
   background: var(--accent-soft);
-  color: #fff;
+  color: var(--text-strong);
 }
 .side-view {
   flex: 1 1 auto;
@@ -879,7 +978,7 @@ body.resizing .editor-host {
   width: calc(100% - 20px);
   margin: 4px 10px 8px;
   padding: 7px 10px;
-  background: #3a3a3a;
+  background: var(--surface-active);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: 7px;
@@ -892,7 +991,7 @@ body.resizing .editor-host {
   text-overflow: ellipsis;
 }
 .side-btn:hover {
-  background: #454545;
+  background: var(--surface-2-hover);
 }
 
 /* Explorer root: the folder the tree is showing, above the actions. */
@@ -904,7 +1003,7 @@ body.resizing .editor-host {
   padding: 4px 6px 4px 8px;
   border: 1px solid var(--border);
   border-radius: 7px;
-  background: #2a2a2a;
+  background: var(--surface-2);
   overflow: hidden;
 }
 .side-root-path {
@@ -936,11 +1035,11 @@ body.resizing .editor-host {
   cursor: pointer;
 }
 .side-root-up:hover:not(:disabled) {
-  background: #454545;
+  background: var(--surface-2-hover);
   color: var(--text);
 }
 .side-root-up:disabled {
-  color: #5a5a5a;
+  color: var(--text-disabled);
   cursor: default;
 }
 
@@ -954,7 +1053,7 @@ body.resizing .editor-host {
   padding: 6px 9px;
   border: 1px solid var(--border);
   border-radius: 7px;
-  background: #252526;
+  background: var(--surface);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
   pointer-events: none;
   display: flex;
@@ -973,7 +1072,7 @@ body.resizing .editor-host {
 }
 .tree-tip-path {
   font-size: 11px;
-  color: #7f7f7f;
+  color: var(--text-faint);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1009,11 +1108,11 @@ body.resizing .editor-host {
   color: var(--text);
 }
 .tree-row:hover {
-  background: #2a2a2a;
+  background: var(--surface-2);
 }
 .tree-row.ctx-active {
   background: var(--accent-soft);
-  color: #fff;
+  color: var(--text-strong);
 }
 .tree-row .chev {
   flex: 0 0 12px;
@@ -1055,11 +1154,11 @@ body.resizing .editor-host {
   gap: 2px;
   padding: 7px 14px;
   cursor: pointer;
-  border-bottom: 1px solid #2b2b2b;
+  border-bottom: 1px solid var(--border-soft);
   position: relative;
 }
 .hist-item:hover {
-  background: #2a2a2a;
+  background: var(--surface-2);
 }
 .hist-item .hi-name {
   font-size: 12px;
@@ -1083,7 +1182,7 @@ body.resizing .editor-host {
   border-radius: 4px;
   border: none;
   background: transparent;
-  color: #9ca3af;
+  color: var(--muted);
   cursor: pointer;
   font-size: 14px;
   line-height: 1;
@@ -1093,8 +1192,8 @@ body.resizing .editor-host {
   opacity: 1;
 }
 .hist-remove:hover {
-  background: #4a4a4a;
-  color: #fff;
+  background: var(--border-strong);
+  color: var(--text-strong);
 }
 
 .editor-wrap {
@@ -1211,7 +1310,7 @@ body.resizing .editor-host {
   cursor: pointer;
 }
 .pick-row:hover {
-  background: #2f2f2f;
+  background: var(--surface-hover);
 }
 .pick-name {
   flex: 0 1 auto;
@@ -1254,7 +1353,7 @@ body.resizing .editor-host {
   padding: 6px 8px 6px 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #2d2d2d;
+  background: var(--surface-3);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
   font-size: 12px;
   color: var(--text);
@@ -1293,7 +1392,7 @@ body.resizing .editor-host {
   font-size: 12px;
 }
 .img-tool:hover:not(:disabled) {
-  background: #3a3a3a;
+  background: var(--surface-active);
 }
 .img-tool:disabled {
   opacity: 0.4;
@@ -1308,7 +1407,7 @@ body.resizing .editor-host {
 }
 .img-note {
   margin-left: auto;
-  color: #e0a060;
+  color: var(--muted);
 }
 /* A checkerboard, so a transparent PNG or an SVG with no background reads as transparent
    rather than as white. Two flat tones are enough; a gradient would fight the picture. */
@@ -1323,11 +1422,11 @@ body.resizing .editor-host {
   align-items: safe center;
   justify-content: safe center;
   padding: 14px;
-  background-color: #1b1b1b;
-  background-image: linear-gradient(45deg, #232323 25%, transparent 25%),
-    linear-gradient(-45deg, #232323 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #232323 75%),
-    linear-gradient(-45deg, transparent 75%, #232323 75%);
+  background-color: var(--sunken-2);
+  background-image: linear-gradient(45deg, var(--border-soft) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--border-soft) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--border-soft) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--border-soft) 75%);
   background-size: 16px 16px;
   background-position: 0 0, 0 8px, 8px -8px, -8px 0;
 }
@@ -1376,7 +1475,7 @@ body.resizing .editor-host {
 }
 .settings-side {
   flex: 0 0 180px;
-  background: #252526;
+  background: var(--surface);
   border-right: 1px solid var(--border);
   padding: 10px 8px;
   overflow-y: auto;
@@ -1385,7 +1484,7 @@ body.resizing .editor-host {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
-  color: #bbb;
+  color: var(--text-dim);
   padding: 6px 8px 10px;
   font-weight: 600;
 }
@@ -1396,19 +1495,19 @@ body.resizing .editor-host {
   padding: 8px 10px;
   margin-bottom: 2px;
   font-size: 13px;
-  color: #cfcfcf;
+  color: var(--text-dim);
   background: transparent;
   border: none;
   border-radius: 6px;
   cursor: pointer;
 }
 .settings-nav-item:hover {
-  background: #2f2f2f;
-  color: #fff;
+  background: var(--surface-hover);
+  color: var(--text-strong);
 }
 .settings-nav-item.active {
   background: var(--accent-soft);
-  color: #fff;
+  color: var(--on-accent);
 }
 .settings-content {
   flex: 1 1 auto;
@@ -1458,7 +1557,7 @@ body.resizing .editor-host {
   padding: 5px 8px;
   border-radius: 6px;
   border: 1px solid var(--border);
-  background: #1e1e1e;
+  background: var(--bg);
   color: var(--text);
   font-size: 13px;
   font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
@@ -1488,7 +1587,7 @@ body.resizing .editor-host {
   padding: 5px 8px;
   border-radius: 6px;
   border: 1px solid var(--border);
-  background: #1e1e1e;
+  background: var(--bg);
   color: var(--text);
   font-size: 13px;
 }
@@ -1497,19 +1596,19 @@ body.resizing .editor-host {
   padding: 5px 8px;
   border-radius: 6px;
   border: 1px solid var(--border);
-  background: #2d2d2d;
+  background: var(--surface-3);
   color: var(--text);
   font-size: 13px;
 }
 .select:hover {
-  background: #363636;
+  background: var(--surface-2-hover);
 }
 .select:focus {
   outline: none;
   border-color: var(--accent-soft);
 }
 .select option {
-  background: #2d2d2d;
+  background: var(--surface-3);
   color: var(--text);
 }
 .settings-cat p.muted,
@@ -1521,14 +1620,14 @@ body.resizing .editor-host {
 }
 .settings-cat code {
   font-family: Consolas, "Courier New", monospace;
-  color: #cfcfcf;
+  color: var(--text-dim);
 }
 .setting-target {
   margin-top: 12px;
   padding: 9px 11px;
   border: 1px solid var(--border);
   border-radius: 7px;
-  background: #1e1e1e;
+  background: var(--bg);
 }
 .setting-target code {
   display: block;
@@ -1539,15 +1638,15 @@ body.resizing .editor-host {
 .setting-warn {
   margin-top: 10px;
   padding: 8px 11px;
-  border-left: 3px solid #d9a441;
+  border-left: 3px solid var(--warn);
   background: rgba(217, 164, 65, 0.12);
   border-radius: 0 7px 7px 0;
   font-size: 12px;
   line-height: 1.6;
-  color: #e6c98a;
+  color: var(--warn-text);
 }
 .setting-warn code {
-  color: #f0d9a8;
+  color: var(--warn-code);
 }
 
 /* ---------- Status bar ---------- */
@@ -1574,13 +1673,13 @@ body.resizing .editor-host {
 }
 /* Saved is the resting state, so it stays muted; only unsaved earns the colour. */
 .statusbar .sb-selection {
-  color: #d7d7e8;
+  color: var(--text-dim);
 }
 .statusbar .sb-total {
-  color: #9a9a9a;
+  color: var(--muted);
 }
 .statusbar .sb-size {
-  color: #9a9a9a;
+  color: var(--muted);
 }
 .statusbar .sb-dirty {
   color: var(--muted);
@@ -1600,10 +1699,10 @@ body.resizing .editor-host {
   color: var(--muted);
 }
 .statusbar .sb-diff .add {
-  color: #4ade80;
+  color: var(--dirty);
 }
 .statusbar .sb-diff .del {
-  color: #f87171;
+  color: var(--del);
 }
 
 /* ---------- Modal ---------- */
@@ -1619,7 +1718,7 @@ body.resizing .editor-host {
 .modal {
   width: 420px;
   max-width: 90vw;
-  background: #2a2a2a;
+  background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 12px;
   padding: 22px;
@@ -1653,18 +1752,18 @@ body.resizing .editor-host {
   padding: 8px 16px;
   border-radius: 7px;
   border: 1px solid var(--border);
-  background: #3a3a3a;
+  background: var(--surface-active);
   color: var(--text);
   font-size: 13px;
   cursor: pointer;
 }
 .btn:hover {
-  background: #454545;
+  background: var(--surface-2-hover);
 }
 .btn.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 .btn.primary:hover {
   background: var(--accent-soft);
@@ -1676,8 +1775,8 @@ body.resizing .editor-host {
   bottom: 40px;
   left: 50%;
   transform: translateX(-50%);
-  background: #333;
-  color: #fff;
+  background: var(--toast-bg);
+  color: var(--text-strong);
   padding: 8px 18px;
   border-radius: 8px;
   font-size: 13px;
@@ -1700,11 +1799,6 @@ body.resizing .editor-host {
    steal width from the content, the track is invisible, and the thumb only makes
    itself obvious on hover. Monaco draws its own, hence the explicit list rather than
    a `*` reset. */
-:root {
-  --scroll-size: 10px;
-  --scroll-thumb: #4a4a4a;
-  --scroll-thumb-hover: #707070;
-}
 .sidebar,
 .side-view,
 .settings-content,
@@ -1995,21 +2089,21 @@ body.resizing .editor-host {
   margin-top: 0.25em;
 }
 .md-body a {
-  color: #8ab4f8;
+  color: var(--link);
 }
 .md-body code {
   font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
   font-size: 0.92em;
   padding: 0.15em 0.4em;
   border-radius: 4px;
-  background: #2a2a2a;
+  background: var(--surface-2);
 }
 .md-body pre {
   margin: 0 0 1em;
   padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #1a1a1a;
+  background: var(--sunken);
   overflow-x: auto;
 }
 .md-body pre code {
@@ -2029,7 +2123,7 @@ body.resizing .editor-host {
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #1a1a1a;
+  background: var(--sunken);
   overflow-x: auto;
 }
 .md-body div[data-diagram] > svg {
@@ -2037,7 +2131,7 @@ body.resizing .editor-host {
   height: auto;
 }
 .md-body div[data-diagram] > .md-diagram-error {
-  color: #e08b8b;
+  color: var(--danger);
   font-size: 0.9em;
   text-align: center;
 }
@@ -2048,7 +2142,7 @@ body.resizing .editor-host {
   width: 100%;
 }
 .md-body div[data-diagram][data-diagram-error] {
-  border-color: #7a3b3b;
+  border-color: var(--danger-bg-2);
 }
 .md-body blockquote {
   padding: 0 1em;
@@ -2066,13 +2160,13 @@ body.resizing .editor-host {
   text-align: left;
 }
 .md-body th {
-  background: #252526;
+  background: var(--surface);
 }
 .md-body img {
   max-width: 100%;
   height: auto;
   border-radius: 4px;
-  background: #1a1a1a;
+  background: var(--sunken);
 }
 /* A path the asset scope does not cover should read as missing, not as a broken icon. */
 .md-body img[data-missing] {

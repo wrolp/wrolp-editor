@@ -70,6 +70,7 @@ const DEFAULT_SETTINGS: Settings = {
   renderWhitespace: "selection",
   wordWrap: false,
   stickyScroll: true,
+  theme: "system",
   tabSize: 2,
   insertSpaces: true,
   detectIndentation: true,
@@ -92,6 +93,25 @@ function whitespaceMode(value: string): (typeof WHITESPACE_MODES)[number] {
 /** Never let a save-on-close turn into a window that cannot be closed. */
 const CLOSE_FLUSH_TIMEOUT_MS = 2000;
 
+/**
+ * Whether the OS is asking for a dark UI. `prefers-color-scheme: light` is the query to
+ * watch rather than the absence of `dark`: a browser that does not support the feature
+ * reports no match for either, and "no preference" has to resolve to the dark theme this
+ * app has always looked like.
+ */
+function usePrefersDark(): boolean {
+  const [dark, setDark] = useState(
+    () => !window.matchMedia("(prefers-color-scheme: light)").matches
+  );
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: light)");
+    const onChange = () => setDark(!mq.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, []);
+  return dark;
+}
+
 /** What fills the preview pane: rendered markdown, a picture, or a live HTML page. */
 type PreviewKind = "markdown" | "image" | "html" | null;
 
@@ -105,6 +125,18 @@ export default function App() {
   }, []);
 
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  // `system` is resolved here rather than in the backend: the OS preference can change while
+  // the app is open, and only the frontend is listening to it.
+  const systemDark = usePrefersDark();
+  const theme = settings.theme === "light" ? "light" : settings.theme === "dark" ? "dark" : systemDark ? "dark" : "light";
+
+  // The palette is keyed on :root[data-theme] rather than on the app node, and that is not
+  // cosmetic: body and html sit outside .app, and the alias variables (--titlebar and
+  // friends) are substituted where they are declared, so a theme that only reached .app
+  // would leave the window background and the title bar on the dark palette.
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SETTINGS.sidebarWidth);
   const [sidebarView, setSidebarView] = useState<"explorer" | "history">("explorer");
@@ -887,7 +919,11 @@ const defaultModeFor = useCallback(
   })();
 
   return (
-    <div className="app" data-density={settings.compactMode ? "compact" : "cozy"}>
+    <div
+      className="app"
+      data-density={settings.compactMode ? "compact" : "cozy"}
+      data-theme={theme}
+    >
       <TitleBar
         tabs={tabs.tabs}
         activeId={tabs.activeId}
@@ -983,6 +1019,7 @@ const defaultModeFor = useCallback(
                 insertSpaces={insertSpaces}
                 detectIndentation={detectIndentation}
                 scrollBeyondLastLine={settings.scrollBeyondLastLine}
+              theme={theme}
                 onChange={tabs.onEditorChange}
                 onCursor={(position, offset) => {
                   setCursor({ line: position.lineNumber, column: position.column });

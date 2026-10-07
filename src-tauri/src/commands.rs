@@ -128,6 +128,9 @@ pub struct Settings {
   /// keystroke away, whereas a preview nobody asked for costs a pane. A picture is not
   /// covered by this choice — its bytes are not text, so it always opens as the picture.
   pub preview_layout: String,
+  /// Colour scheme: system | dark | light. `system` follows the OS preference at runtime,
+  /// so a machine that switches at dusk does not need the app restarted.
+  pub theme: String,
 }
 
 /// Used when settings.json is absent or a key is missing, so a first run must not
@@ -156,6 +159,7 @@ impl Default for Settings {
       detect_indentation: true,
       scroll_beyond_last_line: true,
       preview_layout: "text".into(),
+      theme: "system".into(),
     }
   }
 }
@@ -164,6 +168,8 @@ const SIDEBAR_MIN_WIDTH: f64 = 180.0;
 const SIDEBAR_MAX_WIDTH: f64 = 640.0;
 /// Whitespace rendering modes Monaco understands.
 const RENDER_WHITESPACE: [&str; 5] = ["none", "boundary", "selection", "all", "trailing"];
+/// Colour schemes the frontend knows how to apply.
+const THEMES: [&str; 3] = ["system", "dark", "light"];
 /// Preview layouts a file can open in. `auto` is the per-kind behaviour the frontend used
 /// to hardcode: markdown and SVG side by side, pictures as the picture.
 const PREVIEW_LAYOUT: [&str; 4] = ["auto", "text", "split", "preview"];
@@ -247,6 +253,13 @@ impl Settings {
         self.preview_layout.clone()
       } else {
         "text".into()
+      },
+      // Same reasoning as the layout above: an unknown theme would leave the frontend with
+      // no palette to apply, and an app with no palette is worse than one that ignores it.
+      theme: if THEMES.contains(&self.theme.as_str()) {
+        self.theme.clone()
+      } else {
+        "system".into()
       },
     }
   }
@@ -967,6 +980,36 @@ mod tests {
       }
       .filled()
       .compact_mode
+    );
+  }
+
+  #[test]
+  fn theme_defaults_to_system_and_an_unknown_value_falls_back() {
+    assert_eq!(Settings::default().theme, "system");
+    // A settings.json written before the key existed must not come back dark or light: the
+    // container-level `#[serde(default)]` fills it from the same Default.
+    let s: Settings = serde_json::from_str("{\"fontSize\":16.0}").expect("parse partial settings");
+    assert_eq!(s.filled().theme, "system");
+    for good in ["system", "dark", "light"] {
+      assert_eq!(
+        Settings {
+          theme: good.into(),
+          ..Default::default()
+        }
+        .filled()
+        .theme,
+        good
+      );
+    }
+    // Hand-edited values must not leave the frontend without a palette to apply.
+    assert_eq!(
+      Settings {
+        theme: "solarized".into(),
+        ..Default::default()
+      }
+      .filled()
+      .theme,
+      "system"
     );
   }
 

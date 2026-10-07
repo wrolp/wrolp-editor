@@ -25,6 +25,7 @@ const NAV: { cat: Category; key: string }[] = [
 const WHITESPACE_MODES = ["none", "boundary", "selection", "all", "trailing"] as const;
 /** `auto` last: it is the fallback that decides by file type, not a layout of its own. */
 const PREVIEW_LAYOUTS = ["text", "split", "preview", "auto"] as const;
+const THEMES = ["system", "dark", "light"] as const;
 const ENCODINGS = [
   "auto",
   "utf-8",
@@ -291,6 +292,19 @@ export default function SettingsPanel({
                 </select>
               </SettingField>
               <p className="muted">{t("settings.encodingDesc")}</p>
+              <SettingField label={t("settings.theme")}>
+                <select
+                  className="select"
+                  value={settings.theme}
+                  onChange={(e) => onSaveSettings({ theme: e.target.value })}
+                >
+                  {THEMES.map((option) => (
+                    <option key={option} value={option}>
+                      {t(`settings.theme.${option}`)}
+                    </option>
+                  ))}
+                </select>
+              </SettingField>
               <p className="muted">{t("settings.persisted")}</p>
             </div>
           </div>

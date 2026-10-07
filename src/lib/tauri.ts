@@ -75,6 +75,8 @@ export interface Settings {
   renderWhitespace: string;
   wordWrap: boolean;
   stickyScroll: boolean;
+  /** system | dark | light. `system` follows the OS preference at runtime. */
+  theme: string;
   /** Columns per indentation level, 1..8. */
   tabSize: number;
   /** Insert spaces rather than a tab character. */
