@@ -72,6 +72,9 @@ const DEFAULT_SETTINGS: Settings = {
   insertSpaces: true,
   detectIndentation: true,
   scrollBeyondLastLine: true,
+  // A document is opened to be read and written, so the editor is what a file opens to.
+  // The preview is one keystroke away; a preview nobody asked for costs a pane.
+  previewLayout: "text",
 }
 
 /** The only values Monaco accepts for `renderWhitespace`. */
@@ -747,6 +750,12 @@ export default function App() {
   const insertSpaces = editorTab?.fileSettings.insertSpaces ?? settings.insertSpaces;
   const detectIndentation =
     editorTab?.fileSettings.detectIndentation ?? settings.detectIndentation;
+  /**
+   * The layout a previewable file opens in. Global rather than per file: it is the answer to
+   * "what does opening one of these look like", asked once, and a per-file choice on top of
+   * it is what `previewPref` already remembers for the session.
+   */
+  const previewLayout = settings.previewLayout;
 
   /**
    * What the preview pane can draw for this file, or null when it has nothing to preview.
@@ -760,17 +769,23 @@ export default function App() {
         : null
     : null;
   /**
-   * Markdown and SVG open side by side, a raster image on its own, anything else as text.
-   * The reasoning differs per kind: markdown is read as prose, SVG is edited as source and
-   * read as a picture, and a photo has no text worth a pane of its own.
+   * The layout a file opens in when it has no stored choice of its own.
+   *
+   * A picture is settled before the setting is consulted: its bytes are not text, so
+   * "editor only" would put an editable-looking buffer in front of a photo and any keystroke
+   * would corrupt it. Everything else that has a preview follows the setting, and a file with
+   * nothing to preview is always text. `auto` keeps the per-kind behaviour this replaced —
+   * markdown is read as prose and SVG is edited as source, so both open side by side.
    */
-  const autoPreviewMode = useCallback(
+  const defaultModeFor = useCallback(
     (path: string): PreviewMode => {
-      if (isMarkdown(path) || isSvg(path)) return "split";
       if (isBitmapImage(path)) return "preview";
-      return "text";
+      if (!isMarkdown(path) && !isSvg(path)) return "text";
+      if (previewLayout === "split" || previewLayout === "preview") return previewLayout;
+      if (previewLayout === "text") return "text";
+      return "split";
     },
-    []
+    [previewLayout]
   );
   // A photo has no text to edit, and showing its bytes decoded as text is how an image
   // gets corrupted by a stray keystroke. So for a raster image the layout is not a choice:
@@ -785,7 +800,7 @@ export default function App() {
     : editorTab?.compare
       ? "text"
       : (editorTab && previewPref[editorTab.path]) ||
-        (editorTab ? autoPreviewMode(editorTab.path) : "text");
+        (editorTab ? defaultModeFor(editorTab.path) : "text");
   const showEditor = previewMode !== "preview";
   const showPreview = previewMode !== "text" && !!editorTab;
   /** A comparison owns the pane; the text editor is only hidden behind it. */
@@ -811,13 +826,13 @@ export default function App() {
   const togglePreview = useCallback(
     (path: string) => {
       setPreviewPref((prev) => {
-        const current = prev[path] ?? autoPreviewMode(path);
-        if (current === "text") return { ...prev, [path]: autoPreviewMode(path) };
+        const current = prev[path] ?? defaultModeFor(path);
+        if (current === "text") return { ...prev, [path]: defaultModeFor(path) };
         if (current === "preview") return { ...prev, [path]: "split" };
         return { ...prev, [path]: "text" };
       });
     },
-    [autoPreviewMode]
+    [defaultModeFor]
   );
 
   /** The preview is the driver when the user scrolls it, so mirror it into the editor. */
@@ -1009,7 +1024,7 @@ export default function App() {
               <span>{t("preview.hintImage")}</span>
               <button
                 className="btn small"
-                onClick={() => setPreviewMode(autoPreviewMode(editorTab.path))}
+                onClick={() => setPreviewMode(defaultModeFor(editorTab.path))}
               >
                 {t("preview.hintShow")}
               </button>
@@ -1152,7 +1167,7 @@ export default function App() {
                 >
                   <span className="ctx-tick">
                     {menuTabPath &&
-                    (previewPref[menuTabPath] ?? autoPreviewMode(menuTabPath)) !== "text"
+                    (previewPref[menuTabPath] ?? defaultModeFor(menuTabPath)) !== "text"
                       ? "✓"
                       : ""}
                   </span>

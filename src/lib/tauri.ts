@@ -83,6 +83,12 @@ export interface Settings {
   detectIndentation: boolean;
   /** Allow scrolling past the end so the last line can sit above the bottom edge. */
   scrollBeyondLastLine: boolean;
+  /**
+   * How a file that has a preview opens: `auto` | `text` | `split` | `preview`.
+   * `text` is the default; `auto` is the per-kind behaviour (markdown and SVG side by side).
+   * A picture is not covered by this — its bytes are not text, so it always opens as itself.
+   */
+  previewLayout: string;
 }
 
 /** One restored tab: either a file (path + cursor) or scratch text (untitled + content). */

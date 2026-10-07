@@ -123,6 +123,11 @@ pub struct Settings {
   pub detect_indentation: bool,
   /// Allow scrolling past the end, so the last line can sit above the bottom edge.
   pub scroll_beyond_last_line: bool,
+  /// How a file that has a preview opens: auto | text | split | preview. `text` is the
+  /// default because a document is opened to be read and written; the preview is one
+  /// keystroke away, whereas a preview nobody asked for costs a pane. A picture is not
+  /// covered by this choice — its bytes are not text, so it always opens as the picture.
+  pub preview_layout: String,
 }
 
 /// Used when settings.json is absent or a key is missing, so a first run must not
@@ -150,6 +155,7 @@ impl Default for Settings {
       insert_spaces: true,
       detect_indentation: true,
       scroll_beyond_last_line: true,
+      preview_layout: "text".into(),
     }
   }
 }
@@ -158,6 +164,9 @@ const SIDEBAR_MIN_WIDTH: f64 = 180.0;
 const SIDEBAR_MAX_WIDTH: f64 = 640.0;
 /// Whitespace rendering modes Monaco understands.
 const RENDER_WHITESPACE: [&str; 5] = ["none", "boundary", "selection", "all", "trailing"];
+/// Preview layouts a file can open in. `auto` is the per-kind behaviour the frontend used
+/// to hardcode: markdown and SVG side by side, pictures as the picture.
+const PREVIEW_LAYOUT: [&str; 4] = ["auto", "text", "split", "preview"];
 
 impl Settings {
   pub(crate) fn filled(self) -> Self {
@@ -232,6 +241,13 @@ impl Settings {
       insert_spaces: self.insert_spaces,
       detect_indentation: self.detect_indentation,
       scroll_beyond_last_line: self.scroll_beyond_last_line,
+      // Hand-edited or older settings can carry anything; an unknown layout would leave the
+      // frontend with no mode to show, so fall back to the default rather than trust it.
+      preview_layout: if PREVIEW_LAYOUT.contains(&self.preview_layout.as_str()) {
+        self.preview_layout.clone()
+      } else {
+        "text".into()
+      },
     }
   }
 }
