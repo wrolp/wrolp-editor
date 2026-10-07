@@ -2125,8 +2125,67 @@ body.resizing .editor-host {
   border-radius: 8px;
   background: var(--sunken);
   overflow-x: auto;
+  position: relative;
 }
-.md-body div[data-diagram] > svg {
+/* A hover toolbar of zoom controls sits over the drawing's corner. It only appears on
+   hover so it never crowds a small diagram, and it is absolutely placed so it takes no
+   row of its own. */
+.md-diagram-zoom {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  z-index: 2;
+  display: none;
+  align-items: center;
+  gap: 2px;
+  padding: 2px 4px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+  color: var(--text);
+}
+.md-body div[data-diagram]:hover .md-diagram-zoom {
+  display: flex;
+}
+.md-dz {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  border-radius: 4px;
+  font-size: 15px;
+  line-height: 1;
+}
+.md-dz:hover {
+  background: var(--surface-hover);
+}
+.md-dz-val {
+  min-width: 40px;
+  text-align: center;
+  color: var(--muted);
+}
+/* The drawing lives in a scrollable stage so a zoomed-in diagram can be panned instead of
+   spilling out of the page. */
+.md-diagram-stage {
+  width: 100%;
+  max-height: 70vh;
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+}
+/* Only when the drawing overflows (zoomed or just tall) does it become grabbable, so the
+   cursor never promises a drag that would do nothing. */
+.md-diagram-stage.md-can-pan {
+  cursor: grab;
+}
+.md-diagram-stage.md-can-pan.md-dragging {
+  cursor: grabbing;
+}
+.md-body div[data-diagram] .md-diagram-stage > svg {
   max-width: 100%;
   height: auto;
 }

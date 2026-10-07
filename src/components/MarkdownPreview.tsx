@@ -223,7 +223,20 @@ export default function MarkdownPreview({
       holder.dataset.injected = hit?.svg ?? hit?.error ?? "";
       if (hit?.svg) {
         holder.removeAttribute("data-diagram-error");
-        holder.insertAdjacentHTML("afterbegin", DOMPurify.sanitize(hit.svg, SVG_SANITIZE));
+        const svg = DOMPurify.sanitize(hit.svg, SVG_SANITIZE);
+        // The drawing is wrapped in a scrollable stage plus a hover toolbar. The SVG cannot
+        // carry these as React children — it is injected HTML — so the toolbar buttons are
+        // wired up by the delegated listener below.
+        holder.insertAdjacentHTML(
+          "afterbegin",
+          `<div class="md-diagram-zoom">` +
+            `<button type="button" class="md-dz" data-zoom="out" title="缩小" aria-label="缩小">−</button>` +
+            `<span class="md-dz-val">100%</span>` +
+            `<button type="button" class="md-dz" data-zoom="in" title="放大" aria-label="放大">+</button>` +
+            `<button type="button" class="md-dz" data-zoom="reset" title="重置" aria-label="重置">⟲</button>` +
+            `</div>` +
+            `<div class="md-diagram-stage">${svg}</div>`
+        );
       } else if (hit?.error) {
         holder.setAttribute("data-diagram-error", "");
         const note = document.createElement("div");
@@ -300,6 +313,94 @@ export default function MarkdownPreview({
     };
     el.addEventListener("error", markMissing, true);
     return () => el.removeEventListener("error", markMissing, true);
+  }, []);
+
+  // Diagrams are injected as plain HTML, so the zoom controls get their handlers through
+  // delegation on the preview container — the same trick the broken-image detection uses.
+  // Plain wheel keeps scrolling the preview; Ctrl/Cmd + wheel zooms the diagram under it.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const setZoom = (stage: HTMLElement, zoom: number) => {
+      const clamped = Math.min(Math.max(Math.round(zoom * 100) / 100, 0.2), 5);
+      stage.dataset.zoom = String(clamped);
+      const svg = stage.querySelector("svg");
+      const val = stage.closest("div[data-diagram]")?.querySelector<HTMLElement>(".md-dz-val");
+      if (val) val.textContent = `${Math.round(clamped * 100)}%`;
+      if (svg) {
+        // `zoom` is unreliable on an SVG whose width is capped by `max-width: 100%`, so the
+        // size is set from the viewBox instead: explicit pixel width and height scale the
+        // drawing deterministically and let the stage scroll when it outgrows the column.
+        if (clamped === 1) {
+          svg.style.width = "";
+          svg.style.height = "";
+          svg.style.maxWidth = "";
+        } else {
+          const vb = svg.viewBox?.baseVal;
+          if (vb && vb.width && vb.height) {
+            svg.style.maxWidth = "none";
+            svg.style.width = `${Math.round(vb.width * clamped)}px`;
+            svg.style.height = `${Math.round(vb.height * clamped)}px`;
+          }
+        }
+      }
+      // Only a drawing that actually overflows its column can be panned, so the grab cursor
+      // and the drag handler are gated on this class rather than on the zoom value.
+      const overflow = stage.scrollWidth > stage.clientWidth || stage.scrollHeight > stage.clientHeight;
+      stage.classList.toggle("md-can-pan", overflow);
+    };
+    const onClick = (e: MouseEvent) => {
+      const btn = (e.target as Element).closest?.("[data-zoom]");
+      if (!btn) return;
+      const stage = btn.closest("div[data-diagram]")?.querySelector<HTMLElement>(".md-diagram-stage");
+      if (!stage) return;
+      const action = btn.getAttribute("data-zoom");
+      const current = Number(stage.dataset.zoom ?? "1");
+      setZoom(stage, action === "in" ? current * 1.2 : action === "out" ? current / 1.2 : 1);
+    };
+    const onWheel = (e: WheelEvent) => {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const stage = (e.target as Element).closest?.(".md-diagram-stage") as HTMLElement | null;
+      if (!stage) return;
+      e.preventDefault();
+      const current = Number(stage.dataset.zoom ?? "1");
+      setZoom(stage, e.deltaY < 0 ? current * 1.1 : current / 1.1);
+    };
+    // Press-and-drag pans a diagram that is larger than its column. Pointer events are
+    // used so the same code covers mouse and trackpad; the move/up listeners go on window
+    // so a fast drag that leaves the stage still pans instead of stalling.
+    let pan: { stage: HTMLElement; x: number; y: number; sl: number; st: number } | null = null;
+    const onPointerDown = (e: PointerEvent) => {
+      const stage = (e.target as Element).closest?.(".md-diagram-stage") as HTMLElement | null;
+      if (!stage || !stage.classList.contains("md-can-pan")) return;
+      pan = { stage, x: e.clientX, y: e.clientY, sl: stage.scrollLeft, st: stage.scrollTop };
+      stage.classList.add("md-dragging");
+      stage.setPointerCapture?.(e.pointerId);
+      e.preventDefault(); // stop text selection / native image drag while panning
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      if (!pan) return;
+      pan.stage.scrollLeft = pan.sl - (e.clientX - pan.x);
+      pan.stage.scrollTop = pan.st - (e.clientY - pan.y);
+    };
+    const onPointerUp = (e: PointerEvent) => {
+      if (!pan) return;
+      pan.stage.classList.remove("md-dragging");
+      pan.stage.releasePointerCapture?.(e.pointerId);
+      pan = null;
+    };
+    el.addEventListener("click", onClick);
+    el.addEventListener("wheel", onWheel, { passive: false });
+    el.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+    return () => {
+      el.removeEventListener("click", onClick);
+      el.removeEventListener("wheel", onWheel);
+      el.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerUp);
+    };
   }, []);
 
   return (
