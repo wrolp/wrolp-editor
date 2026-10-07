@@ -17,8 +17,8 @@ interface Props {
 }
 
 const NAV: { cat: Category; key: string }[] = [
-  { cat: "context", key: "settings.catContext" },
   { cat: "general", key: "settings.catGeneral" },
+  { cat: "context", key: "settings.catContext" },
   { cat: "about", key: "settings.catAbout" },
 ];
 
@@ -45,7 +45,8 @@ export default function SettingsPanel({
   onSaveSettings,
   onSetMenu,
 }: Props) {
-  const [category, setCategory] = useState<Category>("context");
+  // The first entry in NAV, so opening Settings lands on it rather than on the second one.
+  const [category, setCategory] = useState<Category>("general");
   const [version, setVersion] = useState("…");
   // The exclusion list is typed as free text, so what is being edited and what is stored
   // are two things: `excludedText` is the field's own state (it takes `png, JPG` and
