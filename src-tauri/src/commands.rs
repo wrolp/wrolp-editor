@@ -465,6 +465,133 @@ pub fn allow_asset_dir(app: AppHandle, dir: String) -> Result<(), String> {
     .map_err(|e| format!("asset_scope:{e}"))
 }
 
+/// Renders a diagram with a locally installed program, returning SVG.
+///
+/// The two supported tools are Graphviz and PlantUML, and they are invoked directly — no
+/// shell, ever. `Command::new` does not interpret metacharacters, and the document text
+/// reaches the program only as the *contents of a file*, never as an argument, so a diagram
+/// containing quotes, semicolons or `$(...)` has nothing to escape into. The program name
+/// comes from the literal table below rather than from `kind`, so the frontend cannot talk
+/// this into running something else.
+///
+/// Neither tool is required. A missing program is reported as an error the preview shows
+/// above the source, which is the whole of the contract: the document stays readable whether
+/// or not the user has these installed.
+#[tauri::command(async)]
+pub fn render_diagram(kind: String, source: String) -> Result<String, String> {
+  // `(program, input extension, args)`. Args are fixed strings except for the two paths,
+  // which are generated here and never contain anything from `source`.
+  let (program, input_ext, args): (&str, &str, &[&str]) = match kind.as_str() {
+    "graphviz" => ("dot", "gv", &["-Tsvg"]),
+    "plantuml" => ("plantuml", "puml", &["-tsvg", "-charset", "UTF-8"]),
+    _ => return Err("diagram_kind_unknown".into()),
+  };
+
+  let stamp = std::time::SystemTime::now()
+    .duration_since(std::time::UNIX_EPOCH)
+    .map(|d| d.as_nanos())
+    .unwrap_or(0);
+  let dir = std::env::temp_dir().join(format!("wrolp-diagram-{}-{stamp}", std::process::id()));
+  std::fs::create_dir_all(&dir).map_err(|e| format!("diagram_temp:{e}"))?;
+  // Every exit path below has to remove this, including the error ones.
+  let result = run_diagram(program, input_ext, args, &source, &dir);
+  let _ = std::fs::remove_dir_all(&dir);
+  result
+}
+
+fn run_diagram(
+  program: &str,
+  input_ext: &str,
+  args: &[&str],
+  source: &str,
+  dir: &Path,
+) -> Result<String, String> {
+  let input = dir.join(format!("in.{input_ext}"));
+  let output = dir.join("out.svg");
+  let errors = dir.join("err.txt");
+  // UTF-8 with no BOM: PlantUML rejects a byte order mark outright.
+  std::fs::write(&input, source.as_bytes()).map_err(|e| format!("diagram_write:{e}"))?;
+
+  let mut command = std::process::Command::new(program);
+  command.args(args).arg("-o").arg(&output).arg(&input);
+  // Files rather than pipes: the tool writes the SVG itself, so there is no pipe buffer to
+  // fill and deadlock on, and stderr goes to a file for the same reason.
+  command
+    .stdin(std::process::Stdio::null())
+    .stdout(std::process::Stdio::null())
+    .stderr(std::process::Stdio::from(
+      std::fs::File::create(&errors).map_err(|e| format!("diagram_stderr:{e}"))?,
+    ));
+
+  let mut child = command.spawn().map_err(|e| {
+    if e.kind() == std::io::ErrorKind::NotFound {
+      format!("diagram_missing:{program}")
+    } else {
+      format!("diagram_spawn:{e}")
+    }
+  })?;
+
+  // Bounded without a crate: poll for the exit status until the deadline. PlantUML in
+  // particular will sit there indefinitely on a diagram that never terminates.
+  let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+  let status = loop {
+    match child.try_wait() {
+      Ok(Some(status)) => break status,
+      Ok(None) if std::time::Instant::now() < deadline => {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+      }
+      Ok(None) => {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err("diagram_timeout".into());
+      }
+      Err(e) => return Err(format!("diagram_wait:{e}")),
+    }
+  };
+
+  let stderr = std::fs::read_to_string(&errors).unwrap_or_default();
+  let stderr = stderr.trim();
+  let svg = std::fs::read(&output).unwrap_or_default();
+  let svg = String::from_utf8_lossy(&svg).into_owned();
+
+  // PlantUML exits 0 on a syntax error and simply draws the error, so the exit code alone
+  // would report success for a diagram that did not render.
+  let looks_broken = svg.contains("syntax error") || svg.contains("Syntax Error");
+  if !status.success() || looks_broken || svg.trim().is_empty() {
+    let reason = if !stderr.is_empty() { stderr } else { "diagram_failed" };
+    let trimmed: String = reason.chars().take(400).collect();
+    return Err(if trimmed.is_empty() {
+      format!("diagram_exit:{}", status.code().unwrap_or(-1))
+    } else {
+      trimmed.to_string()
+    });
+  }
+
+  Ok(strip_xml_preamble(&svg))
+}
+
+/// Removes the XML declaration and doctype, which are meaningless once the SVG is embedded
+/// in a document that has its own.
+fn strip_xml_preamble(svg: &str) -> String {
+  let mut rest = svg.trim_start();
+  for _ in 0..2 {
+    if rest.starts_with("<?xml") {
+      match rest.find("?>") {
+        Some(at) => rest = rest[at + 2..].trim_start(),
+        None => break,
+      }
+    } else if rest.starts_with("<!DOCTYPE") {
+      match rest.find('>') {
+        Some(at) => rest = rest[at + 1..].trim_start(),
+        None => break,
+      }
+    } else {
+      break;
+    }
+  }
+  rest.to_string()
+}
+
 /// Overrides for one file; every field absent means "follow the global default".
 #[tauri::command]
 pub fn get_file_settings(
@@ -965,5 +1092,83 @@ mod tests {
     // ...and the state that was already on disk is still readable.
     assert_eq!(std::fs::read(&target).expect("read"), b"old");
     std::fs::remove_dir_all(&dir).ok();
+  }
+
+  #[test]
+  fn an_unknown_diagram_kind_never_reaches_a_process() {
+    // The program name is chosen from a literal table, so anything else has to be refused
+    // before a temporary directory is even made.
+    for kind in ["", "sh", "dot; rm -rf /", "C:\\Windows\\System32\\cmd.exe"] {
+      assert_eq!(
+        render_diagram(kind.to_string(), "digraph{a}".to_string()),
+        Err("diagram_kind_unknown".to_string())
+      );
+    }
+  }
+
+  #[test]
+  fn a_missing_diagram_program_is_reported_not_panicked() {
+    // Nothing here can rely on what is installed, so this asks for a program that cannot
+    // exist and checks the failure is a value rather than a panic.
+    let err = run_diagram("wrolp-no-such-diagram-program", "gv", &["-Tsvg"], "digraph{a}", &std::env::temp_dir());
+    let reason = err.expect_err("a missing program must fail");
+    assert!(
+      reason.starts_with("diagram_missing:")
+        || reason.starts_with("diagram_spawn:")
+        || reason.starts_with("diagram_write:"),
+      "unexpected reason: {reason}"
+    );
+  }
+
+  #[test]
+  fn the_xml_preamble_is_stripped_and_the_root_svg_is_kept() {
+    let svg = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.1//EN\" \"x.dtd\">\n<svg><g/></svg>";
+    assert_eq!(strip_xml_preamble(svg), "<svg><g/></svg>");
+    // A document that is only a preamble has nothing to show, which the caller treats as a
+    // failure; stripping must not invent content.
+    assert_eq!(strip_xml_preamble("<?xml version=\"1.0\"?>"), "");
+    // Nothing to strip means nothing is touched.
+    assert_eq!(strip_xml_preamble("<svg/>"), "<svg/>");
+  }
+
+  #[test]
+  fn rendering_a_diagram_leaves_no_temporary_directory_behind() {
+    let before = temp_diagram_dirs();
+    let _ = render_diagram("graphviz".to_string(), "digraph{a}".to_string());
+    // Success or failure, the scratch directory is gone either way.
+    assert_eq!(temp_diagram_dirs(), before);
+  }
+
+  #[test]
+  fn graphviz_renders_and_a_syntax_error_is_reported() {
+    // Only meaningful where graphviz is installed; elsewhere the missing program is itself
+    // the thing to assert, so both outcomes are checked rather than one being assumed.
+    match render_diagram("graphviz".to_string(), "digraph{a}".to_string()) {
+      Ok(svg) => {
+        assert!(svg.contains("<svg"), "expected an svg element, got: {}", &svg[..svg.len().min(120)]);
+        // The preamble is stripped so the drawing can be embedded directly.
+        assert!(!svg.contains("<?xml"), "xml declaration should be gone");
+        assert!(!svg.contains("<!DOCTYPE"), "doctype should be gone");
+      }
+      Err(reason) => assert!(
+        reason.starts_with("diagram_missing:"),
+        "graphviz should either render or be absent, not fail: {reason}"
+      ),
+    }
+    // Broken source must never come back as a drawing, whichever tool produced it.
+    if let Ok(svg) = render_diagram("graphviz".to_string(), "this is not dot source!!".to_string()) {
+      assert!(svg.contains("syntax error"), "a broken diagram drew something: {svg}");
+    }
+  }
+
+  fn temp_diagram_dirs() -> usize {
+    std::fs::read_dir(std::env::temp_dir())
+      .map(|entries| {
+        entries
+          .filter_map(|e| e.ok())
+          .filter(|e| e.file_name().to_string_lossy().starts_with("wrolp-diagram-"))
+          .count()
+      })
+      .unwrap_or(0)
   }
 }

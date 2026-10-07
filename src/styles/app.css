@@ -1992,6 +1992,40 @@ body.resizing .editor-host {
   padding: 0;
   background: none;
 }
+/* ---------- Diagrams ----------
+   A drawn diagram sits on the same ground as a code block and is centred in it, with the
+   source still underneath: a tool that is not installed, or a diagram that will not parse,
+   shows the reason above the source rather than an empty box. */
+.md-body div[data-diagram] {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 1em;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #1a1a1a;
+  overflow-x: auto;
+}
+.md-body div[data-diagram] > svg {
+  max-width: 100%;
+  height: auto;
+}
+.md-body div[data-diagram] > .md-diagram-error {
+  color: #e08b8b;
+  font-size: 0.9em;
+  text-align: center;
+}
+/* The source keeps the full width inside the centred column, and its own margin would only
+   push the drawing off centre. */
+.md-body div[data-diagram] > pre {
+  margin: 0;
+  width: 100%;
+}
+.md-body div[data-diagram][data-diagram-error] {
+  border-color: #7a3b3b;
+}
 .md-body blockquote {
   padding: 0 1em;
   border-left: 3px solid var(--border);

@@ -30,6 +30,7 @@ pub fn run() {
       commands::clear_draft,
       commands::list_dir,
       commands::allow_asset_dir,
+      commands::render_diagram,
       commands::get_file_settings,
       commands::save_file_settings,
       commands::clear_file_settings,

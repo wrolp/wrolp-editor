@@ -2,7 +2,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { api } from "../lib/tauri";
+import monaco from "../lib/monaco";
+import { api, errorMessage } from "../lib/tauri";
 
 interface Props {
   /** Current buffer text. */
@@ -36,11 +37,113 @@ export default function MarkdownPreview({
   /** Set while we move the preview ourselves, so our own scroll event is ignored. */
   const following = useRef(false);
 
-  const sanitized = useMemo(() => {
-    // `async: false` keeps this a plain string; marked would otherwise hand back a promise.
-    const raw = marked.parse(text, { async: false, gfm: true, breaks: true }) as string;
-    return DOMPurify.sanitize(raw, SANITIZE);
+  /**
+   * What the asynchronous pass produced for one fence: highlighted source for a code block,
+   * SVG for a diagram, or the reason it could not be drawn.
+   *
+   * Keyed by content, not by position, which is what makes typing free: a keystroke outside
+   * a fence leaves every key unchanged, so nothing is re-highlighted and no diagram is
+   * re-rendered. A block that does change is simply a new key.
+   */
+  const cacheRef = useRef(
+    new Map<string, { html?: string; svg?: string; error?: string }>()
+  );
+  /** Bumped when the cache gains something, so the synchronous pass re-runs. */
+  const [resolved, setResolved] = useState(0);
+
+  /** Every fence in the document, collected without rendering any of it. */
+  const fences = useMemo(() => {
+    const found: { key: string; lang: string; text: string; diagram: DiagramKind | null }[] = [];
+    for (const token of marked.lexer(text)) {
+      if (token.type !== "code") continue;
+      const lang = fenceLang(token.lang);
+      const source = token.text;
+      const kind = (DIAGRAM_KINDS as Record<string, DiagramKind | undefined>)[lang] ?? null;
+      found.push({ key: fenceKey(lang, source), lang, text: source, diagram: kind });
+    }
+    return found;
   }, [text]);
+
+  /**
+   * The asynchronous pass. Highlighting and diagram rendering both cost something — one
+   * tokenises, the other may start a program — so this runs only for fences whose content is
+   * not already resolved, and it does not run at all for a document without any.
+   */
+  useEffect(() => {
+    let live = true;
+    const todo = fences.filter((f) => !cacheRef.current.has(f.key));
+    if (todo.length === 0) return;
+    Promise.all(
+      todo.map(async (fence) => {
+        // Mermaid's own dynamic import is the last thing attempted, so a document with only
+        // code blocks never pays for it.
+        if (fence.diagram) {
+          try {
+            const svg =
+              fence.diagram === "mermaid"
+                ? await renderMermaid(fence.text, fence.key)
+                : await api.renderDiagram(fence.diagram, fence.text);
+            return [fence.key, { svg }] as const;
+          } catch (e) {
+            return [fence.key, { error: errorMessage(e) }] as const;
+          }
+        }
+        const language = monacoLanguage(fence.lang);
+        // An unknown or absent language is left as plain source rather than handed to
+        // Monaco, which would answer with unstyled text anyway.
+        if (!language) return null;
+        try {
+          const html = await monaco.editor.colorize(fence.text, language, { tabSize: 0 });
+          return [fence.key, { html }] as const;
+        } catch {
+          return null;
+        }
+      })
+    ).then((entries) => {
+      if (!live) return;
+      let changed = false;
+      for (const entry of entries) {
+        if (!entry) continue;
+        cacheRef.current.set(entry[0], entry[1]);
+        changed = true;
+      }
+      if (changed) setResolved((n) => n + 1);
+    });
+    return () => {
+      live = false;
+    };
+  }, [fences]);
+
+  const sanitized = useMemo(() => {
+    // A renderer built per call rather than registered globally with `marked.use()`: this is
+    // the only place that overrides code rendering, and a global registration would leak
+    // into every other consumer of the singleton.
+    const renderer = new marked.Renderer();
+    renderer.code = ({ text: source, lang }) => {
+      const info = fenceLang(lang);
+      const key = fenceKey(info, source);
+      const hit = cacheRef.current.get(key);
+      const cls = info ? ` class="language-${escapeHtml(info)}"` : "";
+      if (hit?.html !== undefined) return `<pre><code${cls}>${hit.html}</code></pre>\n`;
+      if (hit && DIAGRAM_KINDS[info as keyof typeof DIAGRAM_KINDS]) {
+        // The diagram itself is injected after sanitisation — see the effect below — so all
+        // that goes through here is a placeholder. The source rides along so a diagram that
+        // never renders still shows what it was meant to be.
+        return (
+          `<div data-diagram="${escapeHtml(key)}"><pre><code${cls}>${escapeHtml(source)}</code></pre></div>\n`
+        );
+      }
+      return `<pre><code${cls}>${escapeHtml(source)}</code></pre>\n`;
+    };
+    // `async: false` keeps this a plain string; marked would otherwise hand back a promise.
+    const raw = marked.parse(text, {
+      async: false,
+      gfm: true,
+      breaks: true,
+      renderer,
+    }) as string;
+    return DOMPurify.sanitize(raw, SANITIZE);
+  }, [text, resolved]);
 
   /**
    * Folders the document points images into, resolved to absolute paths. `..` is allowed
@@ -84,6 +187,41 @@ export default function MarkdownPreview({
     () => (granted ? rewriteImageSources(sanitized, path) : sanitized),
     [sanitized, granted, path]
   );
+
+  /**
+   * Puts the diagram SVGs into their placeholders.
+   *
+   * The SVG cannot go through the markdown pass: mermaid emits a `<style>` element inside
+   * its drawing, and `style` is forbidden there by design, so it would arrive stripped or not
+   * at all. The placeholder is what the markdown pass emits; the drawing is injected here,
+   * through the separate `SVG_SANITIZE` boundary, once the sanitized HTML is in the DOM.
+   *
+   * A failure leaves the source the placeholder already carries and adds the reason, so a
+   * diagram whose tool is not installed shows what it was rather than an empty box.
+   *
+   * Ahead of the tail measurement below, which therefore measures the height the document
+   * actually ended up with rather than one that is about to change.
+   */
+  useLayoutEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    for (const holder of Array.from(body.querySelectorAll<HTMLElement>("div[data-diagram]"))) {
+      const key = holder.getAttribute("data-diagram") ?? "";
+      const hit = cacheRef.current.get(key);
+      if (holder.dataset.injected === (hit?.svg ?? hit?.error ?? "")) continue;
+      holder.dataset.injected = hit?.svg ?? hit?.error ?? "";
+      if (hit?.svg) {
+        holder.removeAttribute("data-diagram-error");
+        holder.insertAdjacentHTML("afterbegin", DOMPurify.sanitize(hit.svg, SVG_SANITIZE));
+      } else if (hit?.error) {
+        holder.setAttribute("data-diagram-error", "");
+        const note = document.createElement("div");
+        note.className = "md-diagram-error";
+        note.textContent = hit.error;
+        holder.insertAdjacentElement("afterbegin", note);
+      }
+    }
+  }, [html]);
 
   /**
    * Size the tail that stands in for the editor's beyond-last-line space.
@@ -235,6 +373,9 @@ const SANITIZE = {
     "ul", "ol", "li",
     "a", "img",
     "table", "thead", "tbody", "tr", "th", "td",
+    // For the highlighter's token spans, and for the diagram placeholders. Both are inert on
+    // their own: neither carries an attribute that survives the hook below.
+    "span", "div",
   ],
   ALLOWED_ATTR: ["href", "src", "alt", "title", "align"],
   // Strip srcset and style too, then constrain URLs to schemes that cannot run code.
@@ -252,8 +393,186 @@ const SANITIZE = {
   ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel):|[^:]+$)/i,
 };
 
+/**
+ * Lets the highlighter's `class` through inside a code block, and nowhere else.
+ *
+ * The highlighter emits `<span class="mtkN">`, and those classes are what carry the colour,
+ * so without this every block renders as flat uncoloured text. But `class` on the document
+ * at large is a different thing: a document that could name classes could restyle the app
+ * chrome around it, so the attribute is kept strictly inside `pre > code`.
+ *
+ * `uponSanitizeAttribute` is the hook that can do this — it runs *before* the allow-list
+ * check and exposes `forceKeepAttr`, which short-circuits it. (`afterSanitizeAttributes`
+ * would be too late: the attribute has already been removed by then.) The decision is
+ * per-attribute rather than a mutation of `allowedAttributes`, because that set is cloned
+ * once per `sanitize()` call and mutating it would leak into every later element.
+ *
+ * Registered once at module scope: `addHook` pushes onto an array, so doing this per render
+ * would stack duplicates that each re-run for every attribute of every element.
+ */
+DOMPurify.addHook("uponSanitizeAttribute", (node, event) => {
+  if (event.attrName !== "class") return;
+  // `closest` matches the element itself, so this covers `<code class="language-x">` as
+  // well as the spans inside it.
+  if ((node as Element).closest("pre > code")) event.forceKeepAttr = true;
+  else event.keepAttr = false;
+});
+
+/**
+ * A second, narrower boundary for diagram SVG.
+ *
+ * The main allow-list cannot take SVG: mermaid emits a `<style>` element inside its `<svg>`,
+ * and `style` is in `FORBID_ATTR` by design, so forcing it through would strip the styling
+ * or the whole drawing. Diagram output does not come from the document either — it comes
+ * from mermaid or from a local program — but it is still generated from text the document
+ * supplied, so it gets its own pass with scripting and HTML embedding forbidden outright.
+ *
+ * `xlink:href` is deliberately not forbidden: both mermaid and graphviz reference their own
+ * arrowheads with `url(#marker)`, and DOMPurify's default URI check already rejects
+ * `javascript:`.
+ */
+const SVG_SANITIZE = {
+  USE_PROFILES: { svg: true, svgFilters: true },
+  FORBID_TAGS: [
+    "script", "foreignObject", "iframe", "object", "embed",
+    "animate", "animateMotion", "animateTransform", "set", "handler",
+  ],
+  FORBID_ATTR: ["onload", "onerror", "onclick", "onbegin", "onend", "onrepeat"],
+};
+
+/** Fence languages that are diagrams rather than source. */
+const DIAGRAM_KINDS = { mermaid: "mermaid", plantuml: "plantuml", graphviz: "graphviz" } as const;
+type DiagramKind = (typeof DIAGRAM_KINDS)[keyof typeof DIAGRAM_KINDS];
+
+/**
+ * The fence info string, reduced to a language token.
+ *
+ * marked hands over the whole info string, and people write `js title=x`, `python {hl}` and
+ * `{.rust}` for their own reasons, so only the leading word is meaningful here.
+ */
+function fenceLang(lang: string | undefined): string {
+  if (!lang) return "";
+  return lang
+    .trim()
+    .split(/\s+/)[0]
+    .replace(/^\{+/, "")
+    .replace(/\}$/, "")
+    .toLowerCase();
+}
+
+/**
+ * Escapes text for the one context `colorize` does not cover itself.
+ *
+ * Monaco escapes `&` and `<`, and turns runs of spaces into `&nbsp;` — but not `"`. That is
+ * fine for its own output and not fine for an attribute, so anything this module puts inside
+ * an attribute is escaped here.
+ */
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
+ * Fence language to Monaco language id, built once from the editor's own registry.
+ *
+ * Monaco's registry is the source of truth rather than a hand-written list, so every
+ * language the editor can already open is highlightable here without being enumerated. The
+ * extra aliases cover the spellings people actually type into a fence, which the registry
+ * does not always carry (`sh`, `c++`, `py`).
+ */
+let langMap: Map<string, string> | null = null;
+
+function monacoLanguage(token: string): string | null {
+  if (!langMap) {
+    langMap = new Map();
+    for (const lang of monaco.languages.getLanguages()) {
+      langMap.set(lang.id.toLowerCase(), lang.id);
+      for (const alias of lang.aliases ?? []) langMap.set(alias.toLowerCase(), lang.id);
+      for (const ext of lang.extensions ?? []) langMap.set(ext.replace(/^\./, "").toLowerCase(), lang.id);
+    }
+    for (const [alias, id] of Object.entries({
+      "c++": "cpp", cxx: "cpp", hpp: "cpp", "c#": "csharp", cs: "csharp",
+      py: "python", rb: "ruby", rs: "rust", kt: "kotlin", tsx: "typescript",
+      jsx: "javascript", golang: "go", sh: "shell", bash: "shell", zsh: "shell",
+      console: "shell", yml: "yaml", md: "markdown", ps1: "powershell",
+    })) {
+      langMap.set(alias, id);
+    }
+  }
+  return langMap.get(token) ?? null;
+}
+
 /** Extensions worth spending an asset grant on. Anything else is left alone. */
 const IMAGE_EXT = /\.(?:png|jpe?g|gif|webp|avif|bmp|ico|svg)$/i;
+
+let mermaidModule: Promise<typeof import("mermaid")> | null = null;
+
+/**
+ * Draws a mermaid diagram to SVG.
+ *
+ * `securityLevel: "strict"` is the point of this function, not a default to accept: it is
+ * the only level that escapes HTML inside labels and refuses `click` bindings.
+ *
+ * `htmlLabels: false` is what makes the result survive the sanitizer. Left on, mermaid draws
+ * every label as HTML inside a `<foreignObject>` — five of them for a three-node flowchart,
+ * and no `<text>` at all — so forbidding `foreignObject` (which the SVG pass must, since that
+ * is the one tag that lets markup back into an SVG) silently removes every label and leaves
+ * a diagram with unlabelled boxes. Turning it off makes mermaid emit real `<text>`, and the
+ * whole drawing then passes the sanitizer untouched: measured, zero tags removed.
+ *
+ * `startOnLoad: false` because nothing here is automatic: rendering is driven by the async
+ * pass, one fence at a time. The module is imported on first use and kept, so a document with
+ * no diagram never loads it.
+ *
+ * Residual risk, stated plainly: mermaid keeps a `<style>` element inside its drawing, which
+ * this pass allows because the labels need it — they take their colour from there. A diagram
+ * can therefore supply CSS through mermaid's `themeCSS` init directive. That is CSS only,
+ * with no script and no way out of the preview pane, and it requires a document the user
+ * chose to open; it is the price of mermaid's own styling, not an oversight.
+ */
+async function renderMermaid(source: string, key: string): Promise<string> {
+  mermaidModule ??= import("mermaid");
+  const mermaid = (await mermaidModule).default;
+  mermaid.initialize({
+    startOnLoad: false,
+    securityLevel: "strict",
+    theme: "dark",
+    htmlLabels: false,
+    flowchart: { htmlLabels: false },
+  });
+  // The id has to be unique per render and safe as a DOM id.
+  const { svg } = await mermaid.render(`mmd-${key}`, source);
+  return svg;
+}
+
+/**
+ * A short, collision-resistant, DOM-id-safe digest of a cache key.
+ */
+function hashKey(key: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < key.length; i++) {
+    h ^= key.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(36);
+}
+
+/**
+ * Identity of one fenced block: its language and its content, and nothing else.
+ *
+ * Hashed rather than spelled out because the key has to survive a round trip through an
+ * HTML attribute — the injection effect reads it back off the placeholder to find what to
+ * draw. Anything unusual in the source would not survive that trip (a NUL, which is the
+ * natural separator, becomes U+FFFD the moment the parser sees it in an attribute) and the
+ * lookup would silently miss. A digest is the same in both places whatever the source
+ * contains, and it keeps a diagram's text out of the document.
+ */
+function fenceKey(lang: string, source: string): string {
+  return hashKey(`${lang}\n${source}`);
+}
 
 function dirOf(filePath: string): string {
   const cut = filePath.replace(/[\\/][^\\/]*$/, "");

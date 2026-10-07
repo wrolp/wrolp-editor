@@ -214,6 +214,15 @@ export const api = {
    * relative images. Called with the opened file's own folder and nothing wider.
    */
   allowAssetDir: (dir: string) => invoke<void>("allow_asset_dir", { dir }),
+  /**
+   * Render a diagram with a locally installed program, returning SVG.
+   *
+   * `kind` is `graphviz` or `plantuml`; anything else is refused by the backend before a
+   * process is started. The error string is shown to the user as-is, so it is written to be
+   * read ("diagram_missing:plantuml" says the program is not installed).
+   */
+  renderDiagram: (kind: string, source: string) =>
+    invoke<string>("render_diagram", { kind, source }),
   getHistory: () => invoke<HistoryEntry[]>("get_history"),
   removeHistory: (path: string) => invoke<HistoryEntry[]>("remove_history", { path }),
   getSettings: () => invoke<Settings>("get_settings"),
