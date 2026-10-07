@@ -224,35 +224,6 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
     });
   }, []);
 
-  /** Restored scratch tab: its text lives in the group file, so seed the model with it. */
-  const openScratch = useCallback(
-    async (name: string, content: string) => {
-      const path = `untitled://${name}`;
-      const existing = tabsRef.current.find((t) => t.path === path);
-      if (existing) {
-        await activate(existing.id);
-        return;
-      }
-      const tab: Tab = {
-        id: nextId(),
-        path,
-        name,
-        language: "plaintext",
-        original: "",
-        // Unsaved by definition: it never reached a file.
-        dirty: content !== "",
-        initialValue: content,
-        encoding: "UTF-8",
-        bom: false,
-        bytes: null,
-        fileSettings: EMPTY_FILE_SETTINGS,
-        };
-      setTabs((prev) => [...prev, tab]);
-      await activate(tab.id);
-    },
-    [activate]
-  );
-
   /**
    * Open a read-only comparison of two files as its own tab.
    *
@@ -355,40 +326,139 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
     return { tabs, active: activeTab ? tabKey(activeTab.path) : "" };
   }, [editorRef]);
 
-  /** Reopen a group. Unreadable entries are skipped so one dead path cannot eat the session. */
+  /**
+   * Reopen a whole group at once. Every file is read in parallel and all tab objects are
+   * built up front, then committed in a single `setTabs` — so the tab strip appears fully
+   * populated and the editor lands straight on the file the user last viewed, instead of the
+   * sequential open where each tab flashes into focus as it is read. Drafts and per-file
+   * overrides are fetched in parallel afterwards and merged in one more update.
+   *
+   * The old per-tab path activated each tab as it loaded, which both caused the flicker and
+   * incidentally created a Monaco model for every tab (the draft-restore prompt needs a model
+   * for any tab, not just the active one). Here the non-active models are primed explicitly
+   * once the editor mounts, so a later draft answer still applies without ever showing those
+   * tabs during startup.
+   */
   const restoreTabs = useCallback(
     async (entries: GroupTab[], activeKey: string): Promise<RestoreResult> => {
-      let restored = 0;
-      let skipped = 0;
-      for (const entry of entries) {
-        if (entry.path) {
-          if (!(await openPath(entry.path, { record: false }))) {
-            skipped++;
-            continue;
+      // Read every file in parallel; a dead path yields a null slot that becomes a skip.
+      const built = await Promise.all(
+        entries.map(async (entry): Promise<Tab | null> => {
+          if (entry.path) {
+            try {
+              const disk = await api.openFile(entry.path, false, encodingRef.current);
+              return {
+                id: nextId(),
+                path: disk.path,
+                name: basename(disk.path),
+                language: langOf(disk.path),
+                original: disk.content,
+                dirty: false,
+                isBinary: disk.binary,
+                encoding: disk.encoding,
+                bom: disk.bom,
+                bytes: disk.bytes,
+                fileSettings: EMPTY_FILE_SETTINGS,
+              };
+            } catch {
+              return null;
+            }
           }
-          const key = pathKey(entry.path);
-          if (entry.cursor > 0) {
-            cursors.current.set(key, entry.cursor);
-            pendingCursors.current.add(key);
+          if (entry.untitled) {
+            const trailing = /(\d+)$/.exec(entry.untitled);
+            if (trailing) untitledSeq.current = Math.max(untitledSeq.current, Number(trailing[1]));
+            return {
+              id: nextId(),
+              path: `untitled://${entry.untitled}`,
+              name: entry.untitled,
+              language: "plaintext",
+              original: "",
+              dirty: entry.content !== "",
+              initialValue: entry.content,
+              encoding: "UTF-8",
+              bom: false,
+              bytes: null,
+              fileSettings: EMPTY_FILE_SETTINGS,
+            };
           }
-        } else if (entry.untitled) {
-          await openScratch(entry.untitled, entry.content);
-          const trailing = /(\d+)$/.exec(entry.untitled);
-          if (trailing) untitledSeq.current = Math.max(untitledSeq.current, Number(trailing[1]));
-        } else {
-          skipped++;
-          continue;
-        }
-        restored++;
-      }
-      // openPath activated each tab as it went, so land on the one the user left selected.
-      const wanted = tabsRef.current.find(
+          return null;
+        })
+      );
+      const tabsBuilt = built.filter((t): t is Tab => t !== null);
+      const skipped = entries.length - tabsBuilt.length;
+
+      // Land on the file the user left selected, or the last tab as a fallback.
+      const wanted = tabsBuilt.find(
         (t) => isFileTab(t) && pathKey(t.path) === pathKey(activeKey)
       );
-      await activate(wanted?.id ?? tabsRef.current[tabsRef.current.length - 1]?.id ?? null);
-      return { restored, skipped };
+      const active = wanted ?? tabsBuilt[tabsBuilt.length - 1];
+      // Remember restored carets before the editor mounts: the active tab's is placed by the
+      // cursor-restore effect, and the rest are ready when that tab is eventually visited.
+      for (const entry of entries) {
+        if (entry.path && entry.cursor > 0) {
+          const key = pathKey(entry.path);
+          cursors.current.set(key, entry.cursor);
+          pendingCursors.current.add(key);
+        }
+      }
+
+      // One commit: the strip fills in all at once and the editor opens on the active file.
+      setTabs(tabsBuilt);
+      setActiveId(active ? active.id : null);
+
+      // Drafts and overrides are independent per file, so fetch them together.
+      const extras = await Promise.all(
+        tabsBuilt.map(async (tab) => {
+          if (!isFileTab(tab)) {
+            return { id: tab.id, overrides: EMPTY_FILE_SETTINGS, draft: null as Draft | null };
+          }
+          const [draft, view] = await Promise.all([
+            api.getDraft(tab.path).catch(() => null),
+            api.fileSettingsView(tab.path).catch(() => ({ overrides: EMPTY_FILE_SETTINGS })),
+          ]);
+          void api.allowAssetDir(dirname(tab.path)).catch(() => {});
+          return { id: tab.id, overrides: view.overrides, draft };
+        })
+      );
+      const overrideMap = new Map(extras.map((e) => [e.id, e.overrides]));
+      const queued: PendingRestore[] = [];
+      for (const e of extras) {
+        if (!e.draft) continue;
+        const tab = tabsBuilt.find((t) => t.id === e.id);
+        if (tab && e.draft.content !== tab.original) {
+          queued.push({ tabId: e.id, path: tab.path, name: tab.name, draft: e.draft });
+        } else if (tab) {
+          await api.clearDraft(tab.path).catch(() => {});
+        }
+      }
+      // Merge overrides in one update, then surface any draft prompts.
+      setTabs((prev) => prev.map((t) => {
+        const ov = overrideMap.get(t.id);
+        return ov ? { ...t, fileSettings: ov } : t;
+      }));
+      if (queued.length > 0) setRestoreQueue((q) => [...q, ...queued]);
+
+      // Prime the editor's model registry with every restored file so a switch shows its
+      // content immediately and a draft prompt can be applied to any tab, not just the
+      // active one. The active tab's model is owned by <Editor> and already exists.
+      const prime = () => {
+        const h = editorRef.current;
+        if (!h) {
+          requestAnimationFrame(prime);
+          return;
+        }
+        for (const tab of tabsBuilt) {
+          if (!isFileTab(tab)) continue;
+          const uri = h.monaco.Uri.parse(modelUri(tab.path));
+          if (h.monaco.editor.getModel(uri)) continue;
+          h.monaco.editor.createModel(tab.original, tab.language, uri);
+        }
+      };
+      requestAnimationFrame(prime);
+
+      return { restored: tabsBuilt.length, skipped };
     },
-    [activate, openPath, openScratch]
+    []
   );
 
   /**
