@@ -17,6 +17,7 @@ import Toast from "./components/Toast";
 import GroupChip from "./components/GroupChip";
 import DraftRestoreSummary from "./components/DraftRestoreSummary";
 import ComparePickerDialog from "./components/ComparePickerDialog";
+import CloseConfirmDialog from "./components/CloseConfirmDialog";
 import { useDraft } from "./hooks/useDraft";
 import { useEditorTabs } from "./hooks/useEditorTabs";
 import { useGroups } from "./hooks/useGroups";
@@ -170,6 +171,8 @@ export default function App() {
   const tabMenuRef = useRef<HTMLDivElement>(null);
   /** The tab whose name is being edited in place, or null. */
   const [renamingTab, setRenamingTab] = useState<number | null>(null);
+  /** The tab waiting on the unsaved-changes prompt, or null. */
+  const [closeAsk, setCloseAsk] = useState<number | null>(null);
   /** "Review individually" in the batch dialog: walk the queue one file at a time. */
   const [reviewEach, setReviewEach] = useState(false);
   /** A group is named by the user, so creating one needs a name first. */
@@ -684,6 +687,11 @@ export default function App() {
     };
     window.addEventListener("click", hide);
     window.addEventListener("contextmenu", hide);
+    // Capture phase, because a press that opens another menu never reaches a bubble-phase
+    // listener here: the Explorer rows call `stopPropagation` on their own context menu, and
+    // React dispatches from the root container, which sits below the window. Without this the
+    // two menus can be on screen at once, one of them dead to the click that raised the other.
+    window.addEventListener("mousedown", hide, true);
     const onBlur = () => setTabMenu(null);
     window.addEventListener("blur", onBlur);
     // The blur handler has to come back off too: as an inline arrow it was left
@@ -691,6 +699,7 @@ export default function App() {
     return () => {
       window.removeEventListener("click", hide);
       window.removeEventListener("contextmenu", hide);
+      window.removeEventListener("mousedown", hide, true);
       window.removeEventListener("blur", onBlur);
     };
   }, [tabMenu]);
@@ -791,7 +800,41 @@ export default function App() {
     [saveSettings]
   );
 
-  const { saveActive, openUntitled, openSettings, closeTab } = tabs;
+  /**
+   * Closing is asked for rather than assumed: a tab with unsaved edits has to be answered for
+   * first. Everything clean — and a comparison or the Settings panel, which have no buffer at
+   * risk — goes straight through.
+   */
+  const requestClose = useCallback(
+    (id: number) => {
+      const tab = tabs.tabs.find((t) => t.id === id);
+      if (!tab?.dirty) {
+        void tabs.closeTab(id);
+        return;
+      }
+      setCloseAsk(id);
+    },
+    [tabs]
+  );
+
+  /** The prompt's answer: the tab only goes if the save it asked for actually happened. */
+  const closeAfterSave = useCallback(
+    async (id: number) => {
+      setCloseAsk(null);
+      if (await tabs.saveTab(id)) void tabs.closeTab(id);
+    },
+    [tabs]
+  );
+
+  const closeWithoutSaving = useCallback(
+    (id: number) => {
+      setCloseAsk(null);
+      void tabs.closeTab(id);
+    },
+    [tabs]
+  );
+
+  const { saveActive, openUntitled, openSettings } = tabs;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
@@ -810,12 +853,12 @@ export default function App() {
         toggleSidebar();
       } else if (key === "w") {
         e.preventDefault();
-        if (tabs.activeId !== null) void closeTab(tabs.activeId);
+        if (tabs.activeId !== null) requestClose(tabs.activeId);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [closeTab, openFiles, openUntitled, saveActive, tabs.activeId, toggleSidebar]);
+  }, [openFiles, openUntitled, requestClose, saveActive, tabs.activeId, toggleSidebar]);
 
   const showSettings = tabs.activeTab?.isSettings === true;
   const sidebarShown = sidebarVisible && !showSettings;
@@ -830,6 +873,8 @@ export default function App() {
   );
   // The menu acts on the right-clicked tab, which is not necessarily the active one.
   const menuTab = tabs.tabs.find((t) => t.path === menuTabPath) ?? null;
+  /** The tab the unsaved-changes prompt is about; gone if it was closed from elsewhere. */
+  const closeAskTab = closeAsk === null ? null : tabs.tabs.find((t) => t.id === closeAsk) ?? null;
   /** Only a real file tab has a path for the path actions (reveal, copy, per-file settings). */
   const menuTabIsFile = !!menuTab && isFileTab(menuTab);
   const menuMinimapOn = menuTab?.fileSettings.minimap ?? settings.minimap;
@@ -1000,7 +1045,7 @@ const defaultModeFor = useCallback(
         }
         onPreviewMode={setPreviewMode}
         onSelect={tabs.selectTab}
-        onClose={tabs.closeTab}
+        onClose={requestClose}
         onReorder={tabs.moveTab}
         onTabContextMenu={(tabId, x, y) => setTabMenu({ tabId, x, y, panel: "root" })}
         renamingId={renamingTab}
@@ -1201,7 +1246,7 @@ const defaultModeFor = useCallback(
               <div
                 className="ctx-item"
                 onClick={() => {
-                  if (menuTab) void closeTab(menuTab.id);
+                  if (menuTab) requestClose(menuTab.id);
                   setTabMenu(null);
                 }}
               >
@@ -1372,6 +1417,15 @@ const defaultModeFor = useCallback(
             if (created) toast(t("grp.created", { name: created.name }));
           }}
           onCancel={() => setNewGroupOpen(false)}
+        />
+      )}
+
+      {closeAskTab && (
+        <CloseConfirmDialog
+          tab={closeAskTab}
+          onSave={() => void closeAfterSave(closeAskTab.id)}
+          onDiscard={() => closeWithoutSaving(closeAskTab.id)}
+          onCancel={() => setCloseAsk(null)}
         />
       )}
 

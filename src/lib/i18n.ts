@@ -66,6 +66,15 @@ const EN: Table = {
   "dialog.restore": "Restore draft",
   "dialog.discard": "Discard and open file",
 
+  "close.title": "Unsaved changes",
+  "close.body": "\"{name}\" has edits that were never saved.",
+  "close.draftNote": "Closing it keeps those edits as a draft, which is offered back the next time this file opens.",
+  "close.untitledNote": "This buffer has no file yet, and its text lives only in the group showing it, so closing it loses the edits.",
+  "close.save": "Save and close",
+  "close.discard": "Close without saving",
+  "close.discardScratch": "Close and lose it",
+  "close.cancel": "Cancel",
+
   "settings.nav": "Settings",
   "settings.catContext": "Context menu",
   "settings.catGeneral": "General",
@@ -316,6 +325,15 @@ const ZH: Table = {
   "dialog.ask": "要恢复上次未保存的编辑吗？",
   "dialog.restore": "恢复草稿",
   "dialog.discard": "丢弃并打开原文件",
+
+  "close.title": "有未保存的修改",
+  "close.body": "「{name}」有你没保存的编辑。",
+  "close.draftNote": "直接关闭会把编辑留成草稿，下次打开这个文件时再提示恢复。",
+  "close.untitledNote": "这个缓冲区还没有对应文件，内容只存在于当前分组里，关掉就找不回了。",
+  "close.save": "保存并关闭",
+  "close.discard": "不保存直接关闭",
+  "close.discardScratch": "关闭并丢弃",
+  "close.cancel": "取消",
 
   "settings.nav": "设置",
   "settings.catContext": "右键菜单",

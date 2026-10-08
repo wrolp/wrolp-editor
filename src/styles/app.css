@@ -1775,6 +1775,9 @@ body.resizing .editor-host {
 .modal-actions {
   display: flex;
   justify-content: flex-end;
+  /* Three of these buttons carry a full phrase ("Close without saving"), and a dialog that
+     is 420px wide on purpose is not going to shrink the labels to fit. */
+  flex-wrap: wrap;
   gap: 10px;
   margin-top: 20px;
 }

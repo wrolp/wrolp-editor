@@ -668,17 +668,28 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
     [draft, editorRef]
   );
 
-  const saveActive = useCallback(async () => {
-    const tab = tabsRef.current.find((t) => t.id === activeRef.current);
+  /**
+   * Write one tab back to disk. Resolves false when nothing was written, which is what a
+   * declined "Save as", a picture with no buffer, and a failed write all amount to: the
+   * caller has to know, because a close that was asked to save must not go ahead without it.
+   */
+  const saveTab = useCallback(async (id: number): Promise<boolean> => {
+    const tab = tabsRef.current.find((t) => t.id === id);
     const h = editorRef.current;
     // A picture has no buffer to write. Saving one would write the empty text that stands
     // in for it and destroy the file, so this is refused rather than merely discouraged.
-    if (!tab || !isFileTab(tab) || tab.isBinary || !h) return;
-    const content = h.editor.getValue();
+    if (!tab || !isFileTab(tab) || tab.isBinary || !h) return false;
+    // The editor only ever holds the active tab's text; another tab's live text is in its
+    // model. Reading the wrong one would save the file the user is looking at instead.
+    const content =
+      id === activeRef.current
+        ? h.editor.getValue()
+        : (h.monaco.editor.getModel(h.monaco.Uri.parse(modelUri(tab.path)))?.getValue() ??
+          tab.original);
     try {
       if (isUntitled(tab.path)) {
         const target = await pickSaveAs(tab.name);
-        if (!target) return;
+        if (!target) return false;
         const saved = await api.saveFile(target, content, encodingRef.current, false);
         draft.forget(tab.path);
         const oldUri = h.monaco.Uri.parse(modelUri(tab.path));
@@ -703,7 +714,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
         setTimeout(() => oldModel?.dispose(), 0);
         onFileOpened?.(dirname(saved.path));
         toast(t("menu.saved", { name: basename(saved.path) }));
-        return;
+        return true;
       }
 
       // Write back in the encoding this file was read in, or a GBK file would be
@@ -726,10 +737,17 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
         )
       );
       toast(t("menu.saved", { name: tab.name }));
+      return true;
     } catch (e) {
       toast(errorMessage(e));
+      return false;
     }
   }, [draft, editorRef, onFileOpened, toast]);
+
+  const saveActive = useCallback(
+    () => (activeRef.current === null ? Promise.resolve(false) : saveTab(activeRef.current)),
+    [saveTab]
+  );
 
   /** Resolve one queued draft. Loops use it so "Restore all" is not a second implementation. */
   const applyRestore = useCallback(
@@ -833,6 +851,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
     rekeyTabs,
     selectTab: activate,
     saveActive,
+    saveTab,
     onEditorChange,
     onCursorChange,
     setFileSettings,
