@@ -173,6 +173,21 @@ impl GroupStore {
     self
   }
 
+  /// Re-home every tab that pointed at a file or folder which has just been renamed.
+  ///
+  /// `active` is a tab key, so it travels with the tab it names; scratch tabs have no path
+  /// to move and are left as they are.
+  pub fn rekey_prefix(&mut self, old: &str, new: &str) {
+    for item in &mut self.items {
+      for tab in &mut item.tabs {
+        if !tab.path.is_empty() {
+          tab.path = crate::rename::rekey(&tab.path, old, new);
+        }
+      }
+      item.active = crate::rename::rekey(&item.active, old, new);
+    }
+  }
+
   pub fn group(&self, id: &str) -> Option<&Group> {
     self.items.iter().find(|g| g.id == id)
   }
@@ -495,6 +510,32 @@ mod tests {
     .stamp_active();
     assert_ne!(stamped.items[0].updated_at, "2026-01-01T00:00:00Z");
     assert_eq!(stamped.items[1].updated_at, "2026-01-01T00:00:00Z");
+  }
+
+  /// A renamed folder takes its whole subtree with it, while a sibling that merely shares
+  /// the prefix, and any scratch tab, stay exactly where they are.
+  #[test]
+  fn a_renamed_folder_takes_its_tabs_and_its_selection_along() {
+    let mut prepared = store(vec![Group {
+      active: r"C:\notes\a\x.txt".into(),
+      tabs: vec![
+        GroupTab {
+          path: r"C:\notes\a\x.txt".into(),
+          cursor: 3,
+          ..Default::default()
+        },
+        tab(r"C:\notes\b\y.txt"),
+        untitled("Untitled-1", "scratch"),
+      ],
+      ..grp("a", "first", vec![])
+    }])
+    .filled();
+    prepared.rekey_prefix(r"c:\notes\a", r"c:\notes\z");
+    let a = prepared.group("a").unwrap();
+    assert_eq!(a.tabs[0].path, r"c:\notes\z\x.txt");
+    assert_eq!(a.tabs[1].path, r"c:\notes\b\y.txt");
+    assert_eq!(a.tabs[2].untitled, "Untitled-1");
+    assert_eq!(a.active, r"c:\notes\z\x.txt");
   }
 
   fn two_groups() -> GroupStore {

@@ -46,6 +46,12 @@ export interface HistoryEntry {
   openedAt: string;
 }
 
+/** What moved after a rename: both spellings are backend-normalized. */
+export interface Renamed {
+  oldPath: string;
+  path: string;
+}
+
 export interface Settings {
   fontSize: number;
   minimap: boolean;
@@ -202,6 +208,13 @@ export const api = {
     invoke<OpenedFile>("open_file", { path, record, encoding: encoding ?? null }),
   saveFile: (path: string, content: string, encoding?: string, bom?: boolean) =>
     invoke<SavedFile>("save_file", { path, content, encoding: encoding ?? null, bom: bom ?? null }),
+  /**
+   * Rename a file or a folder on disk, and re-home every piece of state keyed by the old
+   * path. `name` is a bare name: the backend refuses one carrying a separator, because
+   * moving an entry between folders is a different action from renaming it.
+   */
+  renamePath: (path: string, name: string) =>
+    invoke<Renamed>("rename_path", { path, name }),
   getDraft: (path: string) => invoke<Draft | null>("get_draft", { path }),
   saveDraft: (path: string, content: string, cursor: number) =>
     invoke<Draft>("save_draft", { path, content, cursor }),

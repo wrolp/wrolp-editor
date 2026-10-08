@@ -41,6 +41,12 @@ interface Props {
   onTabContextMenu: (id: number, x: number, y: number) => void;
   /** Drop a dragged tab at this position in the strip. */
   onReorder: (id: number, toIndex: number) => void;
+  /** The tab whose name is being edited in place, or null. */
+  renamingId: number | null;
+  /** Renames the file behind the tab; resolves false when the name was refused. */
+  onRenameTab: (id: number, name: string) => Promise<boolean>;
+  /** Gives up on the tab rename in progress. */
+  onRenameTabEnd: () => void;
   onToggleSidebar: () => void;
   onNewFile: () => void;
   onOpenFiles: () => void;
@@ -108,6 +114,9 @@ export default function TitleBar(props: Props) {
         onClose={props.onClose}
         onContextMenu={props.onTabContextMenu}
         onReorder={props.onReorder}
+        renamingId={props.renamingId}
+        onRename={props.onRenameTab}
+        onRenameEnd={props.onRenameTabEnd}
       />
 
       {/* Drag handle for the empty space at the end of the tab strip. It sits before the

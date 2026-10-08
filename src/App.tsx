@@ -30,9 +30,11 @@ import {
   isMarkdown,
   isPreviewableImage,
   isSvg,
+  isUnder,
   isUntitled,
   modelUri,
   openableExtensions,
+  rekeyPath,
 } from "./lib/path";
 import { isFileTab, pathKey, type DiffStats, type EditStats, type EditorHandle } from "./lib/types";
 import {
@@ -166,6 +168,8 @@ export default function App() {
     panel: "root" | "move" | "copy" | "moveAll";
   } | null>(null);
   const tabMenuRef = useRef<HTMLDivElement>(null);
+  /** The tab whose name is being edited in place, or null. */
+  const [renamingTab, setRenamingTab] = useState<number | null>(null);
   /** "Review individually" in the batch dialog: walk the queue one file at a time. */
   const [reviewEach, setReviewEach] = useState(false);
   /** A group is named by the user, so creating one needs a name first. */
@@ -507,6 +511,58 @@ export default function App() {
       saveSettings({ sidebarRoot: dir });
     },
     [saveSettings]
+  );
+
+  /**
+   * Rename a file or a folder on disk, then move everything the app keys by its path.
+   *
+   * Pending drafts are written first: a debounced draft that landed after the backend had
+   * re-homed them would put one back under the old path. Everything after the rename is one
+   * synchronous batch, so no render can catch a tab whose model is still under the old one.
+   * Resolves false when the name was refused, which is what keeps the edit open.
+   */
+  const renameEntry = useCallback(
+    async (path: string, name: string): Promise<boolean> => {
+      await draft.flushAll();
+      const out = await api.renamePath(path, name).catch((e) => {
+        toast(errorMessage(e));
+        return null;
+      });
+      if (!out) return false;
+      // A name that differs only in spelling Windows folds away moves nothing, and there is
+      // then nothing to re-home.
+      if (out.path === out.oldPath) return true;
+      tabs.rekeyTabs(out.oldPath, out.path);
+      groupsRef.current.rekeyPaths(out.oldPath, out.path);
+      // Both of these are keyed by path: the layout choice for this session, and the file
+      // whose per-file panel is open.
+      setPreviewPref((prev) => {
+        const next: Record<string, PreviewMode> = {};
+        for (const [key, mode] of Object.entries(prev)) {
+          next[rekeyPath(key, out.oldPath, out.path)] = mode;
+        }
+        return next;
+      });
+      setFileSettingsPath((prev) => (prev === null ? prev : rekeyPath(prev, out.oldPath, out.path)));
+      if (rootRef.current && isUnder(rootRef.current, out.oldPath)) {
+        setSidebarRoot(rekeyPath(rootRef.current, out.oldPath, out.path));
+      }
+      refreshHistory();
+      toast(t("rename.done", { name: basename(out.path) }));
+      return true;
+    },
+    [draft, refreshHistory, setSidebarRoot, tabs, toast]
+  );
+
+  const renameTab = useCallback(
+    async (id: number, name: string) => {
+      const tab = tabs.tabs.find((t) => t.id === id);
+      if (!tab) return false;
+      if (!(await renameEntry(tab.path, name))) return false;
+      setRenamingTab(null);
+      return true;
+    },
+    [renameEntry, tabs.tabs]
   );
 
   const openFiles = useCallback(async () => {
@@ -947,6 +1003,9 @@ const defaultModeFor = useCallback(
         onClose={tabs.closeTab}
         onReorder={tabs.moveTab}
         onTabContextMenu={(tabId, x, y) => setTabMenu({ tabId, x, y, panel: "root" })}
+        renamingId={renamingTab}
+        onRenameTab={renameTab}
+        onRenameTabEnd={() => setRenamingTab(null)}
         onToggleSidebar={toggleSidebar}
         onNewFile={openUntitled}
         onOpenFiles={openFiles}
@@ -967,6 +1026,7 @@ const defaultModeFor = useCallback(
           onPickFolder={pickRootFolder}
           onOpenPath={tabs.openPath}
           onCompare={(path) => void startCompare(path)}
+          onRename={(target, name) => renameEntry(target.path, name)}
           onRemoveHistory={(path) =>
             api
               .removeHistory(path)
@@ -1177,18 +1237,29 @@ const defaultModeFor = useCallback(
               >
                 {t("title.menuSidebar")}
               </div>
-              {/* Only a file on disk can be the first side: an unsaved buffer has nothing
-                  to read the other file against. */}
+              {/* Both of these act on a file that is on disk: an unsaved buffer has no entry
+                  to rename, and nothing to read the other file against. */}
               {menuTabIsFile && !isUntitled(menuTabPath) && (
-                <div
-                  className="ctx-item"
-                  onClick={() => {
-                    void startCompare(menuTabPath);
-                    setTabMenu(null);
-                  }}
-                >
-                  {t("cmp.menu")}
-                </div>
+                <>
+                  <div
+                    className="ctx-item"
+                    onClick={() => {
+                      setRenamingTab(tabMenu.tabId);
+                      setTabMenu(null);
+                    }}
+                  >
+                    {t("side.menuRename")}
+                  </div>
+                  <div
+                    className="ctx-item"
+                    onClick={() => {
+                      void startCompare(menuTabPath);
+                      setTabMenu(null);
+                    }}
+                  >
+                    {t("cmp.menu")}
+                  </div>
+                </>
               )}
               <div
                 className="ctx-item"

@@ -4,6 +4,7 @@ mod draft;
 mod encoding;
 mod file_settings;
 mod group;
+mod rename;
 mod window;
 
 use tauri::Manager;
@@ -25,6 +26,7 @@ pub fn run() {
       commands::take_startup_files,
       commands::open_file,
       commands::save_file,
+      rename::rename_path,
       commands::get_draft,
       commands::save_draft,
       commands::clear_draft,

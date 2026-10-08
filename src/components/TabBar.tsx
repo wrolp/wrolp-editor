@@ -11,6 +11,73 @@ interface Props {
   onContextMenu: (id: number, x: number, y: number) => void;
   /** Drop a dragged tab at this position in the strip. */
   onReorder: (id: number, toIndex: number) => void;
+  /** The tab whose name is being edited in place, or null. */
+  renamingId: number | null;
+  /** Renames the file behind the tab; resolves false when the name was refused. */
+  onRename: (id: number, name: string) => Promise<boolean>;
+  /** Gives up on the edit in progress without touching the disk. */
+  onRenameEnd: () => void;
+}
+
+/**
+ * The label of a tab while it is being renamed.
+ *
+ * It stands in for the name rather than opening a dialog: the tab is the thing the user is
+ * pointing at, and the name is where renaming it reads as happening. An empty or unchanged
+ * name is a cancellation, the same way Explorer reads it.
+ */
+function TabNameInput({
+  initial,
+  onCommit,
+  onCancel,
+}: {
+  initial: string;
+  onCommit: (name: string) => Promise<boolean>;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initial);
+  const busy = useRef(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const submit = () => {
+    if (busy.current) return;
+    const next = value.trim();
+    if (!next || next === initial.trim()) {
+      onCancel();
+      return;
+    }
+    // One gesture can press Enter and take the focus away at the same time, and this is a
+    // rename of a file on disk rather than something safe to ask for twice.
+    busy.current = true;
+    void onCommit(next).then((ok) => {
+      busy.current = false;
+      // A refused name stays open, with the text picked out so it can be retyped.
+      if (!ok) inputRef.current?.select();
+    });
+  };
+
+  return (
+    <input
+      ref={inputRef}
+      className="tab-rename"
+      value={value}
+      autoFocus
+      onFocus={(e) => e.currentTarget.select()}
+      // The strip captures the pointer on a press anywhere inside a tab, which would leave
+      // this field without a caret and turn the edit into a drag of the tab it sits in.
+      onPointerDown={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.stopPropagation()}
+      onChange={(e) => setValue(e.target.value)}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === "Enter") submit();
+        if (e.key === "Escape") onCancel();
+      }}
+      onBlur={submit}
+    />
+  );
 }
 
 /** How far the pointer must travel before a press counts as a drag rather than a click. */
@@ -33,6 +100,9 @@ export default function TabBar({
   onClose,
   onContextMenu,
   onReorder,
+  renamingId,
+  onRename,
+  onRenameEnd,
 }: Props) {
   const barRef = useRef<HTMLDivElement>(null);
   /**
@@ -301,7 +371,15 @@ export default function TabBar({
           }
         >
           <TabIcon tab={tab} />
-          <span className="tab-name">{tab.name}</span>
+          {tab.id === renamingId ? (
+            <TabNameInput
+              initial={tab.name}
+              onCommit={(name) => onRename(tab.id, name)}
+              onCancel={onRenameEnd}
+            />
+          ) : (
+            <span className="tab-name">{tab.name}</span>
+          )}
           {tab.dirty && !tab.isSettings && <span className="tab-dirty">U</span>}
           {/* A real button, so it is reachable and closable from the keyboard: a press takes
               the pointer, which sends its `click` to the strip and lets `onPointerUp` do the

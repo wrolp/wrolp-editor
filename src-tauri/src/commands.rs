@@ -12,7 +12,7 @@ use tauri::{AppHandle, Manager, State};
 /// Files larger than this are refused so Monaco cannot freeze the window.
 const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
 
-const GROUPS_FILE: &str = "groups.json";
+pub(crate) const GROUPS_FILE: &str = "groups.json";
 /// Where the window was last left. Separate from settings: it changes on every drag.
 const WINDOW_FILE: &str = "window.json";
 /// Raster images: bytes with no text in them, so decoding them as text fails and the file
@@ -265,7 +265,7 @@ impl Settings {
   }
 }
 
-fn read_json<T: for<'de> Deserialize<'de>>(
+pub(crate) fn read_json<T: for<'de> Deserialize<'de>>(
   app: &AppHandle,
   file: &str,
 ) -> Result<Option<T>, String> {
@@ -291,7 +291,11 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
   std::fs::rename(&tmp, path).map_err(|e| format!("tmp_replace:{e}"))
 }
 
-fn write_json<T: Serialize>(app: &AppHandle, file: &str, value: &T) -> Result<(), String> {
+pub(crate) fn write_json<T: Serialize>(
+  app: &AppHandle,
+  file: &str,
+  value: &T,
+) -> Result<(), String> {
   let path = draft::store_dir(app)?.join(file);
   let json = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
   write_atomic(&path, &json).map_err(|e| format!("state_write:{file}: {e}"))
@@ -422,7 +426,7 @@ pub fn save_file(
 
 /// Directories a document may never be able to read, however it spells the path.
 /// Generated from the environment so the list follows the machine it runs on.
-fn protected_roots() -> Vec<PathBuf> {
+pub(crate) fn protected_roots() -> Vec<PathBuf> {
   [
     "USERPROFILE",
     "SystemRoot",
@@ -444,7 +448,7 @@ fn protected_roots() -> Vec<PathBuf> {
 /// to a root and read everything from there: `notes/a.md` reaching `../shared/logo.png`
 /// is a picture next door, whereas reaching the home directory is not. Refusing every
 /// ancestor of a protected root draws that line without needing a full path policy.
-fn refused_by_scope(dir: &Path, protected: &[PathBuf]) -> bool {
+pub(crate) fn refused_by_scope(dir: &Path, protected: &[PathBuf]) -> bool {
   // A drive root such as "C:\" has no parent to be anything but a whole disk.
   match dir.parent() {
     Some(parent) if !parent.as_os_str().is_empty() => {}

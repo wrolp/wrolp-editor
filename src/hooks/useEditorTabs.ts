@@ -1,7 +1,7 @@
 import { useCallback, useRef, useState, type RefObject } from "react";
 import { t } from "../lib/i18n";
 import { api, errorMessage, pickSaveAs, EMPTY_FILE_SETTINGS, type Draft, type FileSettings, type GroupTab } from "../lib/tauri";
-import { basename, dirname, isUntitled, langOf, modelUri } from "../lib/path";
+import { basename, dirname, isUntitled, langOf, modelUri, rekeyPath } from "../lib/path";
 import { tabKey, toStoredTab } from "../lib/group";
 import { pathKey, isFileTab, type CompareSide, type EditorHandle, type PendingRestore, type Tab } from "../lib/types";
 import type { DraftWriter } from "./useDraft";
@@ -307,6 +307,65 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
         };
       })
     );
+  }, []);
+
+  /**
+   * Re-home every tab whose file moved on disk, with the Monaco model, the remembered caret
+   * and the queued draft prompt that belong to it.
+   *
+   * The models are re-pointed rather than rebuilt: their buffers are the only place a file's
+   * unsaved text and undo stack live. Everything here runs in one synchronous block, so no
+   * render can ever show a tab whose model is still under the old path. Pending drafts must
+   * already be flushed by the caller, or they would be written back under the old key.
+   */
+  const rekeyTabs = useCallback((oldRoot: string, newRoot: string) => {
+    const moved = new Map<string, string>();
+    for (const tab of tabsRef.current) {
+      if (!isFileTab(tab) || isUntitled(tab.path)) continue;
+      const next = rekeyPath(tab.path, oldRoot, newRoot);
+      if (next !== tab.path) moved.set(pathKey(tab.path), next);
+    }
+    if (moved.size === 0) return;
+
+    const h = editorRef.current;
+    if (h) {
+      for (const tab of tabsRef.current) {
+        const next = moved.get(pathKey(tab.path));
+        if (!next) continue;
+        const model = h.monaco.editor.getModel(h.monaco.Uri.parse(modelUri(tab.path)));
+        // A tab that has never mounted has no model to move; Editor builds it under the new
+        // path the first time the tab is shown.
+        model?.updateUri(h.monaco.Uri.parse(modelUri(next)));
+      }
+    }
+    for (const [key, next] of moved) {
+      const target = pathKey(next);
+      const offset = cursors.current.get(key);
+      if (offset !== undefined) {
+        cursors.current.delete(key);
+        cursors.current.set(target, offset);
+      }
+      if (pendingCursors.current.delete(key)) pendingCursors.current.add(target);
+    }
+    const rekeyed = (tab: Tab): Tab => {
+      const next = moved.get(pathKey(tab.path));
+      return !next || !isFileTab(tab)
+        ? tab
+        : { ...tab, path: next, name: basename(next), language: langOf(next) };
+    };
+    setTabs((prev) => prev.map(rekeyed));
+    setRestoreQueue((q) =>
+      q.map((req) => {
+        const next = moved.get(pathKey(req.path));
+        return next ? { ...req, path: next, name: basename(next) } : req;
+      })
+    );
+    // This tab is what the editor keeps showing behind a Settings or comparison tab, so it
+    // has to move with its tab rather than be re-derived from the stale object.
+    const last = lastFileTabRef.current;
+    if (last) lastFileTabRef.current = rekeyed(last);
+    // A document can point at its own pictures, and the grant covered the old folder.
+    for (const next of moved.values()) void api.allowAssetDir(dirname(next)).catch(() => {});
   }, []);
 
   /** Serializable view of the open tabs, for the group store. */
@@ -771,6 +830,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
     closeTab,
     moveTab,
     clearAllTabs,
+    rekeyTabs,
     selectTab: activate,
     saveActive,
     onEditorChange,

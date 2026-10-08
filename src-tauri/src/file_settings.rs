@@ -161,6 +161,20 @@ pub fn clear(app: &AppHandle, path: &str) -> Result<(), String> {
   save(app, path, FileSettings::default()).map(|_| ())
 }
 
+/// Re-home the overrides of `old` and of everything inside it after a rename moved them.
+///
+/// The keys are normalized paths, so a folder rename carries the overrides of its whole
+/// subtree along rather than stranding them on a path that no longer exists.
+pub fn rekey_prefix(app: &AppHandle, old: &str, new: &str) -> Result<(), String> {
+  let mut store = load_store(app)?;
+  let items = std::mem::take(&mut store.items);
+  store.items = items
+    .into_iter()
+    .map(|(path, settings)| (crate::rename::rekey(&path, old, new), settings))
+    .collect();
+  write_store(app, &store)
+}
+
 /// The encoding preference for one file: its override first, then the global setting.
 /// Called from `open_file` so a forced encoding is honoured before decoding.
 pub fn encoding_for(app: &AppHandle, path: &str, fallback: &str) -> String {

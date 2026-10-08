@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { api, errorMessage, type Group, type GroupStore } from "../lib/tauri";
+import { rekeyPath } from "../lib/path";
 import { applySnapshot, newGroupId, sameName, type LiveSnapshot } from "../lib/group";
 
 const DEBOUNCE_MS = 400;
@@ -25,6 +26,8 @@ export interface GroupStoreCommitter {
   select(id: string): void;
   rename(id: string, name: string): NameProblem;
   isNameTaken(name: string, exceptId?: string): boolean;
+  /** Move the stored tab paths of a file or folder that was renamed on disk. */
+  rekeyPaths(oldRoot: string, newRoot: string): void;
   /** Forget the tabs; the group stays in the list. */
   clearContents(id: string): void;
   /** Drop the record. Drafts and files on disk are deliberately left alone. */
@@ -155,6 +158,34 @@ export function useGroups({ onError }: Options): GroupStoreCommitter {
     [isNameTaken, schedule]
   );
 
+  /**
+   * Re-home the tabs of every group that pointed at a renamed file or folder.
+   *
+   * The backend has already rewritten the store on disk, but the copy in memory is what gets
+   * saved next, so it has to move with it: otherwise the very next commit would put the old
+   * paths back and undo the groups that are not on screen.
+   */
+  const rekeyPaths = useCallback(
+    (oldRoot: string, newRoot: string) => {
+      const s = storeRef.current;
+      let changed = false;
+      const items = s.items.map((item) => {
+        const tabs = item.tabs.map((tab) => {
+          if (!tab.path) return tab;
+          const next = rekeyPath(tab.path, oldRoot, newRoot);
+          if (next === tab.path) return tab;
+          changed = true;
+          return { ...tab, path: next };
+        });
+        const active = rekeyPath(item.active, oldRoot, newRoot);
+        if (active !== item.active) changed = true;
+        return { ...item, tabs, active };
+      });
+      if (changed) schedule({ ...s, items });
+    },
+    [schedule]
+  );
+
   const clearContents = useCallback(
     (id: string) => {
       const s = storeRef.current;
@@ -190,6 +221,7 @@ export function useGroups({ onError }: Options): GroupStoreCommitter {
     select,
     rename,
     isNameTaken,
+    rekeyPaths,
     clearContents,
     remove,
   };

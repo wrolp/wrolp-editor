@@ -438,6 +438,23 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* The field that stands in for a tab's name while it is renamed. Bounded rather than
+   flexible: a tab sizes itself to its label, and an input that grew with every keystroke
+   would shove the rest of the strip sideways. */
+.tab .tab-rename {
+  flex: 0 1 auto;
+  width: 14ch;
+  min-width: 70px;
+  max-width: 220px;
+  height: 22px;
+  font: inherit;
+  color: var(--text-strong);
+  background: var(--bg);
+  border: 1px solid var(--accent-soft);
+  border-radius: 4px;
+  padding: 0 5px;
+  outline: none;
+}
 .tab .tab-dirty {
   color: var(--dirty);
   font-size: 12px;
@@ -1146,6 +1163,19 @@ body.resizing .editor-host {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* The field that stands in for a row's name while it is renamed. It takes the label's own
+   flex box, so the row keeps its width and the tree does not shift under the edit. */
+.tree-row .tree-rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  color: var(--text-strong);
+  background: var(--bg);
+  border: 1px solid var(--accent-soft);
+  border-radius: 4px;
+  padding: 0 4px;
+  outline: none;
 }
 
 .hist-item {

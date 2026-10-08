@@ -161,6 +161,45 @@ pub fn clear(app: &AppHandle, raw: &str) -> Result<bool, String> {
   }
 }
 
+/// Move the drafts of `old` and of everything inside it to the paths they now belong to.
+///
+/// A draft file is named by the hash of the path it was written for, so a rename cannot edit
+/// it in place: it has to be re-created under the new key and the old file removed. The
+/// `path` stored inside each one is what says where it belongs, since the name is opaque.
+pub fn rekey_prefix(app: &AppHandle, old: &str, new: &str) -> Result<(), String> {
+  let read = match std::fs::read_dir(drafts_dir(app)?) {
+    Ok(read) => read,
+    Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+    Err(e) => return Err(format!("dir_read:{e}")),
+  };
+  for item in read.flatten() {
+    let file = item.path();
+    if file.extension().and_then(|e| e.to_str()) != Some("draft") {
+      continue;
+    }
+    // A draft that will not parse is left alone: opening its file drops it, and a rename
+    // has no business destroying text it could not read.
+    let Ok(bytes) = std::fs::read(&file) else { continue };
+    let Ok(stored) = serde_json::from_slice::<Draft>(&bytes) else { continue };
+    let before = normalize_path(&stored.path);
+    let moved = crate::rename::rekey(&before, old, new);
+    if moved == before {
+      continue;
+    }
+    let target = draft_file(app, &moved)?;
+    let draft = Draft {
+      path: moved,
+      ..stored
+    };
+    let json = serde_json::to_vec(&draft).map_err(|e| e.to_string())?;
+    crate::commands::write_atomic(&target, &json)?;
+    if target != file {
+      let _ = std::fs::remove_file(&file);
+    }
+  }
+  Ok(())
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;

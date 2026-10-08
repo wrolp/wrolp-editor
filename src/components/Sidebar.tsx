@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { IconFolder, IconGoUp, IconTreeChevron } from "./icons";
 import FileIcon from "./FileIcon";
 import { t } from "../lib/i18n";
@@ -12,11 +12,15 @@ import {
 } from "../lib/tauri";
 import { pathKey } from "../lib/types";
 
-/** A tree node the Explorer context menu is acting on. */
-interface MenuTarget {
+/** A tree node an action is aimed at. `name` keeps the folder's trailing separator. */
+interface NodeTarget {
   path: string;
   name: string;
   isDir: boolean;
+}
+
+/** A tree node the Explorer context menu is acting on. */
+interface MenuTarget extends NodeTarget {
   x: number;
   y: number;
 }
@@ -71,6 +75,77 @@ function TreeTooltip({ children, name, detail }: TipProps) {
   );
 }
 
+/**
+ * The name of a tree row, or the input that stands in for it while that row is renamed.
+ *
+ * The text being typed lives here rather than in the sidebar: one row edits at a time, and
+ * the draft belongs to that edit alone, so nothing has to track which node it came from.
+ * An empty or unchanged name is taken as a cancellation, the same way Explorer reads it.
+ */
+function RowName({
+  editing,
+  name,
+  onCommit,
+  onCancel,
+}: {
+  editing: boolean;
+  name: string;
+  onCommit: (name: string) => Promise<boolean>;
+  onCancel: () => void;
+}) {
+  // A folder's listing carries a trailing separator, which is not part of its name.
+  const current = name.replace(/\/$/, "");
+  const [value, setValue] = useState(current);
+  const busy = useRef(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  // A row that was already on screen when the edit started has to be seeded from the entry
+  // rather than keep whatever the last edit left behind.
+  useEffect(() => {
+    if (editing) setValue(current);
+  }, [editing, current]);
+
+  if (!editing) return <span className="tn">{current}</span>;
+
+  const submit = () => {
+    if (busy.current) return;
+    const next = value.trim();
+    if (!next || next === current) {
+      onCancel();
+      return;
+    }
+    // One gesture can both press Enter and take the focus away, and the rename is a
+    // filesystem operation that must not be asked for twice.
+    busy.current = true;
+    void onCommit(next).then((ok) => {
+      busy.current = false;
+      // A refused name stays open, with the text picked out so it can be retyped.
+      if (!ok) inputRef.current?.select();
+    });
+  };
+
+  return (
+    <input
+      ref={inputRef}
+      className="tree-rename"
+      value={value}
+      autoFocus
+      onFocus={(e) => e.currentTarget.select()}
+      // The row opens the file on any click that reaches it, and the sidebar dismisses an
+      // edit on any click it does not own, so neither must see these.
+      onClick={(e) => e.stopPropagation()}
+      onMouseDown={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.stopPropagation()}
+      onChange={(e) => setValue(e.target.value)}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === "Enter") submit();
+        if (e.key === "Escape") onCancel();
+      }}
+      onBlur={submit}
+    />
+  );
+}
+
 interface TreeHandlers {
   activePath: string | null;
   onOpenPath: (path: string) => void;
@@ -84,7 +159,19 @@ interface TreeHandlers {
    */
   expandLimit: number;
   /** Opens the Explorer context menu for a node. */
-  onContextMenu: (target: Omit<MenuTarget, "x" | "y">, x: number, y: number) => void;
+  onContextMenu: (target: NodeTarget, x: number, y: number) => void;
+  /** `pathKey` of the node whose name is being edited in place, or null. */
+  renaming: string | null;
+  /** Renames a node on disk; resolves false when the name was refused. */
+  onRename: (target: NodeTarget, name: string) => Promise<boolean>;
+  /** Gives up on the edit in progress without touching the disk. */
+  onRenameEnd: () => void;
+  /**
+   * Per-folder refetch counters. A rename only invalidates the listing of the folder that
+   * held the entry, and re-reading just that one is what leaves the rest of the tree
+   * expanded the way the user left it.
+   */
+  refreshed: Record<string, number>;
 }
 
 interface NodeProps extends TreeHandlers {
@@ -104,15 +191,21 @@ function FileRow({
   depth,
   activePath,
   onOpenPath,
+  renaming,
+  onRename,
+  onRenameEnd,
   onContextMenu: openMenu,
 }: NodeProps & { entry: FsEntry }) {
   const active = !!activePath && pathKey(activePath) === pathKey(entry.path);
+  const editing = renaming === pathKey(entry.path);
   return (
     <TreeTooltip name={entry.name} detail={entry.path}>
       <div
         className={`tree-row file${active ? " ctx-active" : ""}`}
         style={indent(depth)}
-        onClick={() => onOpenPath(entry.path)}
+        // A click inside the row is the edit taking or losing the focus, not a request to
+        // open the file the row happens to name.
+        onClick={editing ? undefined : () => onOpenPath(entry.path)}
         onContextMenu={(e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -123,7 +216,14 @@ function FileRow({
         <span className="ti">
           <FileIcon name={entry.name} />
         </span>
-        <span className="tn">{entry.name}</span>
+        <RowName
+          editing={editing}
+          name={entry.name}
+          onCommit={(name) =>
+            onRename({ path: entry.path, name: entry.name, isDir: false }, name)
+          }
+          onCancel={onRenameEnd}
+        />
       </div>
     </TreeTooltip>
   );
@@ -132,32 +232,46 @@ function FileRow({
 function FolderNode({
   entry,
   depth,
+  renaming,
+  onRename,
+  onRenameEnd,
   onContextMenu: openMenu,
   expandLimit,
+  refreshed,
   ...handlers
 }: NodeProps & { entry: FsEntry }) {
   // The initial state only: a folder the user folded stays folded, so the setting applies
   // when a directory is opened (or refreshed), not to the tree already on screen.
   const [collapsed, setCollapsed] = useState(depth >= expandLimit);
-  const [children, setChildren] = useState<FsEntry[] | null>(null);
+  /**
+   * The listing, with the refetch counter it was read for. Keeping the counter next to the
+   * entries is what lets one folder be re-read without touching the rest of the tree: a
+   * plain state reset would fold it as well, and the rows the user opened are the reason
+   * the folder was worth expanding.
+   */
+  const [listing, setListing] = useState<{ token: number; entries: FsEntry[] } | null>(null);
+  const token = refreshed[pathKey(entry.path)] ?? 0;
+  const editing = renaming === pathKey(entry.path);
 
   useEffect(() => {
-    if (collapsed || children !== null) return;
+    if (collapsed || listing?.token === token) return;
     let alive = true;
     api
       .listDir(entry.path)
       .then((list) => {
-        if (alive) setChildren(list);
+        if (alive) setListing({ token, entries: list });
       })
       .catch((e) => {
-        if (alive) setChildren([]);
+        if (alive) setListing({ token, entries: [] });
         handlers.onError(`${entry.name}: ${errorMessage(e)}`);
       });
     return () => {
       alive = false;
     };
     // handlers only report failures; they are not part of the fetch condition
-  }, [collapsed, children, entry.name, entry.path]);
+  }, [collapsed, listing?.token, token, entry.name, entry.path]);
+
+  const children = listing?.token === token ? listing.entries : null;
 
   return (
     <>
@@ -165,7 +279,7 @@ function FolderNode({
         <div
           className={`tree-row folder${collapsed ? " collapsed" : ""}`}
           style={indent(depth)}
-          onClick={() => setCollapsed((v) => !v)}
+          onClick={editing ? undefined : () => setCollapsed((v) => !v)}
           onContextMenu={(e) => {
             e.preventDefault();
             e.stopPropagation();
@@ -180,7 +294,14 @@ function FolderNode({
           <span className="ti">
             <IconFolder />
           </span>
-          <span className="tn">{entry.name.replace(/\/$/, "")}</span>
+          <RowName
+            editing={editing}
+            name={entry.name}
+            onCommit={(name) =>
+              onRename({ path: entry.path, name: entry.name, isDir: true }, name)
+            }
+            onCancel={onRenameEnd}
+          />
         </div>
       </TreeTooltip>
       {!collapsed &&
@@ -194,7 +315,11 @@ function FolderNode({
             entries={children}
             depth={depth + 1}
             expandLimit={expandLimit}
+            renaming={renaming}
+            onRename={onRename}
+            onRenameEnd={onRenameEnd}
             onContextMenu={openMenu}
+            refreshed={refreshed}
           />
         ))}
     </>
@@ -215,7 +340,10 @@ function TreeLevel({ entries, depth, ...handlers }: LevelProps) {
   );
 }
 
-interface Props extends Omit<TreeHandlers, "onContextMenu" | "expandLimit"> {
+interface Props extends Omit<
+  TreeHandlers,
+  "onContextMenu" | "expandLimit" | "renaming" | "onRenameEnd" | "refreshed"
+> {
   visible: boolean;
   width: number;
   view: "explorer" | "history";
@@ -254,6 +382,9 @@ export default function Sidebar(props: Props) {
   const [entries, setEntries] = useState<FsEntry[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [menu, setMenu] = useState<MenuTarget | null>(null);
+  /** `pathKey` of the node whose name is being edited in place. */
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [refreshed, setRefreshed] = useState<Record<string, number>>({});
   // 0 means "collapse everything", which is what having the setting off has to mean: a
   // negative or missing depth would otherwise expand the top level by accident.
   const expandLimit = props.expandFolders ? Math.max(1, Math.floor(props.expandDepth)) : 0;
@@ -298,6 +429,29 @@ export default function Sidebar(props: Props) {
       : path;
   };
 
+  /**
+   * Rename a node through the caller, then re-read just the folder that held it. Only a
+   * rename that the disk accepted gets that far: a refused name leaves the edit open so it
+   * can be corrected.
+   */
+  const commitRename = async (target: NodeTarget, name: string) => {
+    if (!(await props.onRename(target, name))) return false;
+    setRenaming(null);
+    const parent = parentOf(target.path);
+    if (!parent) {
+      // A folder the tree is rooted at: the caller re-points the Explorer, and the new
+      // `rootDir` brings the new listing by itself.
+      setRefreshKey((k) => k + 1);
+      return true;
+    }
+    const key = pathKey(parent);
+    setRefreshed((prev) => ({ ...prev, [key]: (prev[key] ?? 0) + 1 }));
+    return true;
+  };
+
+  // The Explorer's own folder is one more listing, so renaming the root re-reads it here.
+  const rootToken = rootDir ? (refreshed[pathKey(rootDir)] ?? 0) : 0;
+
   useEffect(() => {
     if (!rootDir) {
       setEntries([]);
@@ -317,8 +471,8 @@ export default function Sidebar(props: Props) {
     return () => {
       alive = false;
     };
-    // Re-fetch on view switch and explicit refresh so the listing cannot go stale.
-  }, [rootDir, onError, view, refreshKey]);
+    // Re-fetch on view switch, explicit refresh and a rename in this folder.
+  }, [rootDir, onError, view, refreshKey, rootToken]);
 
   if (!visible) return null;
 
@@ -377,6 +531,10 @@ export default function Sidebar(props: Props) {
               onCompare={onCompare}
               expandLimit={expandLimit}
               onError={onError}
+              renaming={renaming}
+              onRename={commitRename}
+              onRenameEnd={() => setRenaming(null)}
+              refreshed={refreshed}
               onContextMenu={(target, x, y) => setMenu({ ...target, x, y })}
             />
           )}
@@ -446,6 +604,17 @@ export default function Sidebar(props: Props) {
             }}
           >
             {t("side.menuReveal")}
+          </div>
+          <div className="ws-sep" />
+          {/* The edit replaces this menu, so the node it was aimed at is remembered first. */}
+          <div
+            className="ctx-item"
+            onClick={() => {
+              setRenaming(pathKey(menu.path));
+              setMenu(null);
+            }}
+          >
+            {t("side.menuRename")}
           </div>
           <div className="ws-sep" />
           <div className="ctx-item" onClick={() => { void copy(menu.name); setMenu(null); }}>

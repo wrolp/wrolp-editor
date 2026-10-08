@@ -1,3 +1,5 @@
+import { pathKey } from "./types";
+
 const EXT_LANG: Record<string, string> = {
   txt: "plaintext",
   md: "markdown",
@@ -64,6 +66,30 @@ export function langOf(path: string): string {
 /** New, never-saved files have no real path; they are marked with this prefix. */
 export function isUntitled(path: string): boolean {
   return path.startsWith("untitled://");
+}
+
+/**
+ * Whether `path` is `root` itself or sits inside it, compared the way the app compares
+ * paths everywhere else: separators unified, case ignored. The boundary has to be a
+ * separator, because `C:\ab` is not inside `C:\a`.
+ */
+export function isUnder(path: string, root: string): boolean {
+  const key = pathKey(path);
+  const from = pathKey(root);
+  if (key === from) return true;
+  const boundary = key.charAt(from.length);
+  return key.startsWith(from) && boundary === "/";
+}
+
+/**
+ * Swap the leading `oldRoot` for `newRoot`, leaving the rest of the path alone.
+ *
+ * A file rename matches the exact path only, while a folder rename carries its whole subtree
+ * along, which is why one rule covers both sides of a rename.
+ */
+export function rekeyPath(path: string, oldRoot: string, newRoot: string): string {
+  if (pathKey(path) === pathKey(oldRoot)) return newRoot;
+  return isUnder(path, oldRoot) ? newRoot + path.slice(oldRoot.length) : path;
 }
 
 /** Monaco model URI: one-to-one with the backend-normalized path, so a file reuses its model. */
