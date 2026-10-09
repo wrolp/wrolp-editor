@@ -456,6 +456,11 @@ interface Props extends Omit<
    */
   onCreate: (dir: string, name: string, isDir: boolean) => Promise<boolean>;
   /**
+   * Copies `source` into the folder `target`, whole if it is a folder. Resolves false when
+   * nothing was copied, in which case the tree is left showing what it already has.
+   */
+  onPaste: (source: string, target: string) => Promise<boolean>;
+  /**
    * Deletes a file, or a folder and everything in it. The prompt is asked here rather than
    * in the tree, and the caller is only reached once the user has answered it.
    */
@@ -488,6 +493,15 @@ export default function Sidebar(props: Props) {
   const [creating, setCreating] = useState<CreatingTarget | null>(null);
   /** The node waiting on the delete prompt, or null. */
   const [deleting, setDeleting] = useState<NodeTarget | null>(null);
+  /**
+   * What "Copy" last took, waiting to be pasted.
+   *
+   * A path rather than the bytes: the tree is a view of the disk, and the copy is done by
+   * the backend at paste time, so a folder copied and then edited still pastes what is there
+   * now. It is also why the entry has to still exist when the paste happens — a copy is a
+   * promise about a place, not a snapshot carried across.
+   */
+  const [clipboard, setClipboard] = useState<NodeTarget | null>(null);
   const [refreshed, setRefreshed] = useState<Record<string, number>>({});
   // 0 means "collapse everything", which is what having the setting off has to mean: a
   // negative or missing depth would otherwise expand the top level by accident.
@@ -568,6 +582,28 @@ export default function Sidebar(props: Props) {
     setCreating(null);
     bumpFolder(dir);
     return true;
+  };
+
+  /**
+   * A paste lands inside a folder, and a file has no inside. Right-clicking one still means
+   * "here", so the folder holding it is where the copy goes — the same reading Explorer
+   * gives, and the one that makes a paste offered next to any row do something useful.
+   */
+  const pasteTarget = (target: NodeTarget | null): string | null => {
+    if (!target) return null;
+    // A right-click on the blank area names the folder being shown, which is the folder the
+    // copy goes into — the only reading that is not a dead end.
+    if (!target.path) return rootDir;
+    if (target.isDir) return target.path;
+    return parentOf(target.path) || rootDir;
+  };
+
+  /** Paste the copied entry into a folder, then re-read that folder so the copy shows. */
+  const runPaste = async (target: NodeTarget | null) => {
+    const dir = pasteTarget(target);
+    if (!clipboard || !dir) return;
+    if (!(await props.onPaste(clipboard.path, dir))) return;
+    bumpFolder(dir);
   };
 
   /**
@@ -779,6 +815,19 @@ export default function Sidebar(props: Props) {
                 >
                   {t("side.menuNewFolder")}
                 </div>
+                {/* The folder being shown has no row of its own, so this is the only place
+                    a paste into it can be asked for. */}
+                {clipboard && (
+                  <div
+                    className="ctx-item"
+                    onClick={() => {
+                      void runPaste({ path: "", name: "", isDir: true });
+                      setMenu(null);
+                    }}
+                  >
+                    {t("side.menuPaste")}
+                  </div>
+                )}
               </>
             )
           ) : (
@@ -848,6 +897,33 @@ export default function Sidebar(props: Props) {
               >
                 {t("side.menuRename")}
               </div>
+              <div className="ws-sep" />
+              {/* A copy here and a paste there, so both are offered on every row: what is
+                  taken is the path, not the bytes, which is what lets a folder be copied
+                  whole and pasted somewhere the tree can then show it. */}
+              <div
+                className="ctx-item"
+                onClick={() => {
+                  setClipboard({ path: menu.path, name: menu.name, isDir: menu.isDir });
+                  // Nothing else moves when a copy is taken, so without a word about it the
+                  // menu closing would be the only sign that anything happened.
+                  onError(t("side.copyReady", { name: menu.name.replace(/\/$/, "") }));
+                  setMenu(null);
+                }}
+              >
+                {t("side.menuCopy")}
+              </div>
+              {clipboard && (
+                <div
+                  className="ctx-item"
+                  onClick={() => {
+                    void runPaste(menu);
+                    setMenu(null);
+                  }}
+                >
+                  {t("side.menuPaste")}
+                </div>
+              )}
               <div className="ws-sep" />
               <div className="ctx-item" onClick={() => { void copy(menu.name); setMenu(null); }}>
                 {t("side.menuCopyName")}

@@ -235,6 +235,14 @@ export const api = {
   createDir: (parent: string, name: string) =>
     invoke<FsEntry>("create_dir", { parent, name }),
   /**
+   * Copy a file, or a folder and everything in it, into `target`.
+   *
+   * Nothing is replaced: the copy takes the next free spelling of the name, which is why the
+   * entry it made is handed back — the caller shows the name the paste actually got.
+   */
+  copyEntry: (source: string, target: string) =>
+    invoke<FsEntry>("copy_entry", { source, target }),
+  /**
    * Delete a file, or a folder and everything in it, and stop the store pointing at it.
    *
    * Nothing is moved, so there is nothing to undo and nothing reaches the Recycle Bin: the

@@ -601,6 +601,27 @@ export default function App() {
   );
 
   /**
+   * Paste a copy of one entry into a folder.
+   *
+   * Nothing is replaced at the destination: the backend takes the next free spelling of the
+   * name, and the name it got is what gets shown, so a paste that had to be numbered is not
+   * a surprise discovered later. A new file is not opened — a copy is a file beside another,
+   * and opening it would take the user's caret to a place they did not choose.
+   */
+  const pasteEntry = useCallback(
+    async (source: string, target: string): Promise<boolean> => {
+      const made = await api.copyEntry(source, target).catch((e) => {
+        toast(errorMessage(e));
+        return null;
+      });
+      if (!made) return false;
+      toast(t("side.pasted", { name: made.name.replace(/\/$/, "") }));
+      return true;
+    },
+    [toast]
+  );
+
+  /**
    * Delete a file, or a folder and everything in it. Only reached once the prompt has been
    * answered, which is the only thing standing between a stray click and a recursive delete.
    *
@@ -1192,6 +1213,7 @@ const defaultModeFor = useCallback(
             setSidebarRoot(dir);
           }}
           onCreate={createEntry}
+          onPaste={pasteEntry}
           onDelete={deleteEntry}
           onError={toast}
         />

@@ -1,9 +1,10 @@
-//! Creating and deleting files and folders, and letting go of the state that only existed
-//! while they did.
+//! Creating, copying and deleting files and folders, and letting go of the state that only
+//! existed while they did.
 //!
-//! A path is the identity of a document across the whole store (see `rename`), so neither end
-//! of this is only a filesystem operation: a typed name has to be one this app is willing to
-//! put on disk, and a delete has to stop the store pointing at something that is gone.
+//! A path is the identity of a document across the whole store (see `rename`), so none of
+//! this is only a filesystem operation: a typed name has to be one this app is willing to put
+//! on disk, a copy has to land on a name that is free rather than on top of somebody's file,
+//! and a delete has to stop the store pointing at something that is gone.
 //!
 //! What a delete deliberately does *not* do is throw the drafts away. Those hold the unsaved
 //! text of files that were open when the entry went; a file deleted by mistake and created
@@ -112,6 +113,139 @@ pub fn create_dir(parent: String, name: String) -> Result<FsEntry, String> {
     path,
     is_dir: true,
   })
+}
+
+/// The name halves of a file name, so a copy can be numbered without losing its type.
+///
+/// `notes.txt` becomes `("notes", ".txt")`, and a name with no extension — including a
+/// dotfile, which *is* its own stem — keeps itself and gains an empty suffix.
+fn split_ext(name: &str) -> (String, String) {
+  let path = Path::new(name);
+  let stem = path
+    .file_stem()
+    .map(|s| s.to_string_lossy().to_string())
+    .unwrap_or_else(|| name.to_string());
+  let ext = match path.extension() {
+    Some(e) => format!(".{}", e.to_string_lossy()),
+    None => String::new(),
+  };
+  (stem, ext)
+}
+
+/// A path inside `dir` that nothing is using yet.
+///
+/// A copy keeps the name the user copied, because that is the name they asked for, and takes
+/// the next free spelling of it rather than writing over the file that is already there: the
+/// one thing a paste must never do is destroy the file it landed on.
+fn free_name(dir: &Path, name: &str) -> Result<PathBuf, String> {
+  let direct = dir.join(name);
+  if !direct.exists() {
+    return Ok(direct);
+  }
+  let (stem, ext) = split_ext(name);
+  for n in 2..1000 {
+    let numbered = dir.join(format!("{stem} ({n}){ext}"));
+    if !numbered.exists() {
+      return Ok(numbered);
+    }
+  }
+  Err("copy_name_full".into())
+}
+
+/// Copy the contents of `from` into `to`, both of them folders that already exist.
+///
+/// Links are never followed: where one points is outside the folder that was copied, and
+/// walking it could drag in a whole drive the user never named. Skipping them is also what
+/// makes the walk finite even before the self-check above has had its say.
+fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
+  std::fs::create_dir_all(to).map_err(|e| format!("dir_create:{e}"))?;
+  let read = std::fs::read_dir(from).map_err(|e| format!("dir_read:{e}"))?;
+  for item in read.flatten() {
+    let meta = match item.file_type() {
+      Ok(m) => m,
+      Err(_) => continue,
+    };
+    if meta.is_symlink() {
+      continue;
+    }
+    let target = to.join(item.file_name());
+    if meta.is_dir() {
+      copy_tree(&item.path(), &target)?;
+    } else {
+      std::fs::copy(item.path(), &target).map_err(|e| format!("copy_failed:{e}"))?;
+    }
+  }
+  Ok(())
+}
+
+/// Copy a file, or a folder and everything in it, into a folder.
+///
+/// The copy lands beside whatever else is there rather than replacing it, which is why the
+/// name it ends up with is the answer this returns: the caller shows the real name, so a
+/// paste that had to be numbered is not a surprise found later.
+#[tauri::command]
+pub fn copy_entry(source: String, target: String) -> Result<FsEntry, String> {
+  let from = draft::normalize_path(&source);
+  let dir = draft::normalize_path(&target);
+  if from.is_empty() || dir.is_empty() {
+    return Err("path_empty".into());
+  }
+  let from = Path::new(&from);
+  let dir = Path::new(&dir);
+  let meta = from
+    .symlink_metadata()
+    .map_err(|e| format!("copy_not_found:{e}"))?;
+  if !dir.is_dir() {
+    return Err("copy_no_target".into());
+  }
+  // The same line the asset scope draws, for the same reason: a paste into the system
+  // directory or the user's whole profile is not something this app should do.
+  if refused_by_scope(dir, &protected_roots()) {
+    return Err("copy_refused".into());
+  }
+  if meta.file_type().is_symlink() {
+    // A link is not a file to copy: what would be copied is whatever it points at, which
+    // the user did not name and cannot see from the tree.
+    return Err("copy_link".into());
+  }
+  let name = from
+    .file_name()
+    .map(|n| n.to_string_lossy().to_string())
+    .ok_or("copy_no_name")?;
+  let to = free_name(dir, &name)?;
+  // Copying a folder into itself would walk into the copy it is making and never stop.
+  if under(
+    &draft::normalize_path(&to.to_string_lossy()),
+    &draft::normalize_path(&from.to_string_lossy()),
+  ) {
+    return Err("copy_into_itself".into());
+  }
+  let is_dir = meta.is_dir();
+  if is_dir {
+    copy_tree(from, &to)?;
+  } else {
+    std::fs::copy(from, &to).map_err(|e| format!("copy_failed:{e}"))?;
+  }
+  let path = draft::normalize_path(&to.to_string_lossy());
+  Ok(FsEntry {
+    // The trailing separator is how a listing says "folder", and a copy is shown by the
+    // same listing.
+    name: if is_dir {
+      format!("{}/", name_at(&to))
+    } else {
+      name_at(&to)
+    },
+    path,
+    is_dir,
+  })
+}
+
+/// The last segment of `path`, which for a numbered copy is the name it was given.
+fn name_at(path: &Path) -> String {
+  path
+    .file_name()
+    .map(|n| n.to_string_lossy().to_string())
+    .unwrap_or_default()
 }
 
 /// Delete a file, or a folder and everything in it.
@@ -320,6 +454,74 @@ mod tests {
         "{name} should be refused"
       );
     }
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn a_name_is_halved_so_a_numbered_copy_keeps_its_type() {
+    assert_eq!(split_ext("notes.txt"), ("notes".to_string(), ".txt".into()));
+    assert_eq!(split_ext("notes"), ("notes".to_string(), String::new()));
+    assert_eq!(
+      split_ext("archive.tar.gz"),
+      ("archive.tar".to_string(), ".gz".into())
+    );
+    // A dotfile is its own stem, so numbering it does not turn it into ".gitignore.txt".
+    assert_eq!(split_ext(".gitignore"), (".gitignore".to_string(), String::new()));
+  }
+
+  #[test]
+  fn a_copy_beside_a_name_that_is_taken_is_numbered_not_overwritten() {
+    let dir = scratch("number");
+    create_file(dir.clone(), "notes.txt".into()).expect("first");
+    let second = copy_entry(format!("{dir}\\notes.txt"), dir.clone()).expect("second");
+    assert_eq!(second.name, "notes (2).txt");
+    // The original is still the original: a paste that landed on a name wrote nothing.
+    let third = copy_entry(format!("{dir}\\notes.txt"), dir.clone()).expect("third");
+    assert_eq!(third.name, "notes (3).txt");
+    let kept = std::fs::read_to_string(format!("{dir}\\notes.txt")).expect("read");
+    assert_eq!(kept, "", "the file already there is untouched");
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn a_folder_copies_whole_and_takes_a_numbered_name_of_its_own() {
+    let dir = scratch("tree");
+    create_dir(dir.clone(), "src".into()).expect("folder");
+    create_file(format!("{dir}\\src"), "a.txt".into()).expect("file");
+    create_dir(format!("{dir}\\src"), "deep".into()).expect("nested");
+    create_file(format!("{dir}\\src\\deep"), "b.txt".into()).expect("nested file");
+
+    let copy = copy_entry(format!("{dir}\\src"), dir.clone()).expect("copied");
+    assert!(copy.is_dir);
+    let root = PathBuf::from(&copy.path);
+    assert!(root.join("a.txt").is_file(), "files come along");
+    assert!(
+      root.join("deep").join("b.txt").is_file(),
+      "and whole folders do too"
+    );
+    // Two folders cannot share a name, so the second is numbered like a file would be.
+    let again = copy_entry(format!("{dir}\\src"), dir.clone()).expect("copied again");
+    assert_ne!(again.path, copy.path);
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn a_folder_cannot_be_copied_into_itself() {
+    let dir = scratch("self");
+    create_dir(dir.clone(), "src".into()).expect("folder");
+    create_dir(format!("{dir}\\src"), "inner".into()).expect("inner");
+    // The walk would step into the copy it is making and never come back.
+    assert!(copy_entry(format!("{dir}\\src"), format!("{dir}\\src\\inner")).is_err());
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn a_paste_needs_a_folder_that_is_there() {
+    let dir = scratch("target");
+    create_file(dir.clone(), "notes.txt".into()).expect("file");
+    assert!(copy_entry(format!("{dir}\\notes.txt"), format!("{dir}\\nope")).is_err());
+    // And so does a copy of something that is not there at all.
+    assert!(copy_entry(format!("{dir}\\missing.txt"), dir.clone()).is_err());
     let _ = std::fs::remove_dir_all(&dir);
   }
 

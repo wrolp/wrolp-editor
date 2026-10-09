@@ -31,6 +31,7 @@ pub fn run() {
       rename::rename_path,
       entry::create_file,
       entry::create_dir,
+      entry::copy_entry,
       entry::remove_entry,
       commands::get_draft,
       commands::save_draft,
