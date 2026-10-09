@@ -575,6 +575,61 @@ export default function App() {
     [draft, refreshHistory, setSidebarRoot, tabs, toast]
   );
 
+  /**
+   * Create a file or a folder in the Explorer's tree.
+   *
+   * A new file opens straight away: it is empty, so there is nothing to decide about it, and
+   * an Explorer that made a file and left the user somewhere else has made one they then
+   * have to go and find. Resolves false when the name was refused, which is what keeps the
+   * tree's input open with the text picked out.
+   */
+  const createEntry = useCallback(
+    async (dir: string, name: string, isDir: boolean): Promise<boolean> => {
+      const made = await (isDir
+        ? api.createDir(dir, name)
+        : api.createFile(dir, name)
+      ).catch((e) => {
+        toast(errorMessage(e));
+        return null;
+      });
+      if (!made) return false;
+      toast(t("side.created", { name: made.name.replace(/\/$/, "") }));
+      if (!isDir) void tabs.openPath(made.path);
+      return true;
+    },
+    [tabs, toast]
+  );
+
+  /**
+   * Delete a file, or a folder and everything in it. Only reached once the prompt has been
+   * answered, which is the only thing standing between a stray click and a recursive delete.
+   *
+   * A tab showing a deleted file is left open: its text lives in the editor, not in the
+   * file, so closing it would throw away work the delete did not touch. Saving it writes the
+   * file again, which is the one surprise here and the same one every editor has. The tab
+   * strip is not rewritten either — a file that is gone is not re-keyed to anything, and a
+   * stored tab for it is skipped on the next start rather than refused.
+   */
+  const deleteEntry = useCallback(
+    async (target: { path: string; name: string; isDir: boolean }): Promise<boolean> => {
+      try {
+        await api.removeEntry(target.path);
+        toast(t("side.deleted", { name: target.name.replace(/\/$/, "") }));
+        // The backend dropped the entry from the recent-files list, so the sidebar's own
+        // copy of it is stale until it is read again.
+        refreshHistory();
+        return true;
+      } catch (e) {
+        toast(errorMessage(e));
+        // Nothing moved, so the tree's listing is still correct. The prompt closes either
+        // way: the toast is the answer, and a dialog left up over a menu that has already
+        // gone would strand it with nothing to point at.
+        return false;
+      }
+    },
+    [refreshHistory, toast]
+  );
+
   const renameTab = useCallback(
     async (id: number, name: string) => {
       const tab = tabs.tabs.find((t) => t.id === id);
@@ -1136,6 +1191,8 @@ const defaultModeFor = useCallback(
             setSidebarVisible(true);
             setSidebarRoot(dir);
           }}
+          onCreate={createEntry}
+          onDelete={deleteEntry}
           onError={toast}
         />
         {sidebarShown && (

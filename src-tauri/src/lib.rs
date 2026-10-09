@@ -2,6 +2,7 @@ mod commands;
 mod context_menu;
 mod draft;
 mod encoding;
+mod entry;
 mod file_settings;
 mod group;
 mod rename;
@@ -28,6 +29,9 @@ pub fn run() {
       commands::stat_file,
       commands::save_file,
       rename::rename_path,
+      entry::create_file,
+      entry::create_dir,
+      entry::remove_entry,
       commands::get_draft,
       commands::save_draft,
       commands::clear_draft,

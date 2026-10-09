@@ -23,7 +23,7 @@ pub struct Renamed {
 }
 
 /// Longest single name segment Windows will take.
-const MAX_NAME_LEN: usize = 255;
+pub(crate) const MAX_NAME_LEN: usize = 255;
 
 /// Names Windows reserves at the top of a segment, extension or not.
 const RESERVED: [&str; 22] = [
@@ -36,7 +36,7 @@ fn is_sep(byte: u8) -> bool {
 }
 
 /// True when `path` is `root` itself or sits inside it. Both are normalized.
-fn under(path: &str, root: &str) -> bool {
+pub(crate) fn under(path: &str, root: &str) -> bool {
   if path == root {
     return true;
   }
@@ -59,39 +59,57 @@ pub(crate) fn rekey(path: &str, old: &str, new: &str) -> String {
   path.to_string()
 }
 
+/// Why what the user typed is not usable as the name of one path segment.
+///
+/// Said apart from the error code on purpose: the rules belong to every command that has to
+/// turn typed text into a name, and each of those reports a refusal in its own words.
+pub enum NameError {
+  Empty,
+  Invalid,
+}
+
 /// Turn what the user typed into one path segment, or say why it is not one.
 ///
 /// Only a bare name is accepted: a separator would move the entry out of the folder it was
 /// renamed from, and a leading dot would let it land somewhere the user is not looking at.
-pub fn validate_name(raw: &str) -> Result<String, String> {
+pub fn check_name(raw: &str) -> Result<String, NameError> {
   let name = raw.trim().trim_matches('"').trim();
   if name.is_empty() {
-    return Err("rename_name_empty".into());
+    return Err(NameError::Empty);
   }
   if name.chars().count() > MAX_NAME_LEN {
-    return Err("rename_name_invalid".into());
+    return Err(NameError::Invalid);
   }
   if name.contains(|c: char| {
     matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c as u32 <= 31
   }) {
-    return Err("rename_name_invalid".into());
+    return Err(NameError::Invalid);
   }
   // Windows drops a trailing dot when it creates the entry, so the name typed is not the
   // name got. A trailing space is already gone: the trim above takes it, which is what
   // Windows would have done anyway.
   if name.ends_with('.') {
-    return Err("rename_name_invalid".into());
+    return Err(NameError::Invalid);
   }
   // Nothing above separates segments, so these two are the only way a name can be a
   // pointer rather than an entry — and a dotfile is still a name worth allowing.
   if name == "." || name == ".." {
-    return Err("rename_name_invalid".into());
+    return Err(NameError::Invalid);
   }
   let stem = name.split('.').next().unwrap_or(name).to_ascii_lowercase();
   if RESERVED.contains(&stem.as_str()) {
-    return Err("rename_name_invalid".into());
+    return Err(NameError::Invalid);
   }
   Ok(name.to_string())
+}
+
+/// `check_name` reported the way the rename says it, which is what the existing UI text
+/// covers. Other commands map the same two failures onto their own codes.
+pub fn validate_name(raw: &str) -> Result<String, String> {
+  check_name(raw).map_err(|e| match e {
+    NameError::Empty => "rename_name_empty".to_string(),
+    NameError::Invalid => "rename_name_invalid".to_string(),
+  })
 }
 
 #[tauri::command]

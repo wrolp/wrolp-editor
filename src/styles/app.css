@@ -892,6 +892,15 @@ body {
   background: var(--accent-soft);
   color: var(--text-strong);
 }
+/* The one item that cannot be taken back, so it says so before it is pressed rather than
+   after: the colour is the warning, and the prompt behind it is the answer. */
+.ctx-item.ctx-danger {
+  color: var(--danger);
+}
+.ctx-item.ctx-danger:hover {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
 /* Fixed width so labels stay aligned whether or not the tick is present. */
 .ctx-tick {
   display: inline-block;

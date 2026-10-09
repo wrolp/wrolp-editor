@@ -224,6 +224,24 @@ export const api = {
    */
   renamePath: (path: string, name: string) =>
     invoke<Renamed>("rename_path", { path, name }),
+  /**
+   * Create an empty file inside a folder. `name` is a bare name, and the backend appends
+   * `.txt` to one typed without any dot, so the result is a text file rather than a name
+   * every other tool reads as an unknown binary.
+   */
+  createFile: (parent: string, name: string) =>
+    invoke<FsEntry>("create_file", { parent, name }),
+  /** Create a folder inside a folder. `name` is a bare name, as for a rename. */
+  createDir: (parent: string, name: string) =>
+    invoke<FsEntry>("create_dir", { parent, name }),
+  /**
+   * Delete a file, or a folder and everything in it, and stop the store pointing at it.
+   *
+   * Nothing is moved, so there is nothing to undo and nothing reaches the Recycle Bin: the
+   * caller is expected to have asked the user first. Unsaved work is not thrown away with
+   * the entry — the drafts stay, and are offered again if the same path ever comes back.
+   */
+  removeEntry: (path: string) => invoke<void>("remove_entry", { path }),
   getDraft: (path: string) => invoke<Draft | null>("get_draft", { path }),
   saveDraft: (path: string, content: string, cursor: number) =>
     invoke<Draft>("save_draft", { path, content, cursor }),
