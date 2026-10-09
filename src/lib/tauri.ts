@@ -27,6 +27,13 @@ export interface SavedFile {
   bytes: number;
 }
 
+/** What a file on disk currently is, without reading its bytes. */
+export interface FileStat {
+  path: string;
+  mtime: number;
+  bytes: number;
+}
+
 export interface Draft {
   path: string;
   content: string;
@@ -206,6 +213,8 @@ export const api = {
   /** `record: false` keeps a session restore from rewriting the recent-files history. */
   openFile: (path: string, record = true, encoding?: string) =>
     invoke<OpenedFile>("open_file", { path, record, encoding: encoding ?? null }),
+  /** Metadata only, so a background check of every open file stays cheap. */
+  statFile: (path: string) => invoke<FileStat>("stat_file", { path }),
   saveFile: (path: string, content: string, encoding?: string, bom?: boolean) =>
     invoke<SavedFile>("save_file", { path, content, encoding: encoding ?? null, bom: bom ?? null }),
   /**

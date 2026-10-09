@@ -10,6 +10,12 @@ export interface Tab {
   language: string;
   /** Baseline content on disk, used to decide whether the tab is dirty. */
   original: string;
+  /**
+   * Modification time that `original` was read at, epoch milliseconds; undefined for a buffer
+   * that never came off disk. It belongs to the baseline, so anything that moves `original`
+   * moves this with it — a stat that disagrees means another program wrote the file.
+   */
+  mtime?: number;
   dirty: boolean;
   /**
    * Text to seed the Monaco model with when it is first created. Only restored scratch
@@ -23,9 +29,8 @@ export interface Tab {
    */
   isBinary?: boolean;
   /**
-   * A read-only side-by-side diff of two files. The text is a snapshot taken when the
-   * comparison was started: the pair has no model of its own, so it is never dirty and
-   * never carries a draft.
+   * A read-only side-by-side diff. The text is a snapshot taken when the comparison was
+   * started: the pair has no model of its own, so it is never dirty and never carries a draft.
    */
   compare?: ComparePair;
   /**

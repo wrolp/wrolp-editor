@@ -66,6 +66,15 @@ pub struct SavedFile {
   pub bytes: u64,
 }
 
+/// What a file currently is on disk, without reading a byte of it.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileStat {
+  pub path: String,
+  pub mtime: u64,
+  pub bytes: u64,
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct FsEntry {
@@ -307,6 +316,17 @@ pub fn take_startup_files(state: State<'_, PendingFiles>) -> Vec<String> {
   std::mem::take(&mut state.0.lock().expect("pending files lock poisoned"))
 }
 
+/// Modification time as epoch milliseconds, the unit the frontend compares against.
+/// A filesystem that reports none yields 0, so it can never look like a change happened.
+fn mtime_ms(meta: &std::fs::Metadata) -> u64 {
+  meta
+    .modified()
+    .ok()
+    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+    .map(|d| d.as_millis() as u64)
+    .unwrap_or(0)
+}
+
 #[tauri::command]
 pub fn open_file(
   app: AppHandle,
@@ -343,12 +363,7 @@ pub fn open_file(
   } else {
     Some(crate::encoding::decode(&bytes, &preference)?)
   };
-  let mtime = meta
-    .modified()
-    .ok()
-    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-    .map(|d| d.as_millis() as u64)
-    .unwrap_or(0);
+  let mtime = mtime_ms(&meta);
 
   // Reopening a whole workspace is not "the user just opened these": recording it would
   // bury the files actually touched today under whatever was left open last session.
@@ -366,6 +381,29 @@ pub fn open_file(
     bom: decoded.as_ref().is_some_and(|d| d.bom),
     bytes: meta.len(),
     binary,
+  })
+}
+
+/// Current mtime and size, for the check that asks whether another program wrote the file.
+///
+/// Answering that by reading the file would make a background poll expensive, so this looks
+/// at metadata only. Any failure here means just "unknown" to the caller, which keeps what it
+/// already has rather than inventing a change.
+#[tauri::command]
+pub fn stat_file(path: String) -> Result<FileStat, String> {
+  let normalized = draft::normalize_path(&path);
+  if normalized.is_empty() {
+    return Err("path_empty".into());
+  }
+  let file = Path::new(&normalized);
+  let meta = std::fs::metadata(file).map_err(|e| format!("file_access:{e}"))?;
+  if !meta.is_file() {
+    return Err("file_not_file".into());
+  }
+  Ok(FileStat {
+    path: normalized,
+    mtime: mtime_ms(&meta),
+    bytes: meta.len(),
   })
 }
 
@@ -410,10 +448,7 @@ pub fn save_file(
   }
   std::fs::write(file, &written).map_err(|e| format!("file_write:{e}"))?;
   let mtime = std::fs::metadata(file)
-    .ok()
-    .and_then(|m| m.modified().ok())
-    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-    .map(|d| d.as_millis() as u64)
+    .map(|m| mtime_ms(&m))
     .unwrap_or(0);
   push_history_entry(&app, &normalized)?;
   Ok(SavedFile {

@@ -1,15 +1,38 @@
-import { useCallback, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { t } from "../lib/i18n";
 import { api, errorMessage, pickSaveAs, EMPTY_FILE_SETTINGS, type Draft, type FileSettings, type GroupTab } from "../lib/tauri";
 import { basename, dirname, isUntitled, langOf, modelUri, rekeyPath } from "../lib/path";
 import { tabKey, toStoredTab } from "../lib/group";
-import { pathKey, isFileTab, type CompareSide, type EditorHandle, type PendingRestore, type Tab } from "../lib/types";
+import { pathKey, isFileTab, type ComparePair, type CompareSide, type EditorHandle, type PendingRestore, type Tab } from "../lib/types";
 import type { DraftWriter } from "./useDraft";
 
 interface RestoreResult {
   restored: number;
   skipped: number;
 }
+
+/** A tab whose file no longer matches what it holds, waiting for the user to answer for it. */
+interface StaleAsk {
+  tabId: number;
+  /**
+   * Raised by a write that would land on top of the other program's change, which is what
+   * makes "keep mine" a save rather than just a dismissal.
+   */
+  fromSave: boolean;
+  /**
+   * The disk mtime that raised it, kept here because it is what "keep mine" pins: the check
+   * compares against the file as it is now, so the baseline the tab was built on would never
+   * match and the same write would ask again on every sweep.
+   */
+  mtime: number;
+}
+
+/**
+ * How often the open files are re-statted. A stat is one metadata call per tab, cheap enough to
+ * ask on a timer rather than only when the window is refocused — which is exactly the case that
+ * matters here: another program writing the file while this window keeps focus.
+ */
+const DISK_POLL_MS = 4000;
 
 interface Options {
   toast: (message: string) => void;
@@ -57,6 +80,20 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
    * dirty and the draft the reload just dropped would be scheduled again.
    */
   const mutating = useRef(false);
+  /** Conflict prompts waiting for an answer, in the order they were found. */
+  const [stale, setStale] = useState<StaleAsk[]>([]);
+  const staleRef = useRef(stale);
+  staleRef.current = stale;
+  /**
+   * The mtime per file already answered with "keep mine". The periodic check must not ask
+   * about the same write twice; a later write is a different question and is asked again.
+   */
+  const dismissed = useRef(new Map<string, number>());
+  /**
+   * The conflict comparison popup, or null. Its pair is a snapshot of the moment it was opened:
+   * the tab keeps being editable behind it, so a live view would move under the reader.
+   */
+  const [conflict, setConflict] = useState<{ tabId: number; pair: ComparePair } | null>(null);
 
   const currentOffset = useCallback(() => {
     const h = editorRef.current;
@@ -119,6 +156,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
           name: basename(disk.path),
           language: langOf(disk.path),
           original: disk.content,
+          mtime: disk.mtime,
           dirty: false,
           // A picture arrives with no text, and the preview is the only view of it that
           // means anything. Marking it here is what keeps the editor out of the way.
@@ -419,6 +457,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
                 name: basename(disk.path),
                 language: langOf(disk.path),
                 original: disk.content,
+                mtime: disk.mtime,
                 dirty: false,
                 isBinary: disk.binary,
                 encoding: disk.encoding,
@@ -602,6 +641,9 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
         await draft.flush(tab.path);
       }
       setTabs(remaining);
+      // A prompt about a tab that no longer exists would sit in front of the ones still waiting.
+      setStale((q) => q.filter((a) => a.tabId !== id));
+      setConflict((c) => (c && c.tabId === id ? null : c));
       // A closed tab's caret is no longer anybody's; the next open starts at 0.
       cursors.current.delete(pathKey(tab.path));
       pendingCursors.current.delete(pathKey(tab.path));
@@ -632,6 +674,10 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
     // Unanswered draft prompts belong to the context that raised them, not the next one;
     // the drafts themselves stay on disk and are offered again where the tab now lives.
     setRestoreQueue([]);
+    // A conflict prompt belongs to the tabs that raised it, exactly as a draft prompt does.
+    setStale([]);
+    dismissed.current.clear();
+    setConflict(null);
     lastFileTabRef.current = null;
     setTabs([]);
     setActiveId(null);
@@ -682,10 +728,11 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
 
   /**
    * Write one tab back to disk. Resolves false when nothing was written, which is what a
-   * declined "Save as", a picture with no buffer, and a failed write all amount to: the
-   * caller has to know, because a close that was asked to save must not go ahead without it.
+   * declined "Save as", a picture with no buffer, a file another program has since changed,
+   * and a failed write all amount to: the caller has to know, because a close that was asked
+   * to save must not go ahead without it.
    */
-  const saveTab = useCallback(async (id: number): Promise<boolean> => {
+  const saveTab = useCallback(async (id: number, opts?: { overwrite?: boolean }): Promise<boolean> => {
     const tab = tabsRef.current.find((t) => t.id === id);
     const h = editorRef.current;
     // A picture has no buffer to write. Saving one would write the empty text that stands
@@ -698,6 +745,26 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
         ? h.editor.getValue()
         : (h.monaco.editor.getModel(h.monaco.Uri.parse(modelUri(tab.path)))?.getValue() ??
           tab.original);
+    // A write replaces whatever is there now, so when that is not what this tab was built on
+    // the question is asked first — and asked again however many times the save is attempted:
+    // unlike the periodic check, this one is an answer the user already declined once and is
+    // now overriding on purpose. An untitled buffer has no file to disagree with yet.
+    if (!isUntitled(tab.path) && !opts?.overwrite && tab.mtime !== undefined) {
+      // A failed stat is not a conflict: the file may be gone, or on a share that is not
+      // answering, and guessing from that would refuse writes that are perfectly fine.
+      const stat = await api.statFile(tab.path).catch(() => null);
+      if (stat && (stat.mtime !== tab.mtime || stat.bytes !== tab.bytes)) {
+        setStale((q) => {
+          // Raised by a save now, even if the same file is already on the list from a
+          // periodic check: the answer for that one only closes a prompt, this one writes.
+          const ask = { tabId: tab.id, fromSave: true, mtime: stat.mtime };
+          return q.some((a) => a.tabId === tab.id)
+            ? q.map((a) => (a.tabId === tab.id ? ask : a))
+            : [...q, ask];
+        });
+        return false;
+      }
+    }
     try {
       if (isUntitled(tab.path)) {
         const target = await pickSaveAs(tab.name);
@@ -715,6 +782,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
                   name: basename(saved.path),
                   language: langOf(saved.path),
                   original: content,
+                  mtime: saved.mtime,
                   dirty: false,
                   encoding: saved.encoding,
                   bom: false,
@@ -740,6 +808,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
             ? {
                 ...t,
                 original: content,
+                mtime: saved.mtime,
                 dirty: false,
                 encoding: saved.encoding,
                 bom: t.bom,
@@ -805,6 +874,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
           : {
               ...t,
               original: disk.content,
+              mtime: disk.mtime,
               dirty: false,
               // The file may have been rewritten as something else entirely since it was
               // opened, so what it is now is read from the same response as its text.
@@ -842,10 +912,152 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
       // that write would land after the clear below and resurrect what was discarded.
       draft.forget(tab.path);
       await api.clearDraft(tab.path).catch((e) => toast(errorMessage(e)));
+      // The tab now agrees with disk, so any prompt about this file is answered by definition.
+      setStale((q) => q.filter((a) => a.tabId !== id));
       toast(t("menu.reloaded", { name: tab.name }));
     },
     [currentOffset, draft, editorRef, toast]
   );
+
+  /**
+   * The text a tab holds right now. It lives in a Monaco model, not in React state: the editor
+   * only ever shows one tab, so a background tab's live text is reachable through its model and
+   * nowhere else. Undefined means the tab has no model yet, which is to say it still holds
+   * exactly what it was built from.
+   */
+  const liveContent = useCallback(
+    (tab: Tab): string | undefined => {
+      const h = editorRef.current;
+      if (!h) return undefined;
+      if (tab.id === activeRef.current) return h.editor.getValue();
+      return h.monaco.editor.getModel(h.monaco.Uri.parse(modelUri(tab.path)))?.getValue();
+    },
+    [editorRef]
+  );
+
+  /** Set while one sweep is running, so the timer and a focus change cannot interleave two. */
+  const checking = useRef(false);
+
+  /**
+   * Ask the disk what every open file is now, and make the tabs agree with the answer.
+   *
+   * A tab whose text still equals its baseline has nothing to lose, so it quietly takes the new
+   * text — that is the whole point of checking. A tab carrying unsaved edits cannot be answered
+   * for by anybody but the user, so it joins the queue the prompt works through.
+   *
+   * A failed stat is deliberately not a change: the file may be gone, or on a share that is not
+   * answering, and reading either as "modified" would reload a tab onto a guess.
+   */
+  const checkDisk = useCallback(async () => {
+    if (checking.current) return;
+    checking.current = true;
+    try {
+      const waiting = new Set(queueRef.current.map((r) => pathKey(r.path)));
+      const asked = new Set(staleRef.current.map((a) => a.tabId));
+      for (const tab of tabsRef.current) {
+        if (!isFileTab(tab) || isUntitled(tab.path) || tab.mtime === undefined) continue;
+        // A tab with a draft prompt open is already being asked about, and one with a
+        // conflict prompt open is waiting for an answer: reloading either would move the
+        // text under a dialog that describes it.
+        if (asked.has(tab.id) || waiting.has(pathKey(tab.path))) continue;
+        let stat;
+        try {
+          stat = await api.statFile(tab.path);
+        } catch {
+          continue;
+        }
+        if (stat.mtime === tab.mtime && stat.bytes === tab.bytes) continue;
+        // The same write, already answered. A later write is a different question.
+        if (dismissed.current.get(pathKey(tab.path)) === stat.mtime) continue;
+        // Everything above awaited, so the tab is looked up again: it may have been saved,
+        // edited or closed in the meantime, and a reload decided on a stale picture of it
+        // would throw away an undo stack for nothing.
+        const now = tabsRef.current.find((t) => t.id === tab.id);
+        if (!now || now.mtime !== tab.mtime) continue;
+        if (now.dirty) {
+          setStale((q) =>
+            q.some((a) => a.tabId === now.id)
+              ? q
+              : [...q, { tabId: now.id, fromSave: false, mtime: stat.mtime }]
+          );
+          continue;
+        }
+        // Typing that landed while the stat was in flight makes the live text differ from the
+        // baseline the dirty flag was built on. Same reason to stop as above: it is unsaved work.
+        const live = liveContent(now);
+        if (live !== undefined && live !== now.original) continue;
+        await reloadTab(now.id);
+      }
+    } finally {
+      checking.current = false;
+    }
+  }, [liveContent, reloadTab]);
+
+  // `checkDisk` changes identity on every render, because the draft plumbing it reaches through
+  // `reloadTab` is returned as a fresh object each time. Depending on it directly would restart
+  // the timer on every keystroke, and a sweep would then only ever run in a pause long enough to
+  // fit one in — which is the opposite of what it is for.
+  const sweepRef = useRef(checkDisk);
+  sweepRef.current = checkDisk;
+  useEffect(() => {
+    const timer = setInterval(() => void sweepRef.current(), DISK_POLL_MS);
+    return () => clearInterval(timer);
+  }, []);
+
+  /**
+   * Close a conflict prompt. `mute` pins the mtime that raised it, so the periodic check stops
+   * interrupting about the same write — that is what "look at the difference first" needs, and
+   * it is not a resolution: a save still asks, because deciding to write is a separate answer.
+   */
+  const answerStale = useCallback((id: number, mute: boolean) => {
+    if (mute) {
+      const ask = staleRef.current.find((a) => a.tabId === id);
+      const tab = tabsRef.current.find((t) => t.id === id);
+      if (ask && tab) dismissed.current.set(pathKey(tab.path), ask.mtime);
+    }
+    setStale((q) => q.filter((a) => a.tabId !== id));
+  }, []);
+
+  /**
+   * Show what a conflict is: the text on disk against the text in the tab.
+   *
+   * The comparison is a popup held here rather than a tab, because the question it answers is
+   * asked while the prompt is still up — and a tab would put the answer somewhere the user has
+   * to leave the prompt to go and read. Built from the live model on one side, which is also why
+   * it does not go through `openCompare`: reading both sides off disk would compare a file with
+   * itself and show the user their own edits as the difference.
+   */
+  const showConflict = useCallback(
+    async (id: number) => {
+      const tab = tabsRef.current.find((t) => t.id === id);
+      if (!tab || !isFileTab(tab) || isUntitled(tab.path)) return;
+      let disk;
+      try {
+        // `record: false`: looking at a conflict is not opening the file.
+        disk = await api.openFile(tab.path, false, encodingRef.current);
+      } catch (e) {
+        toast(errorMessage(e));
+        return;
+      }
+      const name = basename(tab.path);
+      const language = langOf(disk.path);
+      setConflict({
+        tabId: id,
+        pair: {
+          left: { path: disk.path, name: t("stale.diskSide", { name }), content: disk.content, language },
+          right: {
+            path: disk.path,
+            name: t("stale.mineSide", { name }),
+            content: liveContent(tab) ?? tab.original,
+            language,
+          },
+        },
+      });
+    },
+    [liveContent, toast]
+  );
+
+  const hideConflict = useCallback(() => setConflict(null), []);
 
   /** Resolve one queued draft. Loops use it so "Restore all" is not a second implementation. */
   const applyRestore = useCallback(
@@ -938,6 +1150,14 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
      */
     fileTab: lastFileTabRef.current,
     restoreQueue,
+    /** Conflict prompts, one at a time, in the order the files were found changed. */
+    stale,
+    /** The conflict comparison popup, while it is open. */
+    conflict,
+    showConflict,
+    hideConflict,
+    checkDisk,
+    answerStale,
     openPath,
     openCompare,
     swapCompare,

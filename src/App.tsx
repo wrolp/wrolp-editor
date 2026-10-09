@@ -19,6 +19,8 @@ import DraftRestoreSummary from "./components/DraftRestoreSummary";
 import ComparePickerDialog from "./components/ComparePickerDialog";
 import CloseConfirmDialog from "./components/CloseConfirmDialog";
 import ReloadConfirmDialog from "./components/ReloadConfirmDialog";
+import StaleChangeDialog from "./components/StaleChangeDialog";
+import ConflictCompareModal from "./components/ConflictCompareModal";
 import { useDraft } from "./hooks/useDraft";
 import { useEditorTabs } from "./hooks/useEditorTabs";
 import { useGroups } from "./hooks/useGroups";
@@ -449,6 +451,19 @@ export default function App() {
       document.removeEventListener("visibilitychange", onBlur);
     };
   }, [flushEverything]);
+
+  // Refocusing the window is the moment a change made elsewhere is about to matter, so the disk
+  // is asked then rather than only when the hook's own timer next comes round.
+  const checkDiskRef = useRef(tabs.checkDisk);
+  checkDiskRef.current = tabs.checkDisk;
+  useEffect(() => {
+    const unlisten = getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+      if (focused) void checkDiskRef.current();
+    });
+    return () => {
+      void unlisten.then((f) => f());
+    };
+  }, []);
 
   // Closing the window is the last moment the session is still intact, so write it now.
   const flushRef = useRef(flushEverything);
@@ -899,6 +914,17 @@ export default function App() {
   const closeAskTab = closeAsk === null ? null : tabs.tabs.find((t) => t.id === closeAsk) ?? null;
   /** The tab the reload prompt is about; gone if it was closed while the prompt was up. */
   const reloadAskTab = reloadAsk === null ? null : tabs.tabs.find((t) => t.id === reloadAsk) ?? null;
+  /**
+   * The conflict prompt at the front of the queue, and the tab it is about. A closed tab drops
+   * its own prompt, so a missing tab here means the answer got in before the render.
+   */
+  const staleAsk = tabs.stale[0] ?? null;
+  const staleTab = staleAsk ? tabs.tabs.find((t) => t.id === staleAsk.tabId) ?? null : null;
+  /** The comparison popup, and the tab it is comparing. It opens over the prompt, not instead of it. */
+  const conflictView = tabs.conflict;
+  const conflictTab = conflictView
+    ? tabs.tabs.find((t) => t.id === conflictView.tabId) ?? null
+    : null;
   /** Only a real file tab has a path for the path actions (reveal, copy, per-file settings). */
   const menuTabIsFile = !!menuTab && isFileTab(menuTab);
   const menuMinimapOn = menuTab?.fileSettings.minimap ?? settings.minimap;
@@ -1471,6 +1497,54 @@ const defaultModeFor = useCallback(
             void tabs.reloadTab(reloadAskTab.id);
           }}
           onCancel={() => setReloadAsk(null)}
+        />
+      )}
+
+      {staleAsk && staleTab && (
+        <StaleChangeDialog
+          tab={staleTab}
+          fromSave={staleAsk.fromSave}
+          // Comparing is not an answer to the conflict, so the prompt stays up behind the
+          // comparison and can be come back to. The two that do answer are what close it.
+          onCompare={() => void tabs.showConflict(staleTab.id)}
+          onReload={() => {
+            tabs.answerStale(staleTab.id, false);
+            void tabs.reloadTab(staleTab.id);
+          }}
+          onKeep={() => {
+            tabs.answerStale(staleTab.id, true);
+            // A save that raised this prompt is still the thing the user asked for: keeping
+            // their own text is what lets the write through, so it goes now rather than on
+            // the next keystroke of Ctrl+S.
+            if (staleAsk.fromSave) void tabs.saveTab(staleTab.id, { overwrite: true });
+          }}
+        />
+      )}
+
+      {conflictView && conflictTab && (
+        <ConflictCompareModal
+          pair={conflictView.pair}
+          name={conflictTab.name}
+          fontSize={settings.fontSize}
+          renderWhitespace={renderWhitespaceMode}
+          wordWrap={wordWrap}
+          tabSize={tabSize}
+          insertSpaces={insertSpaces}
+          detectIndentation={detectIndentation}
+          scrollBeyondLastLine={settings.scrollBeyondLastLine}
+          onTakeDisk={() => {
+            tabs.hideConflict();
+            tabs.answerStale(conflictTab.id, false);
+            void tabs.reloadTab(conflictTab.id);
+          }}
+          onKeepSave={() => {
+            tabs.hideConflict();
+            // Saving from the comparison is the answer the prompt was waiting for, so it settles
+            // that one too rather than leaving a question up behind an answer already given.
+            tabs.answerStale(conflictTab.id, true);
+            void tabs.saveTab(conflictTab.id, { overwrite: true });
+          }}
+          onClose={() => tabs.hideConflict()}
         />
       )}
 
