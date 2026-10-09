@@ -18,6 +18,7 @@ import GroupChip from "./components/GroupChip";
 import DraftRestoreSummary from "./components/DraftRestoreSummary";
 import ComparePickerDialog from "./components/ComparePickerDialog";
 import CloseConfirmDialog from "./components/CloseConfirmDialog";
+import ReloadConfirmDialog from "./components/ReloadConfirmDialog";
 import { useDraft } from "./hooks/useDraft";
 import { useEditorTabs } from "./hooks/useEditorTabs";
 import { useGroups } from "./hooks/useGroups";
@@ -173,6 +174,8 @@ export default function App() {
   const [renamingTab, setRenamingTab] = useState<number | null>(null);
   /** The tab waiting on the unsaved-changes prompt, or null. */
   const [closeAsk, setCloseAsk] = useState<number | null>(null);
+  /** The tab waiting on the reload-over-unsaved-edits prompt, or null. */
+  const [reloadAsk, setReloadAsk] = useState<number | null>(null);
   /** "Review individually" in the batch dialog: walk the queue one file at a time. */
   const [reviewEach, setReviewEach] = useState(false);
   /** A group is named by the user, so creating one needs a name first. */
@@ -834,6 +837,25 @@ export default function App() {
     [tabs]
   );
 
+  /**
+   * Reloading is answered for only when there is something to lose. A clean tab just takes the
+   * text from disk, which is the whole point of the action; a dirty one would have its edits
+   * replaced, and here the draft is no consolation — a reload is meant to throw them away, so
+   * it has to be asked for rather than assumed the way a close can be.
+   */
+  const requestReload = useCallback(
+    (id: number) => {
+      const tab = tabs.tabs.find((t) => t.id === id);
+      if (!tab) return;
+      if (!tab.dirty) {
+        void tabs.reloadTab(id);
+        return;
+      }
+      setReloadAsk(id);
+    },
+    [tabs]
+  );
+
   const { saveActive, openUntitled, openSettings } = tabs;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -875,6 +897,8 @@ export default function App() {
   const menuTab = tabs.tabs.find((t) => t.path === menuTabPath) ?? null;
   /** The tab the unsaved-changes prompt is about; gone if it was closed from elsewhere. */
   const closeAskTab = closeAsk === null ? null : tabs.tabs.find((t) => t.id === closeAsk) ?? null;
+  /** The tab the reload prompt is about; gone if it was closed while the prompt was up. */
+  const reloadAskTab = reloadAsk === null ? null : tabs.tabs.find((t) => t.id === reloadAsk) ?? null;
   /** Only a real file tab has a path for the path actions (reveal, copy, per-file settings). */
   const menuTabIsFile = !!menuTab && isFileTab(menuTab);
   const menuMinimapOn = menuTab?.fileSettings.minimap ?? settings.minimap;
@@ -1283,9 +1307,19 @@ const defaultModeFor = useCallback(
                 {t("title.menuSidebar")}
               </div>
               {/* Both of these act on a file that is on disk: an unsaved buffer has no entry
-                  to rename, and nothing to read the other file against. */}
+                  to rename, and nothing to read the other file against. Reload is here for
+                  the same reason — a scratch buffer has no disk text to take. */}
               {menuTabIsFile && !isUntitled(menuTabPath) && (
                 <>
+                  <div
+                    className="ctx-item"
+                    onClick={() => {
+                      requestReload(tabMenu.tabId);
+                      setTabMenu(null);
+                    }}
+                  >
+                    {t("title.menuReload")}
+                  </div>
                   <div
                     className="ctx-item"
                     onClick={() => {
@@ -1426,6 +1460,17 @@ const defaultModeFor = useCallback(
           onSave={() => void closeAfterSave(closeAskTab.id)}
           onDiscard={() => closeWithoutSaving(closeAskTab.id)}
           onCancel={() => setCloseAsk(null)}
+        />
+      )}
+
+      {reloadAskTab && (
+        <ReloadConfirmDialog
+          tab={reloadAskTab}
+          onReload={() => {
+            setReloadAsk(null);
+            void tabs.reloadTab(reloadAskTab.id);
+          }}
+          onCancel={() => setReloadAsk(null)}
         />
       )}
 

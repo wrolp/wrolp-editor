@@ -50,6 +50,13 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
   const pendingCursors = useRef(new Set<string>());
   const encodingRef = useRef(encodingPref ?? "auto");
   encodingRef.current = encodingPref ?? "auto";
+  /**
+   * Set while a reload rewrites a buffer. The change and cursor events that rewrite fires are
+   * read by the handlers below against the tab object React has not re-rendered yet, so
+   * without this the arriving disk text looks like a fresh edit: the tab would be marked
+   * dirty and the draft the reload just dropped would be scheduled again.
+   */
+  const mutating = useRef(false);
 
   const currentOffset = useCallback(() => {
     const h = editorRef.current;
@@ -632,6 +639,8 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
 
   const onEditorChange = useCallback(
     (value: string) => {
+      // A reload replaces the buffer on purpose; see `mutating`.
+      if (mutating.current) return;
       const tab = tabsRef.current.find((t) => t.id === activeRef.current);
       if (!tab || !isFileTab(tab)) return;
       const dirty = value !== tab.original;
@@ -647,6 +656,9 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
   /** Keep the stored cursor honest: edits and content changes can both land before a move. */
   const onCursorChange = useCallback(
     (offset: number) => {
+      // `setValue` in a reload parks the caret at the start, and the reload puts it back
+      // itself; reading the event would overwrite both with 0.
+      if (mutating.current) return;
       const tab = tabsRef.current.find((t) => t.id === activeRef.current);
       if (!tab || !isFileTab(tab)) return;
       // Swapping models emits a cursor event for a position nobody chose. Trusting it
@@ -747,6 +759,92 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
   const saveActive = useCallback(
     () => (activeRef.current === null ? Promise.resolve(false) : saveTab(activeRef.current)),
     [saveTab]
+  );
+
+  /**
+   * Replace what a tab holds with what is on disk right now.
+   *
+   * This is the answer to "the file changed while I was in it", so it re-reads the file and
+   * makes the tab agree with it: the baseline (`original`) moves to the new text, the model
+   * is overwritten and the tab stops being dirty. Everything that belonged to the buffer being
+   * replaced goes with it — the undo stack, as a side effect of `setValue`, and the draft,
+   * which would otherwise offer the discarded edits back the next time this file opens.
+   *
+   * The model is rewritten synchronously, before React can re-render the patched tab, which is
+   * why the whole buffer swap runs inside `mutating` (see its declaration). The draft is
+   * cleared only after that flag is down: an `await` with the flag still set would swallow
+   * whatever the user typed in the meantime.
+   */
+  const reloadTab = useCallback(
+    async (id: number) => {
+      const tab = tabsRef.current.find((t) => t.id === id);
+      // A comparison has no buffer of its own, and a scratch buffer has nothing on disk to
+      // read: both would silently do nothing here.
+      if (!tab || !isFileTab(tab) || isUntitled(tab.path)) return;
+      let disk;
+      try {
+        // `record: false`: a reload is not a new open, so it must not touch the history.
+        disk = await api.openFile(tab.path, false, encodingRef.current);
+      } catch (e) {
+        // Most often the file was moved or deleted underneath the tab.
+        toast(errorMessage(e));
+        return;
+      }
+      const key = pathKey(tab.path);
+      const h = editorRef.current;
+      const model = h?.monaco.editor.getModel(h.monaco.Uri.parse(modelUri(tab.path)));
+      // Taken before the buffer is replaced: `setValue` parks the caret at the very start,
+      // and afterwards the old offset is no longer recoverable from the editor. Only the
+      // editor's own offset means this tab — for a background tab it is another file's, and a
+      // tab nobody has visited has no caret to keep, so it starts at the top like a new open.
+      const caret =
+        cursors.current.get(key) ?? (activeRef.current === id ? currentOffset() : 0);
+      const patch = (t: Tab): Tab =>
+        t.id !== id
+          ? t
+          : {
+              ...t,
+              original: disk.content,
+              dirty: false,
+              // The file may have been rewritten as something else entirely since it was
+              // opened, so what it is now is read from the same response as its text.
+              isBinary: disk.binary,
+              encoding: disk.encoding,
+              bom: disk.bom,
+              bytes: disk.bytes,
+            };
+
+      mutating.current = true;
+      try {
+        setTabs((prev) => prev.map(patch));
+        // A tab that has never been shown has no model yet: Editor builds it from the new
+        // `original` the first time the tab is displayed, so there is nothing to push here.
+        if (model && model.getValue() !== disk.content) model.setValue(disk.content);
+        // The new text can be shorter than the offset the caret was left at, so it is
+        // clamped rather than trusted, and the remembered offset is corrected with it.
+        const offset = Math.min(caret, model?.getValueLength() ?? disk.content.length);
+        cursors.current.set(key, offset);
+        // Whatever caret this tab was restored with belonged to the text just replaced.
+        pendingCursors.current.delete(key);
+        if (h && model && activeRef.current === id) {
+          const position = model.getPositionAt(offset);
+          h.editor.setPosition(position);
+          h.editor.revealPositionInCenterIfOutsideViewport(position);
+        }
+      } finally {
+        mutating.current = false;
+      }
+      // The editor keeps this one mounted behind the Settings panel, so it has to be
+      // re-derived from the patched tab rather than left holding the old baseline.
+      const last = lastFileTabRef.current;
+      if (last && last.id === id) lastFileTabRef.current = patch(last);
+      // `forget` drops the debounced write of the text that is on its way out; without it
+      // that write would land after the clear below and resurrect what was discarded.
+      draft.forget(tab.path);
+      await api.clearDraft(tab.path).catch((e) => toast(errorMessage(e)));
+      toast(t("menu.reloaded", { name: tab.name }));
+    },
+    [currentOffset, draft, editorRef, toast]
   );
 
   /** Resolve one queued draft. Loops use it so "Restore all" is not a second implementation. */
@@ -852,6 +950,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
     selectTab: activate,
     saveActive,
     saveTab,
+    reloadTab,
     onEditorChange,
     onCursorChange,
     setFileSettings,

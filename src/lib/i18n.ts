@@ -29,6 +29,7 @@ const EN: Table = {
   "title.menuReveal": "Reveal in Explorer",
   "title.menuCopy": "Copy path",
   "title.menuSidebar": "Show folder in sidebar",
+  "title.menuReload": "Reload from disk",
   "title.copied": "Path copied: {path}",
   "title.copyFailed": "Copy failed",
 
@@ -54,6 +55,7 @@ const EN: Table = {
   "status.totalChars": "{n} chars",
 
   "menu.saved": "Saved {name}",
+  "menu.reloaded": "Reloaded {name}",
   "menu.draftRestored": "Draft restored",
   "menu.draftDiscarded": "Draft discarded",
   "menu.added": "Context menu added: {value}",
@@ -74,6 +76,11 @@ const EN: Table = {
   "close.discard": "Close without saving",
   "close.discardScratch": "Close and lose it",
   "close.cancel": "Cancel",
+
+  "reload.title": "Discard unsaved changes?",
+  "reload.body": "\"{name}\" has edits that were never saved.",
+  "reload.note": "Reloading replaces them with the text now on disk, and drops the draft kept for them.",
+  "reload.confirm": "Reload and discard",
 
   "settings.nav": "Settings",
   "settings.catContext": "Context menu",
@@ -289,6 +296,7 @@ const ZH: Table = {
   "title.menuReveal": "在资源管理器中显示",
   "title.menuCopy": "复制路径",
   "title.menuSidebar": "在侧边栏显示所在目录",
+  "title.menuReload": "从磁盘重新加载",
   "title.copied": "已复制路径：{path}",
   "title.copyFailed": "复制失败",
 
@@ -314,6 +322,7 @@ const ZH: Table = {
   "status.totalChars": "共 {n} 个字符",
 
   "menu.saved": "已保存 {name}",
+  "menu.reloaded": "已重新加载 {name}",
   "menu.draftRestored": "已恢复草稿",
   "menu.draftDiscarded": "已丢弃草稿",
   "menu.added": "已添加右键菜单：{value}",
@@ -334,6 +343,11 @@ const ZH: Table = {
   "close.discard": "不保存直接关闭",
   "close.discardScratch": "关闭并丢弃",
   "close.cancel": "取消",
+
+  "reload.title": "要放弃未保存的修改吗？",
+  "reload.body": "「{name}」有你没保存的编辑。",
+  "reload.note": "重新加载会用磁盘上的内容替换这些编辑，并为它们保留的草稿也会一并丢弃。",
+  "reload.confirm": "重新加载并丢弃",
 
   "settings.nav": "设置",
   "settings.catContext": "右键菜单",
