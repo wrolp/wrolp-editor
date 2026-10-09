@@ -21,6 +21,20 @@ import CloseConfirmDialog from "./components/CloseConfirmDialog";
 import ReloadConfirmDialog from "./components/ReloadConfirmDialog";
 import StaleChangeDialog from "./components/StaleChangeDialog";
 import ConflictCompareModal from "./components/ConflictCompareModal";
+import {
+  IconClose,
+  IconCompare,
+  IconCopy,
+  IconFolder,
+  IconMinimap,
+  IconModePreview,
+  IconMoveTo,
+  IconOpenFolder,
+  IconPencil,
+  IconReload,
+  IconSettings,
+  IconSidebar,
+} from "./components/icons";
 import { useDraft } from "./hooks/useDraft";
 import { useEditorTabs } from "./hooks/useEditorTabs";
 import { useGroups } from "./hooks/useGroups";
@@ -1369,6 +1383,9 @@ const defaultModeFor = useCallback(
                     setTabMenu(null);
                   }}
                 >
+                  <span className="ctx-icon">
+                    <IconReload size={14} />
+                  </span>
                   {t("cmp.swap")}
                 </div>
               )}
@@ -1379,6 +1396,9 @@ const defaultModeFor = useCallback(
                   setTabMenu(null);
                 }}
               >
+                <span className="ctx-icon">
+                  <IconClose size={14} />
+                </span>
                 {t("tab.close")}
               </div>
             </>
@@ -1391,6 +1411,9 @@ const defaultModeFor = useCallback(
                   setTabMenu(null);
                 }}
               >
+                <span className="ctx-icon">
+                  <IconOpenFolder size={14} />
+                </span>
                 {t("title.menuReveal")}
               </div>
               <div
@@ -1400,6 +1423,9 @@ const defaultModeFor = useCallback(
                   setTabMenu(null);
                 }}
               >
+                <span className="ctx-icon">
+                  <IconCopy size={14} />
+                </span>
                 {t("title.menuCopy")}
               </div>
               <div
@@ -1409,6 +1435,9 @@ const defaultModeFor = useCallback(
                   setTabMenu(null);
                 }}
               >
+                <span className="ctx-icon">
+                  <IconSidebar size={14} />
+                </span>
                 {t("title.menuSidebar")}
               </div>
               {/* Both of these act on a file that is on disk: an unsaved buffer has no entry
@@ -1423,6 +1452,9 @@ const defaultModeFor = useCallback(
                       setTabMenu(null);
                     }}
                   >
+                    <span className="ctx-icon">
+                      <IconReload size={14} />
+                    </span>
                     {t("title.menuReload")}
                   </div>
                   <div
@@ -1432,6 +1464,9 @@ const defaultModeFor = useCallback(
                       setTabMenu(null);
                     }}
                   >
+                    <span className="ctx-icon">
+                      <IconPencil size={14} />
+                    </span>
                     {t("side.menuRename")}
                   </div>
                   <div
@@ -1441,6 +1476,9 @@ const defaultModeFor = useCallback(
                       setTabMenu(null);
                     }}
                   >
+                    <span className="ctx-icon">
+                      <IconCompare size={14} />
+                    </span>
                     {t("cmp.menu")}
                   </div>
                 </>
@@ -1452,6 +1490,9 @@ const defaultModeFor = useCallback(
                   setFileSettingsFor(menuTabPath);
                 }}
               >
+                <span className="ctx-icon">
+                  <IconSettings size={14} />
+                </span>
                 {t("title.menuFileSettings")}
               </div>
               <div
@@ -1461,8 +1502,11 @@ const defaultModeFor = useCallback(
                   setTabMenu(null);
                 }}
               >
-                <span className="ctx-tick">{menuMinimapOn ? "✓" : ""}</span>
+                <span className="ctx-icon">
+                  <IconMinimap size={14} />
+                </span>
                 {t("title.menuMinimap")}
+                <span className="ctx-check">{menuMinimapOn ? "✓" : ""}</span>
               </div>
               {/* A raster image has no text pane to toggle to, so it is not offered. */}
               {!isBitmapImage(menuTabPath) && (
@@ -1473,18 +1517,30 @@ const defaultModeFor = useCallback(
                     setTabMenu(null);
                   }}
                 >
-                  <span className="ctx-tick">
+                  <span className="ctx-icon">
+                    <IconModePreview size={14} />
+                  </span>
+                  {t("title.menuPreview")}
+                  <span className="ctx-check">
                     {menuTabPath &&
                     (previewPref[menuTabPath] ?? defaultModeFor(menuTabPath)) !== "text"
                       ? "✓"
                       : ""}
                   </span>
-                  {t("title.menuPreview")}
                 </div>
               )}
               <div className="ws-sep" />
               {(["move", "copy", "moveAll"] as const).map((panel) => (
                 <div key={panel} className="ctx-item" onClick={() => setTabMenu({ ...tabMenu, panel })}>
+                  {/* A copy leaves the tab behind, a move does not — the only difference
+                      between two rows that otherwise read the same. */}
+                  <span className="ctx-icon">
+                    {panel === "copy" ? (
+                      <IconCopy size={14} />
+                    ) : (
+                      <IconMoveTo size={14} />
+                    )}
+                  </span>
                   {t(
                     panel === "move"
                       ? "grp.moveTitle"
@@ -1498,14 +1554,22 @@ const defaultModeFor = useCallback(
           ) : (
             <>
               <div className="ctx-item" onClick={() => setTabMenu({ ...tabMenu, panel: "root" })}>
-                ← {t("grp.back")}
+                {/* The arrow is the whole of what this row does, so it keeps the shape it
+                    had and simply moves into the icon column. */}
+                <span className="ctx-icon">←</span>
+                {t("grp.back")}
               </div>
               <div className="ws-sep" />
               {transferTargets.length === 0 ? (
                 <div className="dd-empty">{t("grp.noOther")}</div>
               ) : (
+                // A group is a place a tab goes to, so it carries the same shape the
+                // folders in the Explorer do.
                 transferTargets.map((w) => (
                   <div key={w.id} className="ctx-item" onClick={() => void runTransfer(tabMenu.panel as "move" | "copy" | "moveAll", w.id)}>
+                    <span className="ctx-icon">
+                      <IconFolder size={14} />
+                    </span>
                     {w.name}
                   </div>
                 ))

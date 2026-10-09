@@ -1,5 +1,19 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { IconFolder, IconGoUp, IconTreeChevron } from "./icons";
+import {
+  IconCompare,
+  IconCopy,
+  IconFile,
+  IconFilePlus,
+  IconFolder,
+  IconFolderPlus,
+  IconGoUp,
+  IconOpenFolder,
+  IconPaste,
+  IconPencil,
+  IconTarget,
+  IconTrash,
+  IconTreeChevron,
+} from "./icons";
 import FileIcon from "./FileIcon";
 import DeleteEntryDialog from "./DeleteEntryDialog";
 import { t } from "../lib/i18n";
@@ -793,6 +807,9 @@ export default function Sidebar(props: Props) {
                   setMenu(null);
                 }}
               >
+                <span className="ctx-icon">
+                  <IconOpenFolder size={14} />
+                </span>
                 {t("side.openFolder")}
               </div>
             ) : (
@@ -804,6 +821,9 @@ export default function Sidebar(props: Props) {
                     setMenu(null);
                   }}
                 >
+                  <span className="ctx-icon">
+                    <IconFilePlus size={14} />
+                  </span>
                   {t("side.menuNewFile")}
                 </div>
                 <div
@@ -813,6 +833,9 @@ export default function Sidebar(props: Props) {
                     setMenu(null);
                   }}
                 >
+                  <span className="ctx-icon">
+                    <IconFolderPlus size={14} />
+                  </span>
                   {t("side.menuNewFolder")}
                 </div>
                 {/* The folder being shown has no row of its own, so this is the only place
@@ -825,6 +848,9 @@ export default function Sidebar(props: Props) {
                       setMenu(null);
                     }}
                   >
+                    <span className="ctx-icon">
+                      <IconPaste size={14} />
+                    </span>
                     {t("side.menuPaste")}
                   </div>
                 )}
@@ -840,6 +866,11 @@ export default function Sidebar(props: Props) {
                   setMenu(null);
                 }}
               >
+                {/* One item, two meanings, so it carries the shape of the row it was
+                    asked about: a folder is not opened in the editor, it is shown. */}
+                <span className="ctx-icon">
+                  {menu.isDir ? <IconFolder size={14} /> : <IconFile size={14} />}
+                </span>
                 {t("side.menuOpen")}
               </div>
               {!menu.isDir && (
@@ -850,6 +881,9 @@ export default function Sidebar(props: Props) {
                     setMenu(null);
                   }}
                 >
+                  <span className="ctx-icon">
+                    <IconCompare size={14} />
+                  </span>
                   {t("cmp.menu")}
                 </div>
               )}
@@ -860,6 +894,9 @@ export default function Sidebar(props: Props) {
                   setMenu(null);
                 }}
               >
+                <span className="ctx-icon">
+                  <IconOpenFolder size={14} />
+                </span>
                 {t("side.menuReveal")}
               </div>
               <div className="ws-sep" />
@@ -875,6 +912,9 @@ export default function Sidebar(props: Props) {
                       setMenu(null);
                     }}
                   >
+                    <span className="ctx-icon">
+                      <IconFilePlus size={14} />
+                    </span>
                     {t("side.menuNewFile")}
                   </div>
                   <div
@@ -884,6 +924,9 @@ export default function Sidebar(props: Props) {
                       setMenu(null);
                     }}
                   >
+                    <span className="ctx-icon">
+                      <IconFolderPlus size={14} />
+                    </span>
                     {t("side.menuNewFolder")}
                   </div>
                 </>
@@ -895,6 +938,9 @@ export default function Sidebar(props: Props) {
                   setMenu(null);
                 }}
               >
+                <span className="ctx-icon">
+                  <IconPencil size={14} />
+                </span>
                 {t("side.menuRename")}
               </div>
               <div className="ws-sep" />
@@ -911,6 +957,9 @@ export default function Sidebar(props: Props) {
                   setMenu(null);
                 }}
               >
+                <span className="ctx-icon">
+                  <IconCopy size={14} />
+                </span>
                 {t("side.menuCopy")}
               </div>
               {clipboard && (
@@ -921,26 +970,43 @@ export default function Sidebar(props: Props) {
                     setMenu(null);
                   }}
                 >
+                  <span className="ctx-icon">
+                    <IconPaste size={14} />
+                  </span>
                   {t("side.menuPaste")}
                 </div>
               )}
               <div className="ws-sep" />
+              {/* All four put text on the clipboard, so all four carry the same shape:
+                  what differs is the text, and that is what the label says. */}
               <div className="ctx-item" onClick={() => { void copy(menu.name); setMenu(null); }}>
+                <span className="ctx-icon">
+                  <IconCopy size={14} />
+                </span>
                 {t("side.menuCopyName")}
               </div>
               <div className="ctx-item" onClick={() => { void copy(menu.path); setMenu(null); }}>
+                <span className="ctx-icon">
+                  <IconCopy size={14} />
+                </span>
                 {t("side.menuCopyPath")}
               </div>
               <div
                 className="ctx-item"
                 onClick={() => { void copy(relativeToRoot(menu.path)); setMenu(null); }}
               >
+                <span className="ctx-icon">
+                  <IconCopy size={14} />
+                </span>
                 {t("side.menuCopyRelative")}
               </div>
               <div
                 className="ctx-item"
                 onClick={() => { void copy(parentOf(menu.path)); setMenu(null); }}
               >
+                <span className="ctx-icon">
+                  <IconCopy size={14} />
+                </span>
                 {t("side.menuCopyParent")}
               </div>
               {menu.isDir && (
@@ -953,6 +1019,9 @@ export default function Sidebar(props: Props) {
                       setMenu(null);
                     }}
                   >
+                    <span className="ctx-icon">
+                      <IconTarget size={14} />
+                    </span>
                     {t("side.menuSetRoot")}
                   </div>
                 </>
@@ -967,6 +1036,9 @@ export default function Sidebar(props: Props) {
                   setMenu(null);
                 }}
               >
+                <span className="ctx-icon">
+                  <IconTrash size={14} />
+                </span>
                 {t("side.menuDelete")}
               </div>
             </>

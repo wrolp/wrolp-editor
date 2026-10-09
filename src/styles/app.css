@@ -887,10 +887,27 @@ body {
   border-radius: 6px;
   cursor: pointer;
   white-space: nowrap;
+  /* A row is a fixed-width picture and a label, so every label starts at the same place
+     whether or not its row has a picture of its own. */
+  display: flex;
+  align-items: center;
+  gap: 9px;
 }
 .ctx-item:hover {
   background: var(--accent-soft);
   color: var(--text-strong);
+}
+/* The icon sits in its own column and is dimmer than the label: it is the shape the eye
+   finds first when scanning, not the thing being read. */
+.ctx-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 15px;
+  justify-content: center;
+  color: var(--muted);
+}
+.ctx-item:hover .ctx-icon {
+  color: inherit;
 }
 /* The one item that cannot be taken back, so it says so before it is pressed rather than
    after: the colour is the warning, and the prompt behind it is the answer. */
@@ -901,13 +918,15 @@ body {
   background: var(--danger-bg);
   color: var(--danger);
 }
-/* Fixed width so labels stay aligned whether or not the tick is present. */
-.ctx-tick {
-  display: inline-block;
-  width: 14px;
+/* State reads at the end of the row rather than beside the icon: the icon column belongs to
+   the action, and a tick next to it would push that one label further right than every row
+   that has no state to show. */
+.ctx-check {
+  margin-left: auto;
+  padding-left: 12px;
   color: var(--accent-soft);
 }
-.ctx-item:hover .ctx-tick {
+.ctx-item:hover .ctx-check {
   color: var(--on-accent);
 }
 

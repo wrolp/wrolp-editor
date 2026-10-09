@@ -161,3 +161,106 @@ export function IconModePreview({ size = 16 }: IconProps) {
     </svg>
   );
 }
+
+/** A new file: the document, with a plus where its contents would go. */
+export function IconFilePlus({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.6}>
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5z" />
+      <path d="M14 3v5h5" />
+      <path d="M12 11v6M9 14h6" />
+    </svg>
+  );
+}
+
+/** A new folder: the folder, with the plus that says it does not exist yet. */
+export function IconFolderPlus({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.6}>
+      <path d="M3 6.5A1.5 1.5 0 0 1 4.5 5h4L10 6.75h9.5A1.5 1.5 0 0 1 21 8.25V17.5A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5v-11z" />
+      <path d="M12 10v6M9 13h6" />
+    </svg>
+  );
+}
+
+/** Copy: the sheet behind is what is taken, the one in front is what is made. */
+export function IconCopy({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <rect x="9" y="9" width="12" height="12" rx="2" />
+      <path d="M15 5.5A1.5 1.5 0 0 0 13.5 4h-9A1.5 1.5 0 0 0 3 5.5v9A1.5 1.5 0 0 0 4.5 16" />
+    </svg>
+  );
+}
+
+/** Paste: the clipboard the copy is waiting on. */
+export function IconPaste({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <rect x="4" y="4" width="16" height="17" rx="2" />
+      <path d="M9 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1" />
+      <path d="M8 10h8M8 14h5" />
+    </svg>
+  );
+}
+
+/** Rename: a pencil, because the name is what is being written over. */
+export function IconPencil({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <path d="M4 20h4L19 9l-4-4L4 16v4z" />
+      <path d="M14.5 5.5l4 4" />
+    </svg>
+  );
+}
+
+export function IconTrash({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <path d="M4 7h16" />
+      <path d="M9 7V4h6v3" />
+      <path d="M6.5 7l1 13a1 1 0 0 0 1 1h7a1 1 0 0 0 1-1l1-13" />
+      <path d="M10 11v6M14 11v6" />
+    </svg>
+  );
+}
+
+/** Make this folder the one the Explorer shows: the rings a scope draws. */
+export function IconTarget({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <circle cx="12" cy="12" r="8" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
+  );
+}
+
+/** Reload from disk: the same turn the refresh button makes, with a head on it. */
+export function IconReload({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.8}>
+      <path d="M20 12a8 8 0 1 1-2.6-5.9" />
+      <polyline points="20 4 20 9 15 9" />
+    </svg>
+  );
+}
+
+/** Hand a tab to another group: an arrow leaving one place for another. */
+export function IconMoveTo({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.8}>
+      <path d="M4 12h15" />
+      <polyline points="13 6 19 12 13 18" />
+    </svg>
+  );
+}
+
+/** The minimap: a shrunken copy of the document down one side of the editor. */
+export function IconMinimap({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <rect x="3" y="4" width="11" height="16" rx="1.6" />
+      <path d="M17 8h4M17 12h4M17 16h4" />
+    </svg>
+  );
+}
