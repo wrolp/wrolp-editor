@@ -1155,8 +1155,13 @@ body.resizing .editor-host {
 .tree-row:hover {
   background: var(--surface-2);
 }
+/* The file the editor is showing. Grey rather than the accent: the tree is a view of the disk,
+   and a row painted in the accent colour reads as a selection *of the tree* — the same colour
+   the accent uses for "this is the thing you are acting on" everywhere else. `--surface-active`
+   is the same neutral pressed-surface the hover states use, so it stays legible in both themes
+   and cannot be mistaken for a hue that means something. */
 .tree-row.ctx-active {
-  background: var(--accent-soft);
+  background: var(--surface-active);
   color: var(--text-strong);
 }
 .tree-row .chev {
