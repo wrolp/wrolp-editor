@@ -55,7 +55,7 @@ export default function ConflictCompareModal(props: Props) {
   }, []);
 
   return (
-    <div className="modal-overlay clear">
+    <div className="modal-overlay">
       <div className="modal diff-modal" ref={drag.ref}>
         <h3 className="modal-title" {...drag.handleProps}>
           {t("stale.diffName", { name })}

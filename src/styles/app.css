@@ -1764,10 +1764,14 @@ body.resizing .editor-host {
 }
 
 /* ---------- Modal ---------- */
+/* No dim behind a dialog. The panel is an opaque surface of its own with a shadow around it,
+   which is what separates it from the editor — a second, weaker border painted over the whole
+   window only muddied the content the dialog is about. The overlay still covers the viewport,
+   so a click outside lands here and reaches nothing underneath. */
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.55);
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1785,11 +1789,6 @@ body.resizing .editor-host {
 .modal h3 {
   font-size: 15px;
   margin-bottom: 12px;
-}
-/* A prompt about a file the user is still looking at: painting the whole window dark would hide
-   the very text the choice is about, so this overlay dims nothing. */
-.modal-overlay.clear {
-  background: transparent;
 }
 /* The conflict comparison. A side-by-side diff has to be wide before it says anything useful, so
    this one modal is sized instead of wrapped to its content. */

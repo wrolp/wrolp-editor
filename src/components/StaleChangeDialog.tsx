@@ -25,7 +25,7 @@ interface Props {
 export default function StaleChangeDialog({ tab, fromSave, onCompare, onReload, onKeep }: Props) {
   const drag = useModalDrag<HTMLDivElement>();
   return (
-    <div className="modal-overlay clear">
+    <div className="modal-overlay">
       <div className="modal" ref={drag.ref}>
         <h3 className="modal-title" {...drag.handleProps}>
           {t("stale.title")}
