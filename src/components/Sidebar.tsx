@@ -858,34 +858,36 @@ export default function Sidebar(props: Props) {
             )
           ) : (
             <>
-              <div
-                className="ctx-item"
-                onClick={() => {
-                  if (menu.isDir) onReveal(menu.path);
-                  else onOpenPath(menu.path);
-                  setMenu(null);
-                }}
-              >
-                {/* One item, two meanings, so it carries the shape of the row it was
-                    asked about: a folder is not opened in the editor, it is shown. */}
-                <span className="ctx-icon">
-                  {menu.isDir ? <IconFolder size={14} /> : <IconFile size={14} />}
-                </span>
-                {t("side.menuOpen")}
-              </div>
+              {/* Only a file is opened in the editor. A folder is not, so it has nothing
+                  to open and no item here: "Show in Windows Explorer" below is the one
+                  that acts on it. */}
               {!menu.isDir && (
-                <div
-                  className="ctx-item"
-                  onClick={() => {
-                    onCompare(menu.path);
-                    setMenu(null);
-                  }}
-                >
-                  <span className="ctx-icon">
-                    <IconCompare size={14} />
-                  </span>
-                  {t("cmp.menu")}
-                </div>
+                <>
+                  <div
+                    className="ctx-item"
+                    onClick={() => {
+                      onOpenPath(menu.path);
+                      setMenu(null);
+                    }}
+                  >
+                    <span className="ctx-icon">
+                      <IconFile size={14} />
+                    </span>
+                    {t("side.menuOpen")}
+                  </div>
+                  <div
+                    className="ctx-item"
+                    onClick={() => {
+                      onCompare(menu.path);
+                      setMenu(null);
+                    }}
+                  >
+                    <span className="ctx-icon">
+                      <IconCompare size={14} />
+                    </span>
+                    {t("cmp.menu")}
+                  </div>
+                </>
               )}
               <div
                 className="ctx-item"
