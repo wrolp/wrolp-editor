@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import {
   IconChevron,
   IconCompare,
@@ -88,6 +88,9 @@ interface TipProps {
 
 /** `.folder-menu`'s CSS width. The panel is placed by hand, so the number is needed twice. */
 const FOLDER_MENU_WIDTH = 260;
+
+/** How tall `.folder-menu`'s caret is, and so how far below the arrow the panel starts. */
+const FOLDER_MENU_CARET = 6;
 
 /**
  * How long the pointer has to rest on a row before its bubble appears. Sweeping the mouse
@@ -584,8 +587,15 @@ export default function Sidebar(props: Props) {
    *
    * The panel is `fixed` rather than anchored to the arrow, because every box between the two
    * of them scrolls and a scroll container clips both axes. See `.folder-menu`.
+   *
+   * `caret` is where the arrow's middle landed inside the panel, so the triangle keeps pointing
+   * at it even when the clamp below has slid the panel back into the window.
    */
-  const [foldersAt, setFoldersAt] = useState<{ left: number; top: number } | null>(null);
+  const [foldersAt, setFoldersAt] = useState<{
+    left: number;
+    top: number;
+    caret: number;
+  } | null>(null);
   const foldersArrow = useRef<HTMLButtonElement>(null);
   /**
    * What "Copy" last took, waiting to be pasted.
@@ -857,12 +867,20 @@ export default function Sidebar(props: Props) {
                   if (!foldersOpen) {
                     const r = foldersArrow.current?.getBoundingClientRect();
                     if (r) {
-                      setFoldersAt({
-                        left: Math.max(
-                          8,
-                          Math.min(r.left, window.innerWidth - FOLDER_MENU_WIDTH - 8),
+                      // Centred on the arrow, so the panel reads as the arrow's own dropdown
+                      // rather than as something hanging off its left edge.
+                      const mid = r.left + r.width / 2;
+                      const left = Math.max(
+                        8,
+                        Math.min(
+                          mid - FOLDER_MENU_WIDTH / 2,
+                          window.innerWidth - FOLDER_MENU_WIDTH - 8,
                         ),
-                        top: r.bottom + 4,
+                      );
+                      setFoldersAt({
+                        left,
+                        top: r.bottom + FOLDER_MENU_CARET,
+                        caret: mid - left,
                       });
                     }
                   }
@@ -876,43 +894,54 @@ export default function Sidebar(props: Props) {
               {foldersOpen && foldersAt && (
                 <div
                   className="folder-menu"
-                  role="menu"
-                  style={{ left: foldersAt.left, top: foldersAt.top }}
+                  style={
+                    {
+                      left: foldersAt.left,
+                      top: foldersAt.top,
+                      // Where the arrow's middle sits inside the panel, so the caret points at
+                      // it from wherever the panel ended up after the clamp.
+                      "--caret": `${foldersAt.caret}px`,
+                    } as CSSProperties
+                  }
                 >
-                  {folderHistory.length === 0 ? (
-                    <div className="empty">{t("side.noFolderHistory")}</div>
-                  ) : (
-                    folderHistory.map((item) => (
-                      <div
-                        key={item.path}
-                        className={`ctx-item folder-item${item.exists ? "" : " gone"}`}
-                        title={item.exists ? item.path : `${item.path} — ${t("side.folderGone")}`}
-                        // A folder that is not there cannot be pointed at, so the row is
-                        // shown but inert: greyed, and saying why on hover rather than
-                        // failing on click.
-                        onClick={() => {
-                          if (!item.exists) return;
-                          onSetRoot(item.path);
-                          setFoldersOpen(false);
-                        }}
-                      >
-                        <span className="ctx-icon">
-                          <IconOpenFolder size={14} />
-                        </span>
-                        <span className="folder-item-name">{item.name}</span>
-                        <button
-                          className="folder-item-remove"
-                          title={t("side.removeFolder")}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onRemoveFolder(item.path);
+                  {/* The list scrolls rather than the panel, because the caret is drawn outside
+                      the panel's box and a scroll container would clip it away. */}
+                  <div className="folder-menu-list" role="menu">
+                    {folderHistory.length === 0 ? (
+                      <div className="empty">{t("side.noFolderHistory")}</div>
+                    ) : (
+                      folderHistory.map((item) => (
+                        <div
+                          key={item.path}
+                          className={`ctx-item folder-item${item.exists ? "" : " gone"}`}
+                          title={item.exists ? item.path : `${item.path} — ${t("side.folderGone")}`}
+                          // A folder that is not there cannot be pointed at, so the row is
+                          // shown but inert: greyed, and saying why on hover rather than
+                          // failing on click.
+                          onClick={() => {
+                            if (!item.exists) return;
+                            onSetRoot(item.path);
+                            setFoldersOpen(false);
                           }}
                         >
-                          ×
-                        </button>
-                      </div>
-                    ))
-                  )}
+                          <span className="ctx-icon">
+                            <IconOpenFolder size={14} />
+                          </span>
+                          <span className="folder-item-name">{item.name}</span>
+                          <button
+                            className="folder-item-remove"
+                            title={t("side.removeFolder")}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onRemoveFolder(item.path);
+                            }}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      ))
+                    )}
+                  </div>
                 </div>
               )}
             </div>
