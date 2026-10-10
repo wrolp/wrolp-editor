@@ -1309,9 +1309,17 @@ body.resizing .editor-host {
   line-height: 1;
   cursor: pointer;
 }
+/* The row's hover lays the accent down underneath the cross, and grey on indigo is what made it
+   vanish a second time. `--on-accent` is the token the theme already carries for that surface —
+   `.ctx-check` above uses it for the same reason. */
+.folder-item:hover .folder-item-remove {
+  color: var(--on-accent);
+}
+/* The cross can only be pointed at while its row is, so this state always sits on the accent:
+   a wash of white rather than a grey chip, which would read as a hole punched in the row. */
 .folder-item-remove:hover {
-  background: var(--surface-2-hover);
-  color: var(--text);
+  background: rgb(255 255 255 / 0.18);
+  color: var(--on-accent);
 }
 
 .tree {
@@ -1332,8 +1340,14 @@ body.resizing .editor-host {
   white-space: nowrap;
   color: var(--text);
 }
+/* Hover has to be seen with the pointer on it, not measured afterwards: the background step
+   alone was 5 levels of grey (1.07:1 against the sidebar), which reads as nothing at all. The
+   name brightening to full white is what carries the feedback, and the background stays under
+   `.ctx-active`'s `--surface-active` so the file the editor is showing never goes quieter when
+   the pointer crosses it. */
 .tree-row:hover {
-  background: var(--surface-2);
+  background: var(--surface-hover);
+  color: var(--text-strong);
 }
 /* The file the editor is showing. Grey rather than the accent: the tree is a view of the disk,
    and a row painted in the accent colour reads as a selection *of the tree* — the same colour
