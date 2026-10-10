@@ -10,6 +10,7 @@ import {
   IconOpenFolder,
   IconPaste,
   IconPencil,
+  IconReload,
   IconTarget,
   IconTrash,
   IconTreeChevron,
@@ -25,6 +26,7 @@ import {
   type FsEntry,
   type HistoryEntry,
 } from "../lib/tauri";
+import { isUnder } from "../lib/path";
 import { pathKey } from "../lib/types";
 
 /** A tree node an action is aimed at. `name` keeps the folder's trailing separator. */
@@ -48,6 +50,30 @@ interface MenuTarget extends NodeTarget {
 interface CreatingTarget {
   dir: string;
   isDir: boolean;
+}
+
+/**
+ * A refresh aimed at one folder: `path` is the folder, `token` says how far along the request
+ * is. Every folder it covers re-reads, and nothing else does.
+ *
+ * Only the latest request is kept, so a folder has to remember the highest token it has been
+ * given rather than compare for equality: two requests that cover different subtrees must not
+ * send a folder that has already answered one of them back to the disk.
+ */
+interface RefreshRequest {
+  path: string;
+  token: number;
+}
+
+/**
+ * The token `path` has to answer for, or 0 when this request is not about it.
+ *
+ * A folder covers itself, so refreshing a folder refreshes what is inside it: a file added
+ * two levels down is not visible until the folders above it are read again.
+ */
+function covers(refresh: RefreshRequest | null, path: string): number {
+  if (!refresh) return 0;
+  return isUnder(path, refresh.path) ? refresh.token : 0;
 }
 
 interface TipProps {
@@ -203,11 +229,17 @@ interface TreeHandlers {
   /** Gives up on the new entry without touching the disk. */
   onCreateEnd: () => void;
   /**
-   * Per-folder refetch counters. A rename only invalidates the listing of the folder that
-   * held the entry, and re-reading just that one is what leaves the rest of the tree
+   * Per-folder refetch counters. A change to one entry only invalidates the listing of the
+   * folder that held it, and re-reading just that one is what leaves the rest of the tree
    * expanded the way the user left it.
    */
   refreshed: Record<string, number>;
+  /**
+   * The refresh aimed at a folder, which reaches everything inside it. The latest one only:
+   * a folder remembers the highest token it was given, so a request about one subtree never
+   * sends another one back to the disk.
+   */
+  refresh: RefreshRequest | null;
 }
 
 interface NodeProps extends TreeHandlers {
@@ -311,6 +343,7 @@ function FolderNode({
   onContextMenu: openMenu,
   expandLimit,
   refreshed,
+  refresh,
   ...handlers
 }: NodeProps & { entry: FsEntry }) {
   // The initial state only: a folder the user folded stays folded, so the setting applies
@@ -323,7 +356,10 @@ function FolderNode({
    * the folder was worth expanding.
    */
   const [listing, setListing] = useState<{ token: number; entries: FsEntry[] } | null>(null);
-  const token = refreshed[pathKey(entry.path)] ?? 0;
+  // Two ways to be asked for the same listing again: a counter of this folder's own, and the
+  // counter of a refresh aimed at a folder above it. The higher one wins, so a folder always
+  // re-reads at the newest request that covers it and never falls back to a stale question.
+  const token = Math.max(refreshed[pathKey(entry.path)] ?? 0, covers(refresh, entry.path));
   const editing = renaming === pathKey(entry.path);
   const naming = !!creating && pathKey(creating.dir) === pathKey(entry.path);
 
@@ -334,7 +370,9 @@ function FolderNode({
   }, [naming]);
 
   useEffect(() => {
-    if (collapsed || listing?.token === token) return;
+    // `>=` and not `===`: a listing read for a later counter than this folder has been asked
+    // for is still current, and re-reading it would be work for no newer answer.
+    if (collapsed || (listing !== null && listing.token >= token)) return;
     let alive = true;
     api
       .listDir(entry.path)
@@ -351,7 +389,7 @@ function FolderNode({
     // handlers only report failures; they are not part of the fetch condition
   }, [collapsed, listing?.token, token, entry.name, entry.path]);
 
-  const children = listing?.token === token ? listing.entries : null;
+  const children = listing !== null && listing.token >= token ? listing.entries : null;
 
   return (
     <>
@@ -404,6 +442,7 @@ function FolderNode({
               onCreateEnd={onCreateEnd}
               onContextMenu={openMenu}
               refreshed={refreshed}
+              refresh={refresh}
             />
           )}
           {/* At the end of the listing, where an entry sorts to anyway once it exists. It
@@ -444,6 +483,7 @@ interface Props extends Omit<
   | "renaming"
   | "onRenameEnd"
   | "refreshed"
+  | "refresh"
   | "creating"
   | "onCreate"
   | "onCreateEnd"
@@ -517,6 +557,10 @@ export default function Sidebar(props: Props) {
    */
   const [clipboard, setClipboard] = useState<NodeTarget | null>(null);
   const [refreshed, setRefreshed] = useState<Record<string, number>>({});
+  /** The refresh aimed at one folder, and what it covers. See `covers`. */
+  const [refresh, setRefresh] = useState<RefreshRequest | null>(null);
+  /** Only ever counts up: a folder compares tokens with `>=`, which is what needs that. */
+  const refreshSeq = useRef(0);
   // 0 means "collapse everything", which is what having the setting off has to mean: a
   // negative or missing depth would otherwise expand the top level by accident.
   const expandLimit = props.expandFolders ? Math.max(1, Math.floor(props.expandDepth)) : 0;
@@ -562,13 +606,21 @@ export default function Sidebar(props: Props) {
   };
 
   /**
-   * Re-read one folder's listing. The tree root is one more listing of its own, keyed the
-   * same way, so a change in it goes through here as well and leaves every folder the user
-   * had opened exactly as they were.
+   * Re-read one folder, and everything open inside it.
+   *
+   * The counter goes into that folder's own slot as well as into the request, because the
+   * tree root has no folder component to inherit the request and reads its counter directly.
+   * Refreshing a folder reaches what is inside it on purpose: a file added two levels down is
+   * not on screen until the folders above it are read again, and re-reading only the folder
+   * that was clicked is how a tree ends up looking refreshed but still lying.
+   *
+   * Every other folder keeps the expansion and the listing it had, which is the whole point:
+   * the rows the user opened are the reason the tree was worth opening.
    */
   const bumpFolder = (dir: string) => {
-    const key = pathKey(dir);
-    setRefreshed((prev) => ({ ...prev, [key]: (prev[key] ?? 0) + 1 }));
+    const token = ++refreshSeq.current;
+    setRefreshed((prev) => ({ ...prev, [pathKey(dir)]: token }));
+    setRefresh({ path: dir, token });
   };
 
   /**
@@ -579,10 +631,12 @@ export default function Sidebar(props: Props) {
   const commitRename = async (target: NodeTarget, name: string) => {
     if (!(await props.onRename(target, name))) return false;
     setRenaming(null);
-    const parent = parentOf(target.path);
+    // `parentOf` answers "" for a drive or share root, where the folder holding the entry is
+    // the one the Explorer itself is showing.
+    const parent = parentOf(target.path) || rootDir;
     if (!parent) {
-      // A folder the tree is rooted at: the caller re-points the Explorer, and the new
-      // `rootDir` brings the new listing by itself.
+      // No folder to re-read at all, which means there is no tree either: nothing is on
+      // screen that the rename could have changed.
       setRefreshKey((k) => k + 1);
       return true;
     }
@@ -638,8 +692,11 @@ export default function Sidebar(props: Props) {
     }
   };
 
-  // The Explorer's own folder is one more listing, so renaming the root re-reads it here.
-  const rootToken = rootDir ? (refreshed[pathKey(rootDir)] ?? 0) : 0;
+  // The Explorer's own folder is one more listing, so it takes the same pair of counters any
+  // other folder does: its own slot, and a request aimed at it or at something above it.
+  const rootToken = rootDir
+    ? Math.max(refreshed[pathKey(rootDir)] ?? 0, covers(refresh, rootDir))
+    : 0;
 
   useEffect(() => {
     if (!rootDir) {
@@ -647,6 +704,8 @@ export default function Sidebar(props: Props) {
       return;
     }
     let alive = true;
+    // A refresh that arrives while this read is in flight re-runs the effect and `alive`
+    // drops the older answer, so the last question asked is the one that gets answered.
     api
       .listDir(rootDir)
       .then((list) => {
@@ -660,7 +719,8 @@ export default function Sidebar(props: Props) {
     return () => {
       alive = false;
     };
-    // Re-fetch on view switch, explicit refresh and a rename in this folder.
+    // Re-fetch on view switch, explicit refresh and a rename in this folder. The token only
+    // ever counts up, so these do not re-run for a refresh aimed somewhere else in the tree.
   }, [rootDir, onError, view, refreshKey, rootToken]);
 
   if (!visible) return null;
@@ -746,6 +806,7 @@ export default function Sidebar(props: Props) {
                 onCreate={commitCreate}
                 onCreateEnd={() => setCreating(null)}
                 refreshed={refreshed}
+                refresh={refresh}
                 onContextMenu={(target, x, y) => setMenu({ ...target, x, y })}
               />
               {creating && pathKey(creating.dir) === pathKey(rootDir) && (
@@ -814,6 +875,19 @@ export default function Sidebar(props: Props) {
               </div>
             ) : (
               <>
+                <div
+                  className="ctx-item"
+                  onClick={() => {
+                    bumpFolder(rootDir);
+                    setMenu(null);
+                  }}
+                >
+                  <span className="ctx-icon">
+                    <IconReload size={14} />
+                  </span>
+                  {t("side.menuRefresh")}
+                </div>
+                <div className="ws-sep" />
                 <div
                   className="ctx-item"
                   onClick={() => {
@@ -907,6 +981,21 @@ export default function Sidebar(props: Props) {
                   file, which is why these two are offered on a folder only. */}
               {menu.isDir && (
                 <>
+                  {/* Re-reads this folder and everything open inside it, and leaves every
+                      other folder exactly as it is: the tree keeps its shape, which is what
+                      the toolbar's own refresh cannot do. */}
+                  <div
+                    className="ctx-item"
+                    onClick={() => {
+                      bumpFolder(menu.path);
+                      setMenu(null);
+                    }}
+                  >
+                    <span className="ctx-icon">
+                      <IconReload size={14} />
+                    </span>
+                    {t("side.menuRefresh")}
+                  </div>
                   <div
                     className="ctx-item"
                     onClick={() => {
