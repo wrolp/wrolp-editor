@@ -100,6 +100,14 @@ const EN: Table = {
   "stale.diskSide": "{name} · on disk",
   "stale.mineSide": "{name} · unsaved",
 
+  "gone.title": "The file is gone from disk",
+  "gone.body": "\"{name}\" no longer exists: it was deleted or moved while it was open.",
+  "gone.bodyDirty": "It also has edits that were never saved.",
+  "gone.note": "Keeping it writes the text out under the same name in a folder this app keeps, so it stays editable and can be opened again later. Closing throws the text away.",
+  "gone.keep": "Keep the text",
+  "gone.close": "Close the tab",
+  "gone.kept": "Kept {name}",
+
   "settings.nav": "Settings",
   "settings.catContext": "Context menu",
   "settings.catGeneral": "General",
@@ -412,6 +420,14 @@ const ZH: Table = {
   "stale.diffName": "{name} 冲突对比",
   "stale.diskSide": "{name} · 磁盘上",
   "stale.mineSide": "{name} · 未保存",
+
+  "gone.title": "文件已从磁盘上消失",
+  "gone.body": "「{name}」已不存在：它在打开期间被删除或移动了。",
+  "gone.bodyDirty": "而且它还有没保存过的编辑。",
+  "gone.note": "选择保留会把这些文本按原文件名写入本程序保留的目录，之后仍可继续编辑，也能再打开；关闭则会丢弃这些文本。",
+  "gone.keep": "保留这些文本",
+  "gone.close": "关闭标签",
+  "gone.kept": "已保留 {name}",
 
   "settings.nav": "设置",
   "settings.catContext": "右键菜单",

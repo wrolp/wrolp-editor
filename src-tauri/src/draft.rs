@@ -40,6 +40,14 @@ pub fn store_dir(app: &AppHandle) -> Result<PathBuf, String> {
   wrolp_dir(app, "state")
 }
 
+/// Where the text of a file that was deleted while it was open is parked.
+///
+/// Not a draft: this is a whole file with the name it had, kept so it can be opened again
+/// like any other, rather than a note about edits that were never saved.
+pub fn kept_dir(app: &AppHandle) -> Result<PathBuf, String> {
+  wrolp_dir(app, "kept")
+}
+
 /// Strip the Windows `\\?\` / `\\.\` verbatim prefix that canonicalize() adds.
 fn strip_verbatim(path: &str) -> String {
   if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {

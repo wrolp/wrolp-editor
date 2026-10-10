@@ -10,7 +10,7 @@ use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
 
 /// Files larger than this are refused so Monaco cannot freeze the window.
-const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
+pub(crate) const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
 
 pub(crate) const GROUPS_FILE: &str = "groups.json";
 /// Where the window was last left. Separate from settings: it changes on every drag.
@@ -318,7 +318,7 @@ pub fn take_startup_files(state: State<'_, PendingFiles>) -> Vec<String> {
 
 /// Modification time as epoch milliseconds, the unit the frontend compares against.
 /// A filesystem that reports none yields 0, so it can never look like a change happened.
-fn mtime_ms(meta: &std::fs::Metadata) -> u64 {
+pub(crate) fn mtime_ms(meta: &std::fs::Metadata) -> u64 {
   meta
     .modified()
     .ok()
@@ -385,26 +385,35 @@ pub fn open_file(
 }
 
 /// Current mtime and size, for the check that asks whether another program wrote the file.
+/// `None` when there is no such file any more.
 ///
 /// Answering that by reading the file would make a background poll expensive, so this looks
-/// at metadata only. Any failure here means just "unknown" to the caller, which keeps what it
-/// already has rather than inventing a change.
+/// at metadata only. Two very different things come out of it, and they are kept apart:
+/// "there is no file there" is an answer the caller can act on, while a failure to *look* —
+/// a share that is not answering, a permission that is not granted — is not, and is still an
+/// error so the caller keeps what it already has rather than inventing a change.
 #[tauri::command]
-pub fn stat_file(path: String) -> Result<FileStat, String> {
+pub fn stat_file(path: String) -> Result<Option<FileStat>, String> {
   let normalized = draft::normalize_path(&path);
   if normalized.is_empty() {
     return Err("path_empty".into());
   }
   let file = Path::new(&normalized);
-  let meta = std::fs::metadata(file).map_err(|e| format!("file_access:{e}"))?;
+  let meta = match std::fs::metadata(file) {
+    Ok(m) => m,
+    // Deleted, moved, or never written: what the tab was built on is gone.
+    Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+    Err(e) => return Err(format!("file_access:{e}")),
+  };
+  // Something else is there now — a folder, most likely — so there is no text to compare.
   if !meta.is_file() {
-    return Err("file_not_file".into());
+    return Ok(None);
   }
-  Ok(FileStat {
+  Ok(Some(FileStat {
     path: normalized,
     mtime: mtime_ms(&meta),
     bytes: meta.len(),
-  })
+  }))
 }
 
 /// The stored settings, cleaned. Missing file is a clean first run, not an error.
@@ -417,7 +426,7 @@ pub(crate) fn settings_of(app: &AppHandle) -> Settings {
 }
 
 /// The configured encoding, for callers that were not handed one.
-fn stored_encoding(app: &AppHandle) -> String {
+pub(crate) fn stored_encoding(app: &AppHandle) -> String {
   settings_of(app).encoding
 }
 
@@ -723,7 +732,7 @@ pub fn get_history(app: AppHandle) -> Result<Vec<HistoryEntry>, String> {
   Ok(read_json::<Vec<HistoryEntry>>(&app, "history.json")?.unwrap_or_default())
 }
 
-fn push_history_entry(app: &AppHandle, path: &str) -> Result<(), String> {
+pub(crate) fn push_history_entry(app: &AppHandle, path: &str) -> Result<(), String> {
   let mut history = read_json::<Vec<HistoryEntry>>(app, "history.json")?.unwrap_or_default();
   history.retain(|h| h.path != path);
   let name = Path::new(path)

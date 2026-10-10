@@ -19,6 +19,7 @@ import DraftRestoreSummary from "./components/DraftRestoreSummary";
 import ComparePickerDialog from "./components/ComparePickerDialog";
 import CloseConfirmDialog from "./components/CloseConfirmDialog";
 import ReloadConfirmDialog from "./components/ReloadConfirmDialog";
+import DeletedFileDialog from "./components/DeletedFileDialog";
 import StaleChangeDialog from "./components/StaleChangeDialog";
 import ConflictCompareModal from "./components/ConflictCompareModal";
 import {
@@ -653,6 +654,10 @@ export default function App() {
         // The backend dropped the entry from the recent-files list, so the sidebar's own
         // copy of it is stale until it is read again.
         refreshHistory();
+        // A file deleted here may well be one with a tab open, and the tab's text is then
+        // the only copy of it. The periodic check would find that within a few seconds;
+        // asking now is the difference between an answer and a surprise.
+        void tabs.checkDisk();
         return true;
       } catch (e) {
         toast(errorMessage(e));
@@ -662,7 +667,7 @@ export default function App() {
         return false;
       }
     },
-    [refreshHistory, toast]
+    [refreshHistory, tabs, toast]
   );
 
   const renameTab = useCallback(
@@ -1015,6 +1020,13 @@ export default function App() {
   const conflictTab = conflictView
     ? tabs.tabs.find((t) => t.id === conflictView.tabId) ?? null
     : null;
+  /**
+   * The "file is gone" prompt at the front of the queue, and the tab whose text is at stake.
+   * A tab closed from elsewhere drops its own prompt, so a missing tab means the answer got
+   * in before this render.
+   */
+  const goneAsk = tabs.gone[0] ?? null;
+  const goneTab = goneAsk ? tabs.tabs.find((t) => t.id === goneAsk.tabId) ?? null : null;
   /** Only a real file tab has a path for the path actions (reveal, copy, per-file settings). */
   const menuTabIsFile = !!menuTab && isFileTab(menuTab);
   const menuMinimapOn = menuTab?.fileSettings.minimap ?? settings.minimap;
@@ -1661,6 +1673,16 @@ const defaultModeFor = useCallback(
             // the next keystroke of Ctrl+S.
             if (staleAsk.fromSave) void tabs.saveTab(staleTab.id, { overwrite: true });
           }}
+        />
+      )}
+
+      {/* A file that is gone is asked about before a file that merely changed: the changed
+          one can be reloaded from the disk, and this one has nothing left to reload from. */}
+      {!staleAsk && goneAsk && goneTab && (
+        <DeletedFileDialog
+          tab={goneTab}
+          onKeep={() => void tabs.answerGone(goneTab.id, "keep")}
+          onClose={() => void tabs.answerGone(goneTab.id, "close")}
         />
       )}
 

@@ -32,6 +32,7 @@ pub fn run() {
       entry::create_file,
       entry::create_dir,
       entry::copy_entry,
+      entry::keep_file,
       entry::remove_entry,
       commands::get_draft,
       commands::save_draft,

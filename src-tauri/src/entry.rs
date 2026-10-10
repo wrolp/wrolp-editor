@@ -10,7 +10,9 @@
 //! text of files that were open when the entry went; a file deleted by mistake and created
 //! again should still be offered its own edits back, which is the one thing left that can be.
 
-use crate::commands::{self, protected_roots, refused_by_scope, FsEntry, HistoryEntry, Settings};
+use crate::commands::{
+  self, protected_roots, refused_by_scope, FsEntry, HistoryEntry, SavedFile, Settings,
+};
 use crate::draft;
 use crate::group::{GroupStore, GroupTab};
 use crate::rename::{check_name, under, NameError};
@@ -246,6 +248,56 @@ fn name_at(path: &Path) -> String {
     .file_name()
     .map(|n| n.to_string_lossy().to_string())
     .unwrap_or_default()
+}
+
+/// Park the text of a file that was deleted while it was open.
+///
+/// The file is gone, so the only place its text still exists is the editor's buffer, and a
+/// quit or a closed tab would take that with it. This writes it out under the name it had,
+/// in a folder this app owns, so the buffer becomes a file again: it can be edited and saved
+/// like any other, and it is added to the recent-files list, which is what lets it be opened
+/// again after the tab is gone.
+///
+/// Nothing is replaced here either: a second file kept under a name that is already parked
+/// takes the next free spelling, the same way a paste does.
+#[tauri::command]
+pub fn keep_file(
+  app: AppHandle,
+  path: String,
+  content: String,
+  encoding: Option<String>,
+  bom: Option<bool>,
+) -> Result<SavedFile, String> {
+  let dir = draft::kept_dir(&app)?;
+  let name = Path::new(&path)
+    .file_name()
+    .map(|n| n.to_string_lossy().to_string())
+    .ok_or("keep_no_name")?;
+  let target = free_name(&dir, &name)?;
+  // The same encoding the file was read in, for the same reason a save uses it: a legacy
+  // file kept as UTF-8 would be garbage to every other tool that opens it.
+  let chosen = match encoding.filter(|e| !e.trim().is_empty()) {
+    Some(choice) => choice,
+    None => commands::stored_encoding(&app),
+  };
+  let written = crate::encoding::encode(&content, &chosen, bom.unwrap_or(false))?;
+  if written.len() as u64 > commands::MAX_FILE_BYTES {
+    return Err(format!("file_too_large:{}", written.len() / (1024 * 1024)));
+  }
+  std::fs::write(&target, &written).map_err(|e| format!("file_write:{e}"))?;
+  let mtime = std::fs::metadata(&target)
+    .map(|m| commands::mtime_ms(&m))
+    .unwrap_or(0);
+  let path = draft::normalize_path(&target.to_string_lossy());
+  // Being able to open it again is half the point, and the recent-files list is where a
+  // file goes to be found once its tab is closed.
+  commands::push_history_entry(&app, &path)?;
+  Ok(SavedFile {
+    path,
+    mtime,
+    encoding: crate::encoding::resolve(&chosen)?.name().to_string(),
+    bytes: written.len() as u64,
+  })
 }
 
 /// Delete a file, or a folder and everything in it.

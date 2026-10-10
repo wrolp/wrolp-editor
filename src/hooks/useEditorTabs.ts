@@ -1,6 +1,15 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import { t } from "../lib/i18n";
-import { api, errorMessage, pickSaveAs, EMPTY_FILE_SETTINGS, type Draft, type FileSettings, type GroupTab } from "../lib/tauri";
+import {
+  api,
+  errorMessage,
+  pickSaveAs,
+  EMPTY_FILE_SETTINGS,
+  type Draft,
+  type FileSettings,
+  type FileStat,
+  type GroupTab,
+} from "../lib/tauri";
 import { basename, dirname, isUntitled, langOf, modelUri, rekeyPath } from "../lib/path";
 import { tabKey, toStoredTab } from "../lib/group";
 import { pathKey, isFileTab, type ComparePair, type CompareSide, type EditorHandle, type PendingRestore, type Tab } from "../lib/types";
@@ -25,6 +34,19 @@ interface StaleAsk {
    * match and the same write would ask again on every sweep.
    */
   mtime: number;
+}
+
+/**
+ * A tab whose file has gone off the disk entirely, waiting for the user to say whether the
+ * text still in the editor should be kept.
+ *
+ * Different from a conflict, where the file is there and merely disagrees: here there is
+ * nothing on disk to compare against or reload from, and the buffer is the only copy left.
+ */
+interface GoneAsk {
+  tabId: number;
+  path: string;
+  name: string;
 }
 
 /**
@@ -94,6 +116,10 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
    * the tab keeps being editable behind it, so a live view would move under the reader.
    */
   const [conflict, setConflict] = useState<{ tabId: number; pair: ComparePair } | null>(null);
+  /** Files that have gone off the disk while they were open, waiting for an answer. */
+  const [gone, setGone] = useState<GoneAsk[]>([]);
+  const goneRef = useRef(gone);
+  goneRef.current = gone;
 
   const currentOffset = useCallback(() => {
     const h = editorRef.current;
@@ -817,6 +843,10 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
             : t
         )
       );
+      // A save writes the file back into existence, so a prompt saying it is gone would be
+      // answering a question that stopped being true — and keeping it would then park a
+      // second copy of text that already has a home.
+      setGone((q) => q.filter((a) => a.tabId !== tab.id));
       toast(t("menu.saved", { name: tab.name }));
       return true;
     } catch (e) {
@@ -945,25 +975,44 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
    * text — that is the whole point of checking. A tab carrying unsaved edits cannot be answered
    * for by anybody but the user, so it joins the queue the prompt works through.
    *
-   * A failed stat is deliberately not a change: the file may be gone, or on a share that is not
-   * answering, and reading either as "modified" would reload a tab onto a guess.
+   * A file that is simply not there any more is asked about too: the text left in the editor
+   * is then the only copy of it, and whether to keep that is not a question this app can
+   * answer on the user's behalf. A *failed* stat is deliberately still nothing at all: a
+   * share that is not answering says nothing about the file, and reading it as "gone" would
+   * drop a prompt on work that is perfectly safe.
    */
   const checkDisk = useCallback(async () => {
     if (checking.current) return;
     checking.current = true;
     try {
       const waiting = new Set(queueRef.current.map((r) => pathKey(r.path)));
-      const asked = new Set(staleRef.current.map((a) => a.tabId));
+      const asked = new Set([
+        ...staleRef.current.map((a) => a.tabId),
+        ...goneRef.current.map((a) => a.tabId),
+      ]);
       for (const tab of tabsRef.current) {
-        if (!isFileTab(tab) || isUntitled(tab.path) || tab.mtime === undefined) continue;
+        // A picture has no text in it: the "buffer" behind one is the empty stand-in for its
+        // bytes, so there is nothing here to keep and the preview going blank is the whole
+        // of what happened.
+        if (!isFileTab(tab) || isUntitled(tab.path) || tab.mtime === undefined || tab.isBinary) {
+          continue;
+        }
         // A tab with a draft prompt open is already being asked about, and one with a
         // conflict prompt open is waiting for an answer: reloading either would move the
         // text under a dialog that describes it.
         if (asked.has(tab.id) || waiting.has(pathKey(tab.path))) continue;
-        let stat;
+        let stat: FileStat | null;
         try {
           stat = await api.statFile(tab.path);
         } catch {
+          continue;
+        }
+        if (stat === null) {
+          // Deleted, moved, or renamed by something outside the app. The tab keeps holding
+          // the text, so nothing is lost yet — but nothing can be saved back either.
+          setGone((q) =>
+            q.some((a) => a.tabId === tab.id) ? q : [...q, { tabId: tab.id, path: tab.path, name: tab.name }]
+          );
           continue;
         }
         if (stat.mtime === tab.mtime && stat.bytes === tab.bytes) continue;
@@ -1017,6 +1066,79 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
     }
     setStale((q) => q.filter((a) => a.tabId !== id));
   }, []);
+
+  /**
+   * Write the text still in a deleted file's tab out as a file of its own, and point the tab
+   * at it.
+   *
+   * The buffer is the only copy left, so this is what stops a quit or a closed tab from
+   * being the end of it. The tab moves to the parked copy rather than keeping the dead path:
+   * staying there would leave a file that cannot be saved, reopened or compared, and the
+   * parked one is a real file that can be all three. Everything keyed by the old path comes
+   * along, because `rekeyTabs` already knows how to move a tab without losing its model —
+   * and with the model go the undo stack and the caret, which a fresh open would not have.
+   */
+  const keepDeletedFile = useCallback(
+    async (id: number): Promise<boolean> => {
+      const tab = tabsRef.current.find((t) => t.id === id);
+      if (!tab || !isFileTab(tab) || isUntitled(tab.path)) return false;
+      const content = liveContent(tab) ?? tab.original;
+      const saved = await api
+        .keepFile(tab.path, content, tab.encoding, tab.bom)
+        .catch((e) => {
+          toast(errorMessage(e));
+          return null;
+        });
+      if (!saved) return false;
+      const oldPath = tab.path;
+      rekeyTabs(oldPath, saved.path);
+      // The baseline is what was written out, and the mtime is what the disk now says: with
+      // both set, the next sweep sees a file that agrees with its tab instead of one that
+      // has vanished.
+      setTabs((prev) =>
+        prev.map((t) =>
+          t.id === id
+            ? {
+                ...t,
+                original: content,
+                dirty: false,
+                mtime: saved.mtime,
+                encoding: saved.encoding,
+                bytes: saved.bytes,
+              }
+            : t
+        )
+      );
+      // The draft described text this file no longer holds: the parked copy is that text
+      // now, and a draft left behind would offer the same edits back a second time.
+      draft.forget(oldPath);
+      await api.clearDraft(oldPath).catch(() => {});
+      toast(t("gone.kept", { name: basename(saved.path) }));
+      return true;
+    },
+    [draft, liveContent, rekeyTabs, toast]
+  );
+
+  /**
+   * Answer for a file that has gone: keep the text as a file of its own, or close the tab.
+   *
+   * A keep that failed leaves the question on the list. The text is still only in the
+   * buffer, so quietly retiring the prompt would be the same as answering "close" — and
+   * that is the one answer here that cannot be taken back.
+   */
+  const answerGone = useCallback(
+    async (id: number, mode: "keep" | "close") => {
+      if (mode === "keep") {
+        if (await keepDeletedFile(id)) {
+          setGone((q) => q.filter((a) => a.tabId !== id));
+        }
+        return;
+      }
+      setGone((q) => q.filter((a) => a.tabId !== id));
+      await closeTab(id);
+    },
+    [closeTab, keepDeletedFile]
+  );
 
   /**
    * Show what a conflict is: the text on disk against the text in the tab.
@@ -1152,6 +1274,9 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
     restoreQueue,
     /** Conflict prompts, one at a time, in the order the files were found changed. */
     stale,
+    /** Files found to be gone from the disk, one prompt at a time. */
+    gone,
+    answerGone,
     /** The conflict comparison popup, while it is open. */
     conflict,
     showConflict,

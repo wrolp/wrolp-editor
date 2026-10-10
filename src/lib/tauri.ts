@@ -213,8 +213,23 @@ export const api = {
   /** `record: false` keeps a session restore from rewriting the recent-files history. */
   openFile: (path: string, record = true, encoding?: string) =>
     invoke<OpenedFile>("open_file", { path, record, encoding: encoding ?? null }),
-  /** Metadata only, so a background check of every open file stays cheap. */
-  statFile: (path: string) => invoke<FileStat>("stat_file", { path }),
+  /**
+   * Metadata only, so a background check of every open file stays cheap.
+   *
+   * `null` is an answer, not a failure: the file is not there any more. Only a failure to
+   * *look* rejects, and that is deliberately left as "unknown", so a share that is not
+   * answering cannot be read as a change.
+   */
+  statFile: (path: string) => invoke<FileStat | null>("stat_file", { path }),
+  /**
+   * Write the text of a file that was deleted while it was open into the folder this app
+   * keeps for that, under the name it had.
+   *
+   * The buffer is the only place the text still exists, and this makes it a file again —
+   * editable, saveable, and openable later from the recent-files list.
+   */
+  keepFile: (path: string, content: string, encoding?: string, bom?: boolean) =>
+    invoke<SavedFile>("keep_file", { path, content, encoding: encoding ?? null, bom: bom ?? null }),
   saveFile: (path: string, content: string, encoding?: string, bom?: boolean) =>
     invoke<SavedFile>("save_file", { path, content, encoding: encoding ?? null, bom: bom ?? null }),
   /**
