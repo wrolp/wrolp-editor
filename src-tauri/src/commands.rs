@@ -760,6 +760,94 @@ pub fn remove_history(app: AppHandle, path: String) -> Result<Vec<HistoryEntry>,
   Ok(history)
 }
 
+/// A folder the Explorer has been pointed at, newest first.
+///
+/// Separate from the file history in `history.json` because the two answer different
+/// questions and are pruned differently: a file that has been closed is still a file, whereas
+/// a folder on an unplugged drive is not a folder at all. Keeping them apart also means a
+/// forward/back pair cannot evict a folder the Explorer is showing.
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct FolderHistoryEntry {
+  pub path: String,
+  pub name: String,
+  pub opened_at: String,
+  /// Whether the folder still exists. Recorded rather than filtered on read, so a folder that
+  /// comes back (a drive replugged, a sync folder finished catching up) un-greys itself
+  /// instead of having been dropped from the list in the meantime.
+  pub exists: bool,
+}
+
+/// The most folders kept. Deeper than the file history's fifty because a folder list is a
+/// menu of places to go, not a record of what was read, and a project tree rarely lives under
+/// one parent.
+const FOLDER_HISTORY_MAX: usize = 30;
+
+#[tauri::command]
+pub fn get_folder_history(app: AppHandle) -> Result<Vec<FolderHistoryEntry>, String> {
+  let mut history =
+    read_json::<Vec<FolderHistoryEntry>>(&app, "folder-history.json")?.unwrap_or_default();
+  // Existence is settled on read rather than trusted from the file, since a folder can be
+  // deleted while the app is closed — the whole point of greying it out.
+  for entry in &mut history {
+    entry.exists = Path::new(&entry.path).is_dir();
+  }
+  Ok(history)
+}
+
+/// Note that the Explorer moved to `dir`.
+///
+/// Best-effort: a history that cannot be written must not stop the folder from opening, so
+/// the error is dropped. Nothing in the UI depends on the write having happened, and a toast
+/// about a side file would be worse than a folder missing from the menu.
+#[tauri::command]
+pub fn record_folder_history(app: AppHandle, dir: String) {
+  push_folder_history(&app, &dir);
+}
+
+pub(crate) fn push_folder_history(app: &AppHandle, dir: &str) {
+  let mut history = read_json::<Vec<FolderHistoryEntry>>(app, "folder-history.json")
+    .unwrap_or_default()
+    .unwrap_or_default();
+  let normalized = draft::normalize_path(dir);
+  // Compared normalized: the same folder reached as `C:\a` and `C:\a\` is one entry, not two
+  // that trade places on every visit.
+  history.retain(|h| draft::normalize_path(&h.path) != normalized);
+  // A drive root has no file name of its own, so `file_name` answers None and the path is its
+  // own label — the same fallback the file history uses.
+  let name = Path::new(&normalized)
+    .file_name()
+    .map(|n| n.to_string_lossy().to_string())
+    .unwrap_or_else(|| normalized.clone());
+  history.insert(
+    0,
+    FolderHistoryEntry {
+      path: normalized,
+      name,
+      opened_at: chrono::Utc::now().to_rfc3339(),
+      exists: true,
+    },
+  );
+  history.truncate(FOLDER_HISTORY_MAX);
+  let _ = write_json(app, "folder-history.json", &history);
+}
+
+#[tauri::command]
+pub fn remove_folder_history(
+  app: AppHandle,
+  path: String,
+) -> Result<Vec<FolderHistoryEntry>, String> {
+  let target = draft::normalize_path(&path);
+  let mut history =
+    read_json::<Vec<FolderHistoryEntry>>(&app, "folder-history.json")?.unwrap_or_default();
+  history.retain(|h| draft::normalize_path(&h.path) != target);
+  write_json(&app, "folder-history.json", &history)?;
+  for entry in &mut history {
+    entry.exists = Path::new(&entry.path).is_dir();
+  }
+  Ok(history)
+}
+
 #[tauri::command]
 pub fn get_settings(app: AppHandle) -> Result<Settings, String> {
   Ok(
@@ -895,6 +983,56 @@ where
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// A folder read as missing is greyed out rather than dropped, so the same folder reached
+  /// by two spellings must not show up twice.
+  #[test]
+  fn folder_history_dedupes_on_normalized_path() {
+    let mut history = vec![FolderHistoryEntry {
+      path: r"C:\a".into(),
+      name: "a".into(),
+      opened_at: "old".into(),
+      exists: true,
+    }];
+    let target = draft::normalize_path(r"C:\a");
+    history.retain(|h| draft::normalize_path(&h.path) != target);
+    assert!(
+      history.is_empty(),
+      "the trailing separator is the same folder"
+    );
+  }
+
+  /// The list is a menu of places, so it stays short enough to scan.
+  #[test]
+  fn folder_history_is_bounded() {
+    let mut history: Vec<FolderHistoryEntry> = (0..FOLDER_HISTORY_MAX + 10)
+      .map(|i| FolderHistoryEntry {
+        path: format!(r"C:\d{i}"),
+        name: format!("d{i}"),
+        opened_at: "now".into(),
+        exists: true,
+      })
+      .collect();
+    history.truncate(FOLDER_HISTORY_MAX);
+    assert_eq!(history.len(), FOLDER_HISTORY_MAX);
+    // Truncation drops the oldest end, which is the far end of the list.
+    assert_eq!(history[0].path, r"C:\d0");
+  }
+
+  /// A file history written before folders were recorded must still parse, and a folder
+  /// entry that lost its `exists` flag (written by the first build) reads as missing rather
+  /// than being offered as somewhere to go.
+  #[test]
+  fn folder_history_reads_an_older_file() {
+    let legacy = r#"[{"path":"C:\\a","name":"a","opened_at":"then"}]"#;
+    let parsed: Vec<FolderHistoryEntry> = serde_json::from_str(legacy).expect("legacy parses");
+    assert_eq!(parsed.len(), 1);
+    assert_eq!(parsed[0].path, r"C:\a");
+    assert!(
+      !parsed[0].exists,
+      "a missing flag means unknown, which greys the row"
+    );
+  }
 
   /// Pictures are read for their metadata only. SVG counts as text on purpose: it is edited
   /// as source, and it is the one image the editor can legitimately show both ways.

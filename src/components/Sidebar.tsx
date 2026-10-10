@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
+  IconChevron,
   IconCompare,
   IconCopy,
   IconFile,
@@ -23,6 +24,7 @@ import {
   copyText,
   errorMessage,
   parentOf,
+  type FolderHistoryEntry,
   type FsEntry,
   type HistoryEntry,
 } from "../lib/tauri";
@@ -84,6 +86,15 @@ interface TipProps {
   detail?: string;
 }
 
+/** `.folder-menu`'s CSS width. The panel is placed by hand, so the number is needed twice. */
+const FOLDER_MENU_WIDTH = 260;
+
+/**
+ * How long the pointer has to rest on a row before its bubble appears. Sweeping the mouse
+ * across the tree passes a hundred names and means none of them in particular.
+ */
+const TIP_DELAY_MS = 500;
+
 /**
  * Two-line tooltip for the file tree: name on top, full path underneath.
  *
@@ -96,19 +107,32 @@ function TreeTooltip({ children, name, detail }: TipProps) {
   // `alignEnd` right-aligns the bubble to the cursor when there is not enough room to
   // the right, which is what keeps it on screen near the window edge.
   const [tip, setTip] = useState<{ x: number; y: number; alignEnd: boolean } | null>(null);
+  const pending = useRef<number | undefined>(undefined);
+  // A row can unmount while its bubble is still being waited for, when the folder holding it
+  // is collapsed. The timer has to go with it rather than fire into a component that is gone.
+  useEffect(() => () => window.clearTimeout(pending.current), []);
   return (
     <>
       <div
         onMouseEnter={(e) => {
+          // Measured here rather than inside the timeout: this is the last moment the row is
+          // guaranteed to be under the pointer.
           const rect = e.currentTarget.getBoundingClientRect();
           const widest = 444; // the CSS max-width plus a little breathing room
-          setTip({
+          const at = {
             x: e.clientX,
             y: rect.bottom,
             alignEnd: e.clientX > window.innerWidth - widest,
-          });
+          };
+          window.clearTimeout(pending.current);
+          pending.current = window.setTimeout(() => setTip(at), TIP_DELAY_MS);
         }}
-        onMouseLeave={() => setTip(null)}
+        onMouseLeave={() => {
+          // Cancels a bubble still on its way, which is the point of the delay: leaving early
+          // has to mean never showing at all.
+          window.clearTimeout(pending.current);
+          setTip(null);
+        }}
       >
         {children}
       </div>
@@ -500,6 +524,10 @@ interface Props extends Omit<
   onSetView: (view: "explorer" | "history") => void;
   onPickFolder: () => void;
   onRemoveHistory: (path: string) => void;
+  /** Folders the Explorer has been pointed at, newest first. */
+  folderHistory: FolderHistoryEntry[];
+  /** Forgets one folder so it stops being offered. */
+  onRemoveFolder: (path: string) => void;
   /** Reveals a path in the Windows Explorer. */
   onReveal: (path: string) => void;
   /** Points the Explorer at a folder, the same action as the tab menu's. */
@@ -535,6 +563,8 @@ export default function Sidebar(props: Props) {
     onSetView,
     onPickFolder,
     onRemoveHistory,
+    folderHistory,
+    onRemoveFolder,
     onReveal,
     onSetRoot,
   } = props;
@@ -547,6 +577,16 @@ export default function Sidebar(props: Props) {
   const [creating, setCreating] = useState<CreatingTarget | null>(null);
   /** The node waiting on the delete prompt, or null. */
   const [deleting, setDeleting] = useState<NodeTarget | null>(null);
+  /** Whether the recent-folders menu is open under the picker button. */
+  const [foldersOpen, setFoldersOpen] = useState(false);
+  /**
+   * Where the open panel sits: the arrow's screen rect, taken the moment it opens.
+   *
+   * The panel is `fixed` rather than anchored to the arrow, because every box between the two
+   * of them scrolls and a scroll container clips both axes. See `.folder-menu`.
+   */
+  const [foldersAt, setFoldersAt] = useState<{ left: number; top: number } | null>(null);
+  const foldersArrow = useRef<HTMLButtonElement>(null);
   /**
    * What "Copy" last took, waiting to be pasted.
    *
@@ -590,6 +630,26 @@ export default function Sidebar(props: Props) {
       window.removeEventListener("keydown", onKey);
     };
   }, [menu]);
+
+  // The same dismissal for the folder menu: the button's own click stops propagation, so a
+  // click elsewhere closes this and only this while the context menu keeps its own rules.
+  useEffect(() => {
+    if (!foldersOpen) return;
+    const close = () => setFoldersOpen(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("wheel", close, { passive: true });
+    window.addEventListener("blur", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("wheel", close);
+      window.removeEventListener("blur", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [foldersOpen]);
 
   const copy = async (text: string) => {
     const ok = await copyText(text);
@@ -771,9 +831,92 @@ export default function Sidebar(props: Props) {
           </button>
         </div>
         <div className="side-actions">
-          <button className="side-btn" onClick={onPickFolder}>
-            {t("side.openFolder")}
-          </button>
+          {/* A split button: the picker on the left, the recent-folders menu as its right
+              half. They belong together because they are two ways to answer the same
+              question — where the Explorer should look — and splitting one control in two
+              makes the alternative a click further away than it needs to be. `mousedown` is
+              stopped so the window listener that dismisses the menu cannot close it on the
+              very click that opened it. */}
+          <div
+            className="side-split"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <button className="side-btn side-split-main" onClick={onPickFolder}>
+              {t("side.openFolder")}
+            </button>
+            <div className="side-split-tail">
+              <button
+                ref={foldersArrow}
+                className={`side-btn side-split-arrow${foldersOpen ? " active" : ""}`}
+                title={t("side.recentFolders")}
+                aria-label={t("side.recentFolders")}
+                aria-expanded={foldersOpen}
+                onClick={() => {
+                  // Placed on the way open, not kept up to date: the panel closes itself on
+                  // the next wheel or click, so the rect cannot go stale while it is shown.
+                  if (!foldersOpen) {
+                    const r = foldersArrow.current?.getBoundingClientRect();
+                    if (r) {
+                      setFoldersAt({
+                        left: Math.max(
+                          8,
+                          Math.min(r.left, window.innerWidth - FOLDER_MENU_WIDTH - 8),
+                        ),
+                        top: r.bottom + 4,
+                      });
+                    }
+                  }
+                  setFoldersOpen((v) => !v);
+                }}
+              >
+                {/* Down, not sideways: this opens a panel below itself, and `IconTreeChevron`
+                    points right because it means "expand" in the tree. */}
+                <IconChevron size={14} />
+              </button>
+              {foldersOpen && foldersAt && (
+                <div
+                  className="folder-menu"
+                  role="menu"
+                  style={{ left: foldersAt.left, top: foldersAt.top }}
+                >
+                  {folderHistory.length === 0 ? (
+                    <div className="empty">{t("side.noFolderHistory")}</div>
+                  ) : (
+                    folderHistory.map((item) => (
+                      <div
+                        key={item.path}
+                        className={`ctx-item folder-item${item.exists ? "" : " gone"}`}
+                        title={item.exists ? item.path : `${item.path} — ${t("side.folderGone")}`}
+                        // A folder that is not there cannot be pointed at, so the row is
+                        // shown but inert: greyed, and saying why on hover rather than
+                        // failing on click.
+                        onClick={() => {
+                          if (!item.exists) return;
+                          onSetRoot(item.path);
+                          setFoldersOpen(false);
+                        }}
+                      >
+                        <span className="ctx-icon">
+                          <IconOpenFolder size={14} />
+                        </span>
+                        <span className="folder-item-name">{item.name}</span>
+                        <button
+                          className="folder-item-remove"
+                          title={t("side.removeFolder")}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRemoveFolder(item.path);
+                          }}
+                        >
+                          ×
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
           <button
             className="side-btn side-btn-icon"
             title={t("side.refresh")}

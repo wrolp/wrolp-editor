@@ -53,6 +53,18 @@ export interface HistoryEntry {
   openedAt: string;
 }
 
+/**
+ * A folder the Explorer has been pointed at. `exists` is settled by the backend on every read
+ * rather than remembered when the folder was recorded, so a drive that was unplugged while the
+ * app was closed greys its row instead of offering somewhere that is not there.
+ */
+export interface FolderHistoryEntry {
+  path: string;
+  name: string;
+  openedAt: string;
+  exists: boolean;
+}
+
 /** What moved after a rename: both spellings are backend-normalized. */
 export interface Renamed {
   oldPath: string;
@@ -290,6 +302,10 @@ export const api = {
     invoke<string>("render_diagram", { kind, source }),
   getHistory: () => invoke<HistoryEntry[]>("get_history"),
   removeHistory: (path: string) => invoke<HistoryEntry[]>("remove_history", { path }),
+  getFolderHistory: () => invoke<FolderHistoryEntry[]>("get_folder_history"),
+  recordFolderHistory: (dir: string) => invoke<void>("record_folder_history", { dir }),
+  removeFolderHistory: (path: string) =>
+    invoke<FolderHistoryEntry[]>("remove_folder_history", { path }),
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (settings: Settings) => invoke<Settings>("save_settings", { settings }),
   getGroups: () => invoke<GroupStore>("get_groups"),

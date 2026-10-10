@@ -1006,7 +1006,10 @@ body.resizing .editor-host {
 .side-view {
   flex: 1 1 auto;
   overflow-y: auto;
-  overflow-x: hidden;
+  /* Only one axis is named, and both still clip: a scroll container cannot keep the other one
+     `visible`, so `overflow-y: auto` drags `overflow-x` to `auto` with it. That is why the
+     recent-folders panel is `position: fixed` rather than anchored in here — anchored in here,
+     its 260px was cut off at the sidebar's right edge. */
   display: none;
   padding: 6px 0;
 }
@@ -1132,8 +1135,153 @@ body.resizing .editor-host {
 }
 .side-btn-icon {
   flex: 0 0 34px !important;
+  /* Only the left inset goes. The top and bottom are what line this button up with the
+     control beside it, and dropping the whole margin would float it 4px higher. */
+  margin: 4px 10px 8px 0;
   text-align: center !important;
   font-size: 14px;
+}
+
+/* The split button: the folder picker and the recent-folders menu as one control.
+
+   Grid rather than flex, and that is the whole point. As a flex row the two halves were
+   joined by a negative margin cancelling a basis nobody could see, and the join broke the
+   moment a width was wrong: a tail sized by its own content leaves the main half ending
+   short of it, and the gap reads as two buttons rather than one control. A grid column of
+   `1fr` plus one sized by its contents cannot express that state — the first column always
+   fills whatever the second does not use.
+
+   The margin lives here rather than on the halves, because `.side-btn` carries
+   `margin: 4px 10px 8px` from when it was a full-width button on its own row, and inside a
+   wrapper two of those would indent both halves away from each other. */
+.side-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  /* `flex: 1`, not `1 1 auto`. With an auto basis the wrapper is sized by its own contents
+     (the two buttons, 159px measured on the real component tree) instead of the row's width.
+     A zero basis asks for the leftover outright. */
+  flex: 1;
+  position: relative;
+  /* No right inset, and the refresh button has no left one either, so the space between the
+     two controls is the row's `gap` and nothing else. Both carried a 10px `.side-btn` margin
+     here, which stacked with that gap into a 26px hole wide enough to read as an empty button. */
+  margin: 4px 0 8px 10px;
+}
+/* Both halves drop the margin `.side-btn` carries for its old life as a full-width button,
+   and the shared `border-radius: 0` is overridden per half below. Descendant selectors
+   throughout, because `.side-actions .side-btn` has the same specificity as these and sits
+   earlier in the file. */
+.side-split .side-split-main,
+.side-split .side-split-arrow {
+  margin: 0;
+  border-radius: 0;
+}
+/* The seam between the halves: one border, not two, so the control reads as a single object.
+   The main half keeps the outer left corners, the arrow the outer right ones. The selector is
+   a descendant because `.side-actions .side-btn` is one too and sits earlier in the file —
+   at equal specificity the later rule wins, so this has to outrank it to land. */
+.side-split .side-split-main {
+  min-width: 0;
+  border-right: none;
+  border-radius: 7px 0 0 7px;
+}
+/* The arrow's half. Its only job is to be exactly as wide as the arrow inside it — grid's
+   `auto` track already sizes it to content, so this adds no width of its own.
+   `flex` rather than a plain block, so the button stretches to this box's height: as a block
+   child it sized itself to the 14px glyph and came out 3px shorter than the half it is joined
+   to, which left a notch at the seam. */
+.side-split .side-split-tail {
+  display: flex;
+  margin: 0;
+}
+.side-split .side-split-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  /* A hair narrower than the icon buttons beside it, because this one is a segment of a
+     control rather than a control of its own. */
+  width: 26px;
+  padding: 7px 0;
+  /* The main half has no right border, so the arrow must have no left border either —
+     two borders would draw a 2px line down the middle of one control. */
+  border-left: none;
+  border-radius: 0 7px 7px 0;
+}
+/* Open while pressed: the menu is showing, so the arrow stays in the active state rather
+   than snapping back the moment the click lands. */
+.side-split-arrow.active {
+  background: var(--surface-2-hover);
+  border-color: var(--accent);
+}
+
+/* The panel itself. `fixed`, and placed from the arrow's screen rect by the component, because
+   it cannot be placed from here: every ancestor between it and the sidebar scrolls, and a
+   scroll container clips on both axes however the CSS names them — `overflow-y: auto` alone
+   forces `overflow-x` to `auto` too — so a panel anchored inside the sidebar was cut off at
+   its right edge. Escaping to the viewport is the same move the context menu makes.
+   Still 260px, and still free to overhang the sidebar: a list of folder paths held inside a
+   180px sidebar would show one word per line. */
+.folder-menu {
+  position: fixed;
+  z-index: 100;
+  width: 260px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px;
+  /* `--surface`, not a `--surface-1` that never existed: an undefined custom property makes
+     the whole declaration invalid, which is how this panel ended up transparent. */
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.28);
+}
+.folder-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.folder-item-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* A folder that is not on disk any more. It stays in the list rather than being dropped,
+   because a drive that was unplugged is coming back someday and the path is still the one
+   worth offering. It cannot be clicked: the row is inert, not broken. */
+.folder-item.gone {
+  color: var(--text-faint);
+  cursor: default;
+}
+.folder-item.gone:hover {
+  background: transparent;
+}
+/* The row is inert, so its icon must read as inert too: the hover state tints the glyph of
+   every other menu item, and a bright folder next to greyed text reads as available. */
+.folder-item.gone:hover .ctx-icon {
+  color: var(--text-faint);
+}
+.folder-item-remove {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-faint);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+}
+.folder-item:hover .folder-item-remove {
+  opacity: 1;
+}
+.folder-item-remove:hover {
+  background: var(--surface-2-hover);
+  color: var(--text);
 }
 
 .tree {
@@ -1142,6 +1290,8 @@ body.resizing .editor-host {
      to roughly 40px, so anything less clips the bubble for the last entry once the tree
      is scrolled to the bottom. Doubles as visual breathing room. */
   padding-bottom: 48px;
+  /* A row holding a long file name must not widen the sidebar. */
+  overflow-x: hidden;
 }
 .tree-row {
   display: flex;
@@ -2033,9 +2183,18 @@ body.resizing .editor-host {
 .app[data-density="compact"] .side-view {
   padding: 4px 0;
 }
+/* Vertical rhythm only. The horizontal inset belongs to the layout rules above, and an
+   attribute selector here outranks every one of them: repeating `10px` on both sides pushed
+   the two halves of `.side-split` apart from each other, and putting the margins on the halves
+   as well as on the wrapper made the refresh button a taller box than the control beside it. */
 .app[data-density="compact"] .side-btn {
-  margin: 3px 10px 6px;
-  padding: 5px 10px;
+  padding-block: 5px;
+}
+.app[data-density="compact"] .side-split {
+  margin-block: 3px 6px;
+}
+.app[data-density="compact"] .side-btn-icon {
+  margin-block: 3px 6px;
 }
 .app[data-density="compact"] .side-root-up {
   width: 18px;

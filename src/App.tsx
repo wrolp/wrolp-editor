@@ -65,6 +65,7 @@ import {
   pickFiles,
   pickFolder,
   revealItemInDir,
+  type FolderHistoryEntry,
   type HistoryEntry,
   type MenuTarget,
   type Settings,
@@ -163,6 +164,8 @@ export default function App() {
   const [sidebarView, setSidebarView] = useState<"explorer" | "history">("explorer");
   const [rootDir, setRootDir] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
+  /** Folders the Explorer has been pointed at, newest first. */
+  const [folderHistory, setFolderHistory] = useState<FolderHistoryEntry[]>([]);
   const [cursor, setCursor] = useState({ line: 1, column: 1 });
   /**
    * Preview layout per file. A missing key means "auto": markdown opens side by side,
@@ -224,6 +227,19 @@ export default function App() {
   const refreshHistory = useCallback(() => {
     api.getHistory().then(setHistory).catch((e) => toast(errorMessage(e)));
   }, [toast]);
+
+  /**
+   * Re-read the folder list.
+   *
+   * Silent on failure: the folder menu is a shortcut, and a menu that cannot be read is an
+   * empty one, not an error worth a toast. The folders themselves are on disk regardless.
+   */
+  const refreshFolderHistory = useCallback(() => {
+    api
+      .getFolderHistory()
+      .then(setFolderHistory)
+      .catch(() => setFolderHistory([]));
+  }, []);
 
   /** The per-file panel only makes sense for a real file, not an untitled buffer. */
   const setFileSettingsFor = useCallback((path: string) => {
@@ -297,11 +313,13 @@ export default function App() {
   // mount, unlike the boot sequence which must only run once.
   useEffect(() => {
     refreshHistory();
+    refreshFolderHistory();
     const unlisten = listen<string>("open-file", (event) => void tabs.openPath(event.payload));
     return () => {
       unlisten.then((f) => f());
     };
-  }, []);
+    // `refreshFolderHistory` is stable and needs nothing from this scope.
+  }, [refreshFolderHistory]);
 
   // Probing the menu means asking about one specific set of file types, so it waits for the
   // settings that carry the exclusions. Doing it at mount would ask about the wrong set.
@@ -545,8 +563,16 @@ export default function App() {
       rootRef.current = dir;
       setRootDir(dir);
       saveSettings({ sidebarRoot: dir });
+      // Every way of moving the Explorer goes through here — the folder picker, the parent
+      // button, "Set as Explorer folder", a rename that moves the root — so this one call
+      // records all of them. Recording is a backend write that reorders the menu, and it is
+      // awaited nowhere on purpose: the folder must open whether or not this succeeds.
+      void api
+        .recordFolderHistory(dir)
+        .then(refreshFolderHistory)
+        .catch(() => refreshFolderHistory());
     },
-    [saveSettings]
+    [refreshFolderHistory, saveSettings]
   );
 
   /**
@@ -1218,9 +1244,16 @@ const defaultModeFor = useCallback(
           expandFolders={settings.expandFolders}
           expandDepth={settings.expandDepth}
           history={history}
+          folderHistory={folderHistory}
           activePath={editorTab?.path ?? null}
           onSetView={changeView}
           onPickFolder={pickRootFolder}
+          onRemoveFolder={(path) =>
+            api
+              .removeFolderHistory(path)
+              .then(setFolderHistory)
+              .catch((e) => toast(errorMessage(e)))
+          }
           onOpenPath={tabs.openPath}
           onCompare={(path) => void startCompare(path)}
           onRename={(target, name) => renameEntry(target.path, name)}

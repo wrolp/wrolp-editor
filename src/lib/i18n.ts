@@ -44,6 +44,10 @@ const EN: Table = {
   "side.noFolder": "No folder open",
   "side.noHistory": "No recently opened files",
   "side.removeHistory": "Remove from history",
+  "side.recentFolders": "Recent folders",
+  "side.noFolderHistory": "No folders yet",
+  "side.removeFolder": "Forget this folder",
+  "side.folderGone": "This folder is not there any more",
   "side.resizeHint": "Drag to resize, double-click to reset",
 
   "status.noFile": "No file open",
@@ -366,6 +370,10 @@ const ZH: Table = {
   "side.noFolder": "尚未打开文件夹",
   "side.noHistory": "暂无打开记录",
   "side.removeHistory": "从历史中移除",
+  "side.recentFolders": "最近打开的文件夹",
+  "side.noFolderHistory": "还没有记录任何文件夹",
+  "side.removeFolder": "不再记录这个文件夹",
+  "side.folderGone": "该文件夹已不存在",
   "side.resizeHint": "拖动调整宽度，双击复位",
 
   "status.noFile": "未打开文件",
