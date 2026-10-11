@@ -100,6 +100,9 @@ const DEFAULT_SETTINGS: Settings = {
   // A document is opened to be read and written, so the editor is what a file opens to.
   // The preview is one keystroke away; a preview nobody asked for costs a pane.
   previewLayout: "text",
+  // A capped line length is the readable default; the other two are for readers who want
+  // the text to use the room they gave it.
+  previewWidth: "narrow",
 }
 
 /** The only values Monaco accepts for `renderWhitespace`. */
@@ -229,14 +232,23 @@ export default function App() {
   }, [toast]);
 
   /**
-   * Re-read the folder list.
+   * Which group the folder menu belongs to, or `""` while no group is on screen.
+   *
+   * Held in a ref so the callbacks that record and re-read stay stable: the list is per group
+   * now, and reading the id off the store instead would rebuild them on every switch.
+   */
+  const folderGroupRef = useRef(groups.store.active);
+  folderGroupRef.current = groups.store.active;
+
+  /**
+   * Re-read the folder list of the group on screen.
    *
    * Silent on failure: the folder menu is a shortcut, and a menu that cannot be read is an
    * empty one, not an error worth a toast. The folders themselves are on disk regardless.
    */
   const refreshFolderHistory = useCallback(() => {
     api
-      .getFolderHistory()
+      .getFolderHistory(folderGroupRef.current)
       .then(setFolderHistory)
       .catch(() => setFolderHistory([]));
   }, []);
@@ -313,13 +325,19 @@ export default function App() {
   // mount, unlike the boot sequence which must only run once.
   useEffect(() => {
     refreshHistory();
-    refreshFolderHistory();
     const unlisten = listen<string>("open-file", (event) => void tabs.openPath(event.payload));
     return () => {
       unlisten.then((f) => f());
     };
-    // `refreshFolderHistory` is stable and needs nothing from this scope.
-  }, [refreshFolderHistory]);
+    // `refreshHistory` and the tab handle are read for their first values only; the listener
+    // is set up once and must not be torn down and re-made when either is rebuilt.
+  }, [refreshHistory]);
+
+  // Each group has its own folder menu, so it is read on mount and again whenever the group on
+  // screen changes — before boot resolves this reads the no-group bucket, which is harmless.
+  useEffect(() => {
+    refreshFolderHistory();
+  }, [refreshFolderHistory, groups.store.active]);
 
   // Probing the menu means asking about one specific set of file types, so it waits for the
   // settings that carry the exclusions. Doing it at mount would ask about the wrong set.
@@ -557,7 +575,10 @@ export default function App() {
   );
   saveSettingsRef.current = saveSettings;
 
-  /** Move the Explorer to another folder. Global view state: it does not open or switch a group. */
+  /**
+   * Move the Explorer to another folder. The folder itself is global view state — it does not
+   * open or switch a group — but where it has been is remembered per group.
+   */
   const setSidebarRoot = useCallback(
     (dir: string) => {
       rootRef.current = dir;
@@ -565,10 +586,11 @@ export default function App() {
       saveSettings({ sidebarRoot: dir });
       // Every way of moving the Explorer goes through here — the folder picker, the parent
       // button, "Set as Explorer folder", a rename that moves the root — so this one call
-      // records all of them. Recording is a backend write that reorders the menu, and it is
-      // awaited nowhere on purpose: the folder must open whether or not this succeeds.
+      // records all of them, into the menu of the group that is on screen. Recording is a
+      // backend write that reorders the menu, and it is awaited nowhere on purpose: the folder
+      // must open whether or not this succeeds.
       void api
-        .recordFolderHistory(dir)
+        .recordFolderHistory(folderGroupRef.current, dir)
         .then(refreshFolderHistory)
         .catch(() => refreshFolderHistory());
     },
@@ -1224,6 +1246,7 @@ const defaultModeFor = useCallback(
         onPreviewMode={setPreviewMode}
         onSelect={tabs.selectTab}
         onClose={requestClose}
+        onSave={(id) => void tabs.saveTab(id)}
         onReorder={tabs.moveTab}
         onTabContextMenu={(tabId, x, y) => setTabMenu({ tabId, x, y, panel: "root" })}
         renamingId={renamingTab}
@@ -1250,7 +1273,7 @@ const defaultModeFor = useCallback(
           onPickFolder={pickRootFolder}
           onRemoveFolder={(path) =>
             api
-              .removeFolderHistory(path)
+              .removeFolderHistory(groups.store.active, path)
               .then(setFolderHistory)
               .catch((e) => toast(errorMessage(e)))
           }
@@ -1373,7 +1396,10 @@ const defaultModeFor = useCallback(
               scrollRatio={scrollRatio}
               onScrollRatio={scrollEditorToRatio}
               beyondEnd={settings.scrollBeyondLastLine}
+              width={settings.previewWidth}
               theme={theme}
+              onOpenPath={(path) => void tabs.openPath(path)}
+              onError={(message) => toast(message)}
             />
           )}
 

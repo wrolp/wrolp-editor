@@ -38,6 +38,8 @@ interface Props {
   onPreviewMode: (mode: PreviewMode) => void;
   onSelect: (id: number) => void;
   onClose: (id: number) => void;
+  /** Writes the file behind one tab, asked for by that tab's dirty mark. */
+  onSave: (id: number) => void;
   onTabContextMenu: (id: number, x: number, y: number) => void;
   /** Drop a dragged tab at this position in the strip. */
   onReorder: (id: number, toIndex: number) => void;
@@ -112,6 +114,7 @@ export default function TitleBar(props: Props) {
         activeId={activeId}
         onSelect={props.onSelect}
         onClose={props.onClose}
+        onSave={props.onSave}
         onContextMenu={props.onTabContextMenu}
         onReorder={props.onReorder}
         renamingId={props.renamingId}

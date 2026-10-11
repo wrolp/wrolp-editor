@@ -455,12 +455,31 @@ body {
   padding: 0 5px;
   outline: none;
 }
+/* The dirty mark is also that tab's save button, so it is a real `button` and has to shed
+   the browser's chrome to keep the strip looking the way it did. `font-family: inherit` is
+   not decoration: a button defaults to its own font, which would restyle the mark itself.
+   The hit box is wider than the glyph because a 12px target on a strip this dense is not a
+   target, and it is centred so the mark keeps its place relative to the name beside it. */
 .tab .tab-dirty {
+  width: 14px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin-left: 2px;
+  font-family: inherit;
   color: var(--dirty);
   font-size: 12px;
   font-weight: 600;
-  margin-left: 2px;
-  flex: 0 0 auto;
+  line-height: 1;
+  flex: 0 0 14px;
+  cursor: pointer;
+}
+.tab .tab-dirty:hover {
+  text-decoration: underline;
 }
 .tab .tab-close {
   width: 18px;
@@ -2316,6 +2335,10 @@ body.resizing .editor-host {
      `.md-body`'s bottom padding and `.md-tail`'s height, because the tail has to be
      measured against where the text actually ends, not against the box. */
   --md-end-gap: 40px;
+  /* Reading measure for `.md-body`, capped by `settings.previewWidth`. A paragraph that
+     spans a wide window is hard to track back to its next line, so the default is the
+     narrow one; `none` is what "fill the pane" means for `max-width`. */
+  --md-body-max: 860px;
   flex: 1 1 50%;
   min-width: 0;
   /* A flex child defaults to min-height:auto, so it grows to fit its content instead of
@@ -2329,6 +2352,15 @@ body.resizing .editor-host {
 /* Preview-only mode: the pane is the whole area, so drop the divider. */
 .editor-wrap.preview-only > .md-preview {
   border-left: none;
+}
+/* The width setting, chosen by `data-md-width` on the pane. An unrecognised value matches
+   nothing and leaves the narrow measure above, which is the same fallback the backend
+   applies to a hand-edited settings file. */
+.md-preview[data-md-width="wide"] {
+  --md-body-max: 1200px;
+}
+.md-preview[data-md-width="full"] {
+  --md-body-max: none;
 }
 
 /* ---------- HTML preview ----------
@@ -2356,7 +2388,7 @@ body.resizing .editor-host {
   background: #fff;
 }
 .md-body {
-  max-width: 860px;
+  max-width: var(--md-body-max);
   margin: 0 auto;
   padding: 24px 28px var(--md-end-gap);
   font-size: 14px;

@@ -3,7 +3,7 @@ import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import monaco from "../lib/monaco";
-import { api, errorMessage } from "../lib/tauri";
+import { api, errorMessage, openUrl } from "../lib/tauri";
 
 interface Props {
   /** Current buffer text. */
@@ -13,8 +13,14 @@ interface Props {
   /** Fraction 0..1 of the editor's scroll position, so the two panes can track. */
   scrollRatio: number;
   beyondEnd: boolean;
+  /** Reading measure for the body: `narrow` | `wide` | `full`, from `settings.previewWidth`. */
+  width: string;
   /** Resolved scheme (dark | light) so diagrams are not drawn for the wrong background. */
   theme: string;
+  /** Opens a file the document links to, beside itself. */
+  onOpenPath: (path: string) => void;
+  /** Reports a link that was followed but could not be opened. */
+  onError: (message: string) => void;
   /** Called when the user scrolls the preview, to drive the editor instead. */
   onScrollRatio: (ratio: number) => void;
 }
@@ -33,7 +39,10 @@ export default function MarkdownPreview({
   scrollRatio,
   onScrollRatio,
   beyondEnd,
+  width,
   theme,
+  onOpenPath,
+  onError,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -315,6 +324,47 @@ export default function MarkdownPreview({
     return () => el.removeEventListener("error", markMissing, true);
   }, []);
 
+  /**
+   * Make the links inside the preview go somewhere.
+   *
+   * Left to the document, every kind of `href` fails in its own way and all of them read as a
+   * broken click: a `#heading` rewrites the app window's own URL hash, a relative path tries to
+   * navigate the webview away from the app, and an external URL is refused by Tauri's navigation
+   * guard. Each kind is answered here instead, and the click is taken away from the document
+   * first so that nothing it holds can move the window — including a scheme this never handles.
+   */
+  useEffect(() => {
+    const pane = scrollRef.current;
+    if (!pane) return;
+    const onClick = (e: MouseEvent) => {
+      if (e.defaultPrevented || e.button !== 0) return;
+      const link = (e.target as Element).closest?.("a");
+      const href = link?.getAttribute("href");
+      // An `<a>` with no href is a marker rather than a link; it has nothing to go to.
+      if (!href) return;
+      e.preventDefault();
+      if (href.startsWith("#")) {
+        const body = bodyRef.current;
+        if (!body) return;
+        const target = findHeadingBySlug(body, anchorOf(href));
+        if (!target) return;
+        // Measured from the pane's own edge rather than by `scrollIntoView`, which would also
+        // scroll any ancestor, and from the heading's box rather than its `offsetTop`, whose
+        // offset parent is whichever wrapper last happened to be positioned.
+        pane.scrollTop += target.getBoundingClientRect().top - pane.getBoundingClientRect().top - 12;
+        return;
+      }
+      if (EXTERNAL_SCHEME.test(href)) {
+        openUrl(href).catch((err) => onError(errorMessage(err)));
+        return;
+      }
+      const target = resolveLocalTarget(href, dirOf(path));
+      if (target) onOpenPath(target);
+    };
+    pane.addEventListener("click", onClick);
+    return () => pane.removeEventListener("click", onClick);
+  }, [path, onOpenPath, onError]);
+
   // Diagrams are injected as plain HTML, so the zoom controls get their handlers through
   // delegation on the preview container — the same trick the broken-image detection uses.
   // Plain wheel keeps scrolling the preview; Ctrl/Cmd + wheel zooms the diagram under it.
@@ -427,7 +477,7 @@ export default function MarkdownPreview({
   }, []);
 
   return (
-    <div className="md-preview" ref={scrollRef} onScroll={onScroll}>
+    <div className="md-preview" data-md-width={width} ref={scrollRef} onScroll={onScroll}>
       {/* Sanitized in `sanitize` below; `path` is rendered as text, never interpolated. */}
       <div className="md-body" ref={bodyRef} dangerouslySetInnerHTML={{ __html: html }} />
       {beyondEnd && <div className="md-tail" />}
@@ -758,24 +808,115 @@ function dirOf(filePath: string): string {
   return cut || filePath;
 }
 
+/** The four schemes the opener plugin may hand to a default application. */
+const EXTERNAL_SCHEME = /^(?:https?|mailto|tel):/i;
+
 /**
- * Resolve an `img` src against the document's folder, or return null when it is not a
- * local image reference. Absolute URLs, data URIs, protocol-relative and root-absolute
- * links, and Windows paths spelled in the markdown ("C:\x.png") all return null: the
- * first group already resolves on its own, and the last is a drive path a document has
- * no business naming.
+ * A reference that is not a file beside the document: it names a scheme, a share (`//server/x`),
+ * a drive (`C:\x`) or a root (`/x`). The last two are how a whole drive would be reached, and a
+ * document has no business naming either.
  */
-function resolveLocalImage(src: string | null, baseDir: string): string | null {
-  if (!src) return null;
-  if (baseDir && /^(?:[a-z][a-z0-9+.-]*:|\/\/|#|\/)/i.test(src)) return null;
-  if (!IMAGE_EXT.test(src.split(/[?#]/)[0])) return null;
+const NOT_A_LOCAL_PATH = /^(?:[a-z][a-z0-9+.-]*:|\/\/|\/|#)/i;
+
+/**
+ * The file part of a reference and its `#fragment`, split the way a browser splits it. A query
+ * stays with the file part, since nothing in a local file answers one.
+ */
+function splitFragment(ref: string): [string, string] {
+  const at = ref.indexOf("#");
+  return at === -1 ? [ref, ""] : [ref.slice(0, at), ref.slice(at + 1)];
+}
+
+/** Undo a percent-escaping, or hand back the raw text when it is not well formed. */
+function decodeRef(part: string): string {
+  try {
+    return decodeURIComponent(part);
+  } catch {
+    return part;
+  }
+}
+
+/**
+ * Walk `ref` from the document's folder, `..` included. Null when the walk ends above the root
+ * it started from, which is a fold the document does not actually live in.
+ */
+function joinToLocal(ref: string, baseDir: string): string | null {
   const segments = (baseDir ? `${baseDir}\\` : "").split(/[\\/]+/).filter(Boolean);
-  for (const part of src.replace(/\//g, "\\").split("\\")) {
+  for (const part of ref.replace(/\//g, "\\").split("\\")) {
     if (part === "" || part === ".") continue;
     if (part === "..") segments.pop();
     else segments.push(part);
   }
   return segments.length > 1 ? segments.join("\\") : null;
+}
+
+/**
+ * The file a link points at beside the document: its `#fragment` dropped, percent-decoded, then
+ * resolved. Null for a pure anchor and for anything `NOT_A_LOCAL_PATH` refuses.
+ *
+ * The decoded form is checked again because escaping is how a refusal is usually smuggled:
+ * `%2F..%2F` is a root-absolute path once it has been read, not before.
+ */
+function resolveLocalTarget(href: string, baseDir: string): string | null {
+  const file = splitFragment(href)[0].split(/[?#]/)[0];
+  if (!file || (baseDir && NOT_A_LOCAL_PATH.test(href))) return null;
+  const decoded = decodeRef(file);
+  if (NOT_A_LOCAL_PATH.test(decoded)) return null;
+  return joinToLocal(decoded, baseDir);
+}
+
+/**
+ * GitHub's anchor spelling for a heading, so a table of contents written as
+ * `[Install](#installation)` reaches its target whatever tool wrote it. Punctuation goes, spaces
+ * become hyphens, and letters of any script stay — a Chinese heading's anchor is its own text.
+ */
+function headingSlug(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N} _-]/gu, "")
+    .replace(/\s+/g, "-");
+}
+
+/** The anchor an `href` asks for, in the same spelling headings are slugified into. */
+function anchorOf(href: string): string {
+  return headingSlug(decodeRef(href.slice(1)));
+}
+
+/**
+ * The heading an in-document anchor names, or null.
+ *
+ * Repeated headings take GitHub's `-1`, `-2` suffixes, which forces a walk of the whole document
+ * in order: what the third "Usage" is called is only knowable from the two before it.
+ *
+ * The id is deliberately never written onto the element. Settling the anchor here means a file's
+ * own HTML cannot put an `id` anywhere in the app's document — which is why `id` is not in the
+ * sanitiser's allow-list either, and stays out of it.
+ */
+function findHeadingBySlug(body: HTMLElement, want: string): HTMLElement | null {
+  if (!want) return null;
+  const seen = new Map<string, number>();
+  for (const heading of Array.from(body.querySelectorAll("h1, h2, h3, h4, h5, h6"))) {
+    const base = headingSlug(heading.textContent ?? "");
+    const repeats = seen.get(base) ?? 0;
+    seen.set(base, repeats + 1);
+    if ((repeats === 0 ? base : `${base}-${repeats}`) === want) return heading as HTMLElement;
+  }
+  return null;
+}
+
+/**
+ * Resolve an `img` src against the document's folder, or return null when it is not a
+ * local image reference. Absolute URLs, data URIs, protocol-relative and root-absolute
+ * links, and Windows paths spelled in the markdown ("C:\x.png") all return null: the
+ * first group already resolves on its own, and the rest is what `NOT_A_LOCAL_PATH` refuses
+ * for links too.
+ */
+function resolveLocalImage(src: string | null, baseDir: string): string | null {
+  if (!src) return null;
+  if (baseDir && NOT_A_LOCAL_PATH.test(src)) return null;
+  if (!IMAGE_EXT.test(src.split(/[?#]/)[0])) return null;
+  return joinToLocal(src, baseDir);
 }
 
 /** Swap every local image reference for an asset URL the backend has allowed. */

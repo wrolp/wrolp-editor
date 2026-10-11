@@ -527,7 +527,7 @@ interface Props extends Omit<
   onSetView: (view: "explorer" | "history") => void;
   onPickFolder: () => void;
   onRemoveHistory: (path: string) => void;
-  /** Folders the Explorer has been pointed at, newest first. */
+  /** Folders this group's Explorer has been pointed at, newest first. */
   folderHistory: FolderHistoryEntry[];
   /** Forgets one folder so it stops being offered. */
   onRemoveFolder: (path: string) => void;

@@ -137,6 +137,11 @@ pub struct Settings {
   /// keystroke away, whereas a preview nobody asked for costs a pane. A picture is not
   /// covered by this choice — its bytes are not text, so it always opens as the picture.
   pub preview_layout: String,
+  /// How wide the markdown preview body is inside its pane: narrow | wide | full.
+  /// `narrow` and `wide` cap the line length so text stays readable and centre it; `full`
+  /// runs the text the width of the pane. A line length is worth capping because a
+  /// paragraph that spans a wide window is hard to track back to its next line.
+  pub preview_width: String,
   /// Colour scheme: system | dark | light. `system` follows the OS preference at runtime,
   /// so a machine that switches at dusk does not need the app restarted.
   pub theme: String,
@@ -168,6 +173,7 @@ impl Default for Settings {
       detect_indentation: true,
       scroll_beyond_last_line: true,
       preview_layout: "text".into(),
+      preview_width: "narrow".into(),
       theme: "system".into(),
     }
   }
@@ -182,6 +188,9 @@ const THEMES: [&str; 3] = ["system", "dark", "light"];
 /// Preview layouts a file can open in. `auto` is the per-kind behaviour the frontend used
 /// to hardcode: markdown and SVG side by side, pictures as the picture.
 const PREVIEW_LAYOUT: [&str; 4] = ["auto", "text", "split", "preview"];
+/// Widths the markdown preview body can take, as capped reading measures. The numbers
+/// themselves live in the stylesheet; this only names the three choices.
+const PREVIEW_WIDTH: [&str; 3] = ["narrow", "wide", "full"];
 
 impl Settings {
   pub(crate) fn filled(self) -> Self {
@@ -262,6 +271,11 @@ impl Settings {
         self.preview_layout.clone()
       } else {
         "text".into()
+      },
+      preview_width: if PREVIEW_WIDTH.contains(&self.preview_width.as_str()) {
+        self.preview_width.clone()
+      } else {
+        "narrow".into()
       },
       // Same reasoning as the layout above: an unknown theme would leave the frontend with
       // no palette to apply, and an app with no palette is worse than one that ignores it.
@@ -760,12 +774,16 @@ pub fn remove_history(app: AppHandle, path: String) -> Result<Vec<HistoryEntry>,
   Ok(history)
 }
 
-/// A folder the Explorer has been pointed at, newest first.
+/// A folder the Explorer has been pointed at, newest first within its group.
 ///
 /// Separate from the file history in `history.json` because the two answer different
 /// questions and are pruned differently: a file that has been closed is still a file, whereas
 /// a folder on an unplugged drive is not a folder at all. Keeping them apart also means a
 /// forward/back pair cannot evict a folder the Explorer is showing.
+///
+/// Kept in its own file rather than inside the group record because it is written on a best-
+/// effort basis: pointing the Explorer somewhere must never fail, and it must not have to share
+/// a write with the tabs it is not part of. Which folder the Explorer is *on* stays global.
 #[derive(Serialize, Deserialize, Clone, Default)]
 #[serde(rename_all = "camelCase", default)]
 pub struct FolderHistoryEntry {
@@ -778,38 +796,106 @@ pub struct FolderHistoryEntry {
   pub exists: bool,
 }
 
-/// The most folders kept. Deeper than the file history's fifty because a folder list is a
-/// menu of places to go, not a record of what was read, and a project tree rarely lives under
-/// one parent.
+/// The most folders kept for one group. Deeper than the file history's fifty because a folder
+/// list is a menu of places to go, not a record of what was read, and a project tree rarely
+/// lives under one parent.
 const FOLDER_HISTORY_MAX: usize = 30;
 
-#[tauri::command]
-pub fn get_folder_history(app: AppHandle) -> Result<Vec<FolderHistoryEntry>, String> {
-  let mut history =
-    read_json::<Vec<FolderHistoryEntry>>(&app, "folder-history.json")?.unwrap_or_default();
-  // Existence is settled on read rather than trusted from the file, since a folder can be
-  // deleted while the app is closed — the whole point of greying it out.
-  for entry in &mut history {
+/// One group's folders, newest first, keyed by group id.
+type FolderBuckets = std::collections::BTreeMap<String, Vec<FolderHistoryEntry>>;
+
+/// The bucket for folders opened while no group was on screen.
+const FOLDER_BUCKET_NONE: &str = "";
+
+/// `folder-history.json`, in both shapes it has had.
+///
+/// The list was one history shared by the whole app until each group got its own. `Shared` is
+/// still read, so an upgrade does not blank a menu that had entries in it a moment ago.
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum FolderHistoryFile {
+  Shared(Vec<FolderHistoryEntry>),
+  Scoped(FolderBuckets),
+}
+
+/// The buckets on disk, plus the pre-scoping list while the file still holds one.
+///
+/// A file that cannot be read at all is an empty history rather than an error: the menu is a
+/// shortcut, and the folders themselves are on disk regardless of this side file.
+fn read_folder_buckets(app: &AppHandle) -> (FolderBuckets, Vec<FolderHistoryEntry>) {
+  match read_json::<FolderHistoryFile>(app, "folder-history.json").unwrap_or_default() {
+    Some(FolderHistoryFile::Scoped(buckets)) => (buckets, Vec::new()),
+    Some(FolderHistoryFile::Shared(shared)) => (FolderBuckets::new(), shared),
+    None => (FolderBuckets::new(), Vec::new()),
+  }
+}
+
+/// The list belonging to `group`, taking over the shared one when this is the first group to
+/// have anything recorded. Handing it to the group in use rather than copying it to every
+/// group keeps the other groups' menus empty, which is what "each its own" means.
+fn bucket_of<'a>(
+  buckets: &'a mut FolderBuckets,
+  shared: &mut Vec<FolderHistoryEntry>,
+  group: &str,
+) -> &'a mut Vec<FolderHistoryEntry> {
+  let history = buckets.entry(group.to_string()).or_default();
+  if history.is_empty() {
+    history.append(shared);
+  }
+  history
+}
+
+/// Set `exists` from the disk rather than trusting the file, since a folder can be deleted
+/// while the app is closed — the whole point of greying it out rather than dropping it.
+fn mark_existing(history: &mut [FolderHistoryEntry]) {
+  for entry in history {
     entry.exists = Path::new(&entry.path).is_dir();
   }
+}
+
+/// Forget a group's folders when the group itself is gone, so removing a group does not leave
+/// its list sitting in the file forever. Read from the store on disk rather than from anything
+/// the frontend sends, since this runs while writing a different file.
+fn retain_live_groups(app: &AppHandle, buckets: &mut FolderBuckets) {
+  let Ok(Some(store)) = read_json::<GroupStore>(app, GROUPS_FILE) else {
+    return;
+  };
+  buckets.retain(|group, _| {
+    group == FOLDER_BUCKET_NONE || store.items.iter().any(|item| item.id == *group)
+  });
+}
+
+#[tauri::command]
+pub fn get_folder_history(
+  app: AppHandle,
+  group: String,
+) -> Result<Vec<FolderHistoryEntry>, String> {
+  let (mut buckets, shared) = read_folder_buckets(&app);
+  // A group with no bucket of its own reads as the shared list for as long as the file has not
+  // been scoped, which is exactly what the menu was before this was per group. The first
+  // folder recorded converts the file, and from then on an empty bucket is really empty.
+  let mut history = buckets.remove(&group).unwrap_or_default();
+  if history.is_empty() {
+    history = shared;
+  }
+  mark_existing(&mut history);
   Ok(history)
 }
 
-/// Note that the Explorer moved to `dir`.
+/// Note that the Explorer of group `group` moved to `dir`.
 ///
 /// Best-effort: a history that cannot be written must not stop the folder from opening, so
 /// the error is dropped. Nothing in the UI depends on the write having happened, and a toast
 /// about a side file would be worse than a folder missing from the menu.
 #[tauri::command]
-pub fn record_folder_history(app: AppHandle, dir: String) {
-  push_folder_history(&app, &dir);
+pub fn record_folder_history(app: AppHandle, group: String, dir: String) {
+  push_folder_history(&app, &group, &dir);
 }
 
-pub(crate) fn push_folder_history(app: &AppHandle, dir: &str) {
-  let mut history = read_json::<Vec<FolderHistoryEntry>>(app, "folder-history.json")
-    .unwrap_or_default()
-    .unwrap_or_default();
+pub(crate) fn push_folder_history(app: &AppHandle, group: &str, dir: &str) {
+  let (mut buckets, mut shared) = read_folder_buckets(app);
   let normalized = draft::normalize_path(dir);
+  let history = bucket_of(&mut buckets, &mut shared, group);
   // Compared normalized: the same folder reached as `C:\a` and `C:\a\` is one entry, not two
   // that trade places on every visit.
   history.retain(|h| draft::normalize_path(&h.path) != normalized);
@@ -829,23 +915,25 @@ pub(crate) fn push_folder_history(app: &AppHandle, dir: &str) {
     },
   );
   history.truncate(FOLDER_HISTORY_MAX);
-  let _ = write_json(app, "folder-history.json", &history);
+  retain_live_groups(app, &mut buckets);
+  let _ = write_json(app, "folder-history.json", &buckets);
 }
 
 #[tauri::command]
 pub fn remove_folder_history(
   app: AppHandle,
+  group: String,
   path: String,
 ) -> Result<Vec<FolderHistoryEntry>, String> {
   let target = draft::normalize_path(&path);
-  let mut history =
-    read_json::<Vec<FolderHistoryEntry>>(&app, "folder-history.json")?.unwrap_or_default();
+  let (mut buckets, mut shared) = read_folder_buckets(&app);
+  let history = bucket_of(&mut buckets, &mut shared, &group);
   history.retain(|h| draft::normalize_path(&h.path) != target);
-  write_json(&app, "folder-history.json", &history)?;
-  for entry in &mut history {
-    entry.exists = Path::new(&entry.path).is_dir();
-  }
-  Ok(history)
+  let mut out = history.clone();
+  retain_live_groups(&app, &mut buckets);
+  write_json(&app, "folder-history.json", &buckets)?;
+  mark_existing(&mut out);
+  Ok(out)
 }
 
 #[tauri::command]
@@ -1032,6 +1120,70 @@ mod tests {
       !parsed[0].exists,
       "a missing flag means unknown, which greys the row"
     );
+  }
+
+  /// The two file shapes are told apart by their own JSON: an array was the whole app's list,
+  /// an object is one list per group. Reading the wrong one as empty would blank a menu.
+  #[test]
+  fn folder_history_reads_both_file_shapes() {
+    let scoped = r#"{"grp-1":[{"path":"C:\\a","name":"a","openedAt":"then","exists":true}]}"#;
+    match serde_json::from_str::<FolderHistoryFile>(scoped).expect("scoped parses") {
+      FolderHistoryFile::Scoped(buckets) => assert_eq!(buckets["grp-1"].len(), 1),
+      FolderHistoryFile::Shared(_) => panic!("an object is not the shared shape"),
+    }
+    let shared = r#"[{"path":"C:\\a","name":"a","openedAt":"then","exists":true}]"#;
+    match serde_json::from_str::<FolderHistoryFile>(shared).expect("shared parses") {
+      FolderHistoryFile::Shared(history) => assert_eq!(history.len(), 1),
+      FolderHistoryFile::Scoped(_) => panic!("an array is not the scoped shape"),
+    }
+  }
+
+  fn folder(path: &str, name: &str) -> FolderHistoryEntry {
+    FolderHistoryEntry {
+      path: path.into(),
+      name: name.into(),
+      opened_at: "then".into(),
+      exists: true,
+    }
+  }
+
+  /// The old shared list is handed to the first group that records a folder, and to nobody
+  /// else: an upgrade keeps the menu the user was reading without every new group inheriting it.
+  #[test]
+  fn folder_history_adopts_the_shared_list_once() {
+    let mut shared = vec![folder(r"C:\a", "a")];
+    let mut buckets = FolderBuckets::new();
+
+    let first = bucket_of(&mut buckets, &mut shared, "grp-1");
+    first.insert(0, folder(r"C:\b", "b"));
+    assert!(shared.is_empty(), "the list moves rather than being copied");
+
+    let second = bucket_of(&mut buckets, &mut shared, "grp-2");
+    assert!(
+      second.is_empty(),
+      "a group that has not been anywhere shows nothing"
+    );
+    assert_eq!(
+      buckets["grp-1"]
+        .iter()
+        .map(|e| e.path.as_str())
+        .collect::<Vec<_>>(),
+      vec![r"C:\b", r"C:\a"],
+      "the newest folder leads, and the adopted one follows it"
+    );
+  }
+
+  /// A group that already has its own list must not have the shared one appended to it, which
+  /// is what keeps a folder the user removed from coming back on the next visit.
+  #[test]
+  fn folder_history_does_not_refill_a_group_that_has_its_own() {
+    let mut shared = vec![folder(r"C:\gone", "gone")];
+    let mut buckets = FolderBuckets::new();
+    buckets.insert("grp-1".into(), vec![folder(r"C:\keep", "keep")]);
+    let history = bucket_of(&mut buckets, &mut shared, "grp-1");
+    assert_eq!(history.len(), 1);
+    assert_eq!(history[0].path, r"C:\keep");
+    assert_eq!(shared.len(), 1, "someone else can still claim it");
   }
 
   /// Pictures are read for their metadata only. SVG counts as text on purpose: it is edited

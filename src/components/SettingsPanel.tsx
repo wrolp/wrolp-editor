@@ -25,6 +25,7 @@ const NAV: { cat: Category; key: string }[] = [
 const WHITESPACE_MODES = ["none", "boundary", "selection", "all", "trailing"] as const;
 /** `auto` last: it is the fallback that decides by file type, not a layout of its own. */
 const PREVIEW_LAYOUTS = ["text", "split", "preview", "auto"] as const;
+const PREVIEW_WIDTHS = ["narrow", "wide", "full"] as const;
 const THEMES = ["system", "dark", "light"] as const;
 const ENCODINGS = [
   "auto",
@@ -239,6 +240,20 @@ export default function SettingsPanel({
                 </select>
               </SettingField>
               <p className="muted">{t("settings.previewLayoutDesc")}</p>
+              <SettingField label={t("settings.previewWidth")}>
+                <select
+                  className="select"
+                  value={settings.previewWidth}
+                  onChange={(e) => onSaveSettings({ previewWidth: e.target.value })}
+                >
+                  {PREVIEW_WIDTHS.map((width) => (
+                    <option key={width} value={width}>
+                      {t(`settings.width.${width}`)}
+                    </option>
+                  ))}
+                </select>
+              </SettingField>
+              <p className="muted">{t("settings.previewWidthDesc")}</p>
               <SettingCheck
                 label={t("settings.wordWrap")}
                 checked={settings.wordWrap}

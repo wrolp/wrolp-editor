@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { t, translateError } from "./i18n";
 
 export interface OpenedFile {
@@ -54,9 +54,10 @@ export interface HistoryEntry {
 }
 
 /**
- * A folder the Explorer has been pointed at. `exists` is settled by the backend on every read
- * rather than remembered when the folder was recorded, so a drive that was unplugged while the
- * app was closed greys its row instead of offering somewhere that is not there.
+ * A folder the Explorer has been pointed at. Each group keeps its own list of these; the id is
+ * passed to every call that reads or writes one. `exists` is settled by the backend on every
+ * read rather than remembered when the folder was recorded, so a drive that was unplugged while
+ * the app was closed greys its row instead of offering somewhere that is not there.
  */
 export interface FolderHistoryEntry {
   path: string;
@@ -116,6 +117,13 @@ export interface Settings {
    * A picture is not covered by this — its bytes are not text, so it always opens as itself.
    */
   previewLayout: string;
+  /**
+   * How wide the rendered markdown body is inside its pane: `narrow` | `wide` | `full`.
+   * The first two cap the line length for readability and centre it; `full` lets the text
+   * run the width of the pane. Only the markdown preview is measured this way — an HTML
+   * preview renders a document that sets its own width.
+   */
+  previewWidth: string;
 }
 
 /** One restored tab: either a file (path + cursor) or scratch text (untitled + content). */
@@ -302,10 +310,12 @@ export const api = {
     invoke<string>("render_diagram", { kind, source }),
   getHistory: () => invoke<HistoryEntry[]>("get_history"),
   removeHistory: (path: string) => invoke<HistoryEntry[]>("remove_history", { path }),
-  getFolderHistory: () => invoke<FolderHistoryEntry[]>("get_folder_history"),
-  recordFolderHistory: (dir: string) => invoke<void>("record_folder_history", { dir }),
-  removeFolderHistory: (path: string) =>
-    invoke<FolderHistoryEntry[]>("remove_folder_history", { path }),
+  getFolderHistory: (group: string) =>
+    invoke<FolderHistoryEntry[]>("get_folder_history", { group }),
+  recordFolderHistory: (group: string, dir: string) =>
+    invoke<void>("record_folder_history", { group, dir }),
+  removeFolderHistory: (group: string, path: string) =>
+    invoke<FolderHistoryEntry[]>("remove_folder_history", { group, path }),
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (settings: Settings) => invoke<Settings>("save_settings", { settings }),
   getGroups: () => invoke<GroupStore>("get_groups"),
@@ -322,7 +332,11 @@ export const api = {
   uninstallContextMenu: (extensions: string[]) => invoke<void>("uninstall_context_menu", { extensions }),
 };
 
-export { invoke, listen, open, save, revealItemInDir };
+/**
+ * `openUrl` hands a URL to the OS default application. The `opener:default` capability already
+ * scopes it to `http`, `https`, `mailto` and `tel`, so a document cannot name an application.
+ */
+export { invoke, listen, open, save, revealItemInDir, openUrl };
 
 const fileFilters = () => [{ name: t("dialog.allFiles"), extensions: ["*"] }];
 

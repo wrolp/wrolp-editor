@@ -8,6 +8,11 @@ interface Props {
   activeId: number | null;
   onSelect: (id: number) => void;
   onClose: (id: number) => void;
+  /**
+   * Writes the file behind this tab. Reached by the dirty mark, which is a button: a tab that
+   * is not on screen can be saved from here without first being selected.
+   */
+  onSave: (id: number) => void;
   onContextMenu: (id: number, x: number, y: number) => void;
   /** Drop a dragged tab at this position in the strip. */
   onReorder: (id: number, toIndex: number) => void;
@@ -98,6 +103,7 @@ export default function TabBar({
   activeId,
   onSelect,
   onClose,
+  onSave,
   onContextMenu,
   onReorder,
   renamingId,
@@ -113,12 +119,12 @@ export default function TabBar({
    */
   const [drag, setDrag] = useState<{ id: number; x: number; index: number } | null>(null);
   /**
-   * Press before the threshold is crossed: the id, the x it started at, and whether it
-   * landed on the × — which decides what releasing does. Selection is settled here rather
-   * than by `onClick`, because the press captures the pointer and a captured gesture never
-   * delivers a `click` to the tab.
+   * Press before the threshold is crossed: the id, the x it started at, and whether it landed
+   * on the × or on the dirty mark — which decides what releasing does. Selection is settled
+   * here rather than by `onClick`, because the press captures the pointer and a captured
+   * gesture never delivers a `click` to the tab.
    */
-  const pending = useRef<{ id: number; x: number; close: boolean } | null>(null);
+  const pending = useRef<{ id: number; x: number; close: boolean; save: boolean } | null>(null);
   /**
    * Auto-scroll while dragging. Tabs hidden past either end are otherwise unreachable: the
    * strip only scrolls on a wheel over it, and the gesture already owns the pointer.
@@ -297,6 +303,7 @@ export default function TabBar({
           id,
           x: e.clientX,
           close: !!(e.target as HTMLElement).closest?.(".tab-close"),
+          save: !!(e.target as HTMLElement).closest?.(".tab-dirty"),
         };
         // Captured on the press, not once the drag is recognised. Reaching either end of the
         // strip means leaving its box, and a `pointermove` that never passes through the
@@ -327,9 +334,11 @@ export default function TabBar({
         pending.current = null;
         if (drag) endDrag();
         // A press that never became a drag is a click, and the capture means no `click` is
-        // coming. Deciding here is also what keeps the × from selecting the tab it closes.
+        // coming. Deciding here is also what keeps the × and the dirty mark from selecting the
+        // tab they act on.
         else if (press) {
-          if (press.close) onClose(press.id);
+          if (press.save) onSave(press.id);
+          else if (press.close) onClose(press.id);
           else onSelect(press.id);
         }
         if (e.currentTarget.hasPointerCapture(e.pointerId)) {
@@ -380,7 +389,14 @@ export default function TabBar({
           ) : (
             <span className="tab-name">{tab.name}</span>
           )}
-          {tab.dirty && !tab.isSettings && <span className="tab-dirty">U</span>}
+          {tab.dirty && !tab.isSettings && (
+            // A real button, on the same terms as the × next to it: a pointer press is settled
+            // by the strip's `onPointerUp`, while a key-generated click still lands here. This
+            // saves the tab it sits on and deliberately does not select it first.
+            <button className="tab-dirty" title={t("tab.saveDirty")} onClick={() => onSave(tab.id)}>
+              U
+            </button>
+          )}
           {/* A real button, so it is reachable and closable from the keyboard: a press takes
               the pointer, which sends its `click` to the strip and lets `onPointerUp` do the
               closing, but a key-generated click still lands here. */}
