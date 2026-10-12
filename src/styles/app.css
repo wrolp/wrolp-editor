@@ -624,6 +624,11 @@ body {
   display: flex;
   align-items: center;
   margin-left: 6px;
+  /* The chip names the whole tab set rather than one of the tabs, so it stands a little
+     apart from them. The space lives here rather than on the strip's left padding because
+     that padding scrolls away with the tabs: once the strip is scrolled, a tab would then
+     come to rest against the chip, which is exactly what this gap is there to prevent. */
+  margin-right: 10px;
   flex: 0 0 auto;
 }
 .grp-chip {
