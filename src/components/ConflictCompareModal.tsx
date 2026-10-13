@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import DiffView from "./DiffView";
 import { t } from "../lib/i18n";
 import { useModalDrag } from "../hooks/useModalDrag";
-import type { ComparePair, DiffStats } from "../lib/types";
+import { sideKey, type ComparePair, type DiffStats } from "../lib/types";
 
 interface View {
   fontSize: number;
@@ -62,9 +62,9 @@ export default function ConflictCompareModal(props: Props) {
         </h3>
         <div className="diff-modal-body">
           <DiffView
-            // Remount per file: the two models are keyed by the pair's paths, and the view only
-            // releases the ones it attached at unmount.
-            key={`${pair.left.path}|${pair.right.path}`}
+            // Remount per pair: the two models are keyed by the sides' identities, and
+            // the view only releases the ones it attached at unmount.
+            key={`${sideKey(pair.left.kind, pair.left.path)}|${sideKey(pair.right.kind, pair.right.path)}`}
             pair={pair}
             fontSize={props.fontSize}
             renderWhitespace={props.renderWhitespace}

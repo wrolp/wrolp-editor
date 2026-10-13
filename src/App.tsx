@@ -55,7 +55,15 @@ import {
   openableExtensions,
   rekeyPath,
 } from "./lib/path";
-import { isFileTab, pathKey, type DiffStats, type EditStats, type EditorHandle } from "./lib/types";
+import {
+  isFileTab,
+  pathKey,
+  sideKey,
+  type CompareRef,
+  type DiffStats,
+  type EditStats,
+  type EditorHandle,
+} from "./lib/types";
 import {
   api,
   copyText,
@@ -204,7 +212,7 @@ export default function App() {
   /** A group is named by the user, so creating one needs a name first. */
   const [newGroupOpen, setNewGroupOpen] = useState(false);
   /** Path of the file a comparison starts from, while the other side is being chosen. */
-  const [compareFrom, setCompareFrom] = useState<string | null>(null);
+  const [compareFrom, setCompareFrom] = useState<CompareRef | null>(null);
 
   const editorRef = useRef<EditorHandle | null>(null);
   const draft = useDraft(toast);
@@ -737,49 +745,88 @@ export default function App() {
     for (const path of paths) await tabs.openPath(path);
   }, [tabs, toast]);
 
-  /** Open tabs that can be the other side of a comparison against `left`. */
-  const otherFileTabs = useCallback(
-    (left: string) =>
+  /**
+   * Open tabs that can be the other side of a comparison against `left`: every text
+   * buffer there is, except the left source itself. Untitled buffers count — their text
+   * is exactly what an unsaved side is made of — while a picture has no text to compare
+   * and the settings panel and other comparisons are not documents at all. A disk source
+   * drops the tabs of its own file, which keeps "compare a file with itself" a question
+   * only the tab's own menu asks.
+   *
+   * Note for the encryption plan: a locked encrypted tab holds no text (an empty buffer
+   * behind a lock overlay), so it is not a side either. Add `&& !tab.locked` here once
+   * that field exists — until then there is nothing to exclude.
+   */
+  const compareCandidates = useCallback(
+    (left: CompareRef) =>
       tabs.tabs
-        .filter((tab) => isFileTab(tab) && !isUntitled(tab.path))
-        .filter((tab) => pathKey(tab.path) !== pathKey(left))
-        .map((tab) => ({ path: tab.path, name: tab.name })),
+        .filter((tab) => isFileTab(tab) && !tab.isBinary)
+        .filter((tab) => !(left.kind === "buffer" && tab.id === left.tabId))
+        .filter((tab) => !(left.kind === "disk" && pathKey(tab.path) === pathKey(left.path)))
+        .map((tab) => ({
+          key: sideKey("buffer", tab.path),
+          tabId: tab.id,
+          path: tab.path,
+          name: tab.name,
+          dirty: tab.dirty,
+          untitled: isUntitled(tab.path),
+        })),
     [tabs.tabs]
   );
 
   /** The system file picker, for a file that is not open in a tab. */
   const browseCompareWith = useCallback(
-    async (left: string) => {
+    async (left: CompareRef) => {
       const right = await pickFile().catch((e) => {
         toast(errorMessage(e));
         return null;
       });
       if (!right) return;
-      if (pathKey(left) === pathKey(right)) {
+      // The same file on both sides says nothing — unless one side is the tab's buffer,
+      // which is the one way a file is compared against its own unsaved text.
+      if (sideKey(left.kind, left.path) === sideKey("disk", right)) {
         toast(t("cmp.same"));
         return;
       }
-      await tabs.openCompare(left, right);
+      await tabs.openCompare(left, { kind: "disk", path: right });
     },
     [tabs, toast]
   );
 
   /**
-   * Compare one file with another. The first file is the one the user acted on; the
-   * second is picked from the files already open in tabs, because comparing two files you
-   * are working on is the common case and the tab strip already lists them. When nothing
-   * else is open — or the other file lives in another folder — the system file picker
-   * takes over, so the pair is not limited to what happens to be open.
+   * Compare one source with another. The first source is the one the user acted on — a
+   * tab's buffer or a file on disk; the second is picked from what is already open,
+   * because comparing two things you are working on is the common case and the tab strip
+   * already lists them. When nothing else is open — or the other file lives in another
+   * folder — the system file picker takes over, so the pair is not limited to what
+   * happens to be open.
    */
   const startCompare = useCallback(
-    async (left: string) => {
-      if (otherFileTabs(left).length > 0) {
+    async (left: CompareRef) => {
+      if (compareCandidates(left).length > 0) {
         setCompareFrom(left);
         return;
       }
       await browseCompareWith(left);
     },
-    [browseCompareWith, otherFileTabs]
+    [browseCompareWith, compareCandidates]
+  );
+
+  /**
+   * Compare a tab's unsaved text against the saved version of its own file: the disk side
+   * is read fresh (so it is what the file holds now, not what the tab was opened with)
+   * and the buffer side is the text on screen.
+   */
+  const compareWithSaved = useCallback(
+    async (tabId: number) => {
+      const tab = tabs.tabs.find((t) => t.id === tabId);
+      if (!tab || isUntitled(tab.path)) return;
+      await tabs.openCompare(
+        { kind: "disk", path: tab.path },
+        { kind: "buffer", tabId: tab.id, path: tab.path }
+      );
+    },
+    [tabs]
   );
 
   const pickRootFolder = useCallback(async () => {
@@ -1055,6 +1102,14 @@ export default function App() {
   const menuTab = tabs.tabs.find((t) => t.path === menuTabPath) ?? null;
   /** The tab the unsaved-changes prompt is about; gone if it was closed from elsewhere. */
   const closeAskTab = closeAsk === null ? null : tabs.tabs.find((t) => t.id === closeAsk) ?? null;
+  /** What the comparison picker shows as its left side: the tab's name, or the file's. */
+  const compareLeftName =
+    compareFrom === null
+      ? ""
+      : compareFrom.kind === "disk"
+        ? basename(compareFrom.path)
+        : (tabs.tabs.find((tab) => tab.id === compareFrom.tabId)?.name ??
+          basename(compareFrom.path));
   /** The tab the reload prompt is about; gone if it was closed while the prompt was up. */
   const reloadAskTab = reloadAsk === null ? null : tabs.tabs.find((t) => t.id === reloadAsk) ?? null;
   /**
@@ -1278,7 +1333,7 @@ const defaultModeFor = useCallback(
               .catch((e) => toast(errorMessage(e)))
           }
           onOpenPath={tabs.openPath}
-          onCompare={(path) => void startCompare(path)}
+          onCompare={(path) => void startCompare({ kind: "disk", path })}
           onRename={(target, name) => renameEntry(target.path, name)}
           onRemoveHistory={(path) =>
             api
@@ -1355,11 +1410,11 @@ const defaultModeFor = useCallback(
           {showDiff && editorTab?.compare && (
             <div className="editor-host">
               <DiffView
-                // Keyed by the ordered pair: swapping the sides remounts the view, which
-                // is what releases the two models it had attached. Re-pointing the model
-                // paths alone would detach them without disposing, and the library only
-                // disposes the models attached at unmount.
-                key={`${editorTab.compare.left.path}|${editorTab.compare.right.path}`}
+                // Keyed by the two sides' identities: swapping them remounts the view,
+                // which is what releases the two models it had attached. Re-pointing the
+                // model paths alone would detach them without disposing, and the library
+                // only disposes the models attached at unmount.
+                key={`${sideKey(editorTab.compare.left.kind, editorTab.compare.left.path)}|${sideKey(editorTab.compare.right.kind, editorTab.compare.right.path)}`}
                 pair={editorTab.compare}
                 fontSize={settings.fontSize}
                 renderWhitespace={renderWhitespaceMode}
@@ -1511,8 +1566,8 @@ const defaultModeFor = useCallback(
                 </span>
                 {t("title.menuSidebar")}
               </div>
-              {/* Both of these act on a file that is on disk: an unsaved buffer has no entry
-                  to rename, and nothing to read the other file against. Reload is here for
+              {/* These act on a file that is on disk: an unsaved buffer has no entry to
+                  rename, and nothing to read the other file against. Reload is here for
                   the same reason — a scratch buffer has no disk text to take. */}
               {menuTabIsFile && !isUntitled(menuTabPath) && (
                 <>
@@ -1540,19 +1595,44 @@ const defaultModeFor = useCallback(
                     </span>
                     {t("side.menuRename")}
                   </div>
-                  <div
-                    className="ctx-item"
-                    onClick={() => {
-                      void startCompare(menuTabPath);
-                      setTabMenu(null);
-                    }}
-                  >
-                    <span className="ctx-icon">
-                      <IconCompare size={14} />
-                    </span>
-                    {t("cmp.menu")}
-                  </div>
+                  {/* The one comparison that needs the file on disk: the other side is this
+                      tab's buffer, and the disk side is read fresh so it shows what the
+                      file holds now rather than what the tab was opened with. */}
+                  {!isBitmapImage(menuTabPath) && (
+                    <div
+                      className="ctx-item"
+                      onClick={() => {
+                        void compareWithSaved(tabMenu.tabId);
+                        setTabMenu(null);
+                      }}
+                    >
+                      <span className="ctx-icon">
+                        <IconCompare size={14} />
+                      </span>
+                      {t("cmp.withSaved")}
+                    </div>
+                  )}
                 </>
+              )}
+              {/* A comparison can start from any text buffer: the left side is what the tab
+                  holds, saved or not. A picture has no text to compare, so it is left out. */}
+              {menuTabIsFile && !isBitmapImage(menuTabPath) && (
+                <div
+                  className="ctx-item"
+                  onClick={() => {
+                    void startCompare({
+                      kind: "buffer",
+                      tabId: tabMenu.tabId,
+                      path: menuTabPath,
+                    });
+                    setTabMenu(null);
+                  }}
+                >
+                  <span className="ctx-icon">
+                    <IconCompare size={14} />
+                  </span>
+                  {t("cmp.menu")}
+                </div>
               )}
               <div
                 className="ctx-item"
@@ -1663,12 +1743,17 @@ const defaultModeFor = useCallback(
 
       {compareFrom && (
         <ComparePickerDialog
-          leftPath={compareFrom}
-          leftName={basename(compareFrom)}
-          candidates={otherFileTabs(compareFrom)}
-          onPick={(right) => {
+          leftKey={sideKey(compareFrom.kind, compareFrom.path)}
+          leftName={compareLeftName}
+          candidates={compareCandidates(compareFrom)}
+          onPick={(tabId) => {
+            // Resolved from the live tabs rather than the picker's row: the row is a
+            // snapshot of what was open when the dialog appeared.
+            const right = tabs.tabs.find((tab) => tab.id === tabId);
+            if (!right) return;
+            const left = compareFrom;
             setCompareFrom(null);
-            void tabs.openCompare(compareFrom, right);
+            void tabs.openCompare(left, { kind: "buffer", tabId: right.id, path: right.path });
           }}
           onBrowse={() => {
             const left = compareFrom;

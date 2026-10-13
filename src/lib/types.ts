@@ -45,13 +45,35 @@ export interface Tab {
   fileSettings: FileSettings;
 }
 
-/** One side of a comparison: the file it is, plus the text to show for it. */
+/**
+ * One side of a comparison: the content it is, plus the text to show for it.
+ *
+ * `kind` records where the content came from, and it is part of the side's identity
+ * (`sideKey`): a file's unsaved buffer and the file on disk share a path but are two
+ * different things, and comparing one against the other — the same-file case — must
+ * neither collide with another pair nor collapse when the two sides are swapped.
+ */
 export interface CompareSide {
   path: string;
   name: string;
   content: string;
   language: string;
+  kind: "buffer" | "disk";
 }
+
+/** Identity of one side of a comparison, in the same shape for a side or a source. */
+export function sideKey(kind: "buffer" | "disk", path: string): string {
+  return `${kind}:${pathKey(path)}`;
+}
+
+/**
+ * Which source a side of a comparison is read from: a file off the disk, or the live
+ * buffer of an open tab. The buffer variant carries the tab's path as well as its id
+ * so a source can be keyed (`sideKey`) without a tab lookup.
+ */
+export type CompareRef =
+  | { kind: "disk"; path: string }
+  | { kind: "buffer"; tabId: number; path: string };
 
 export interface ComparePair {
   left: CompareSide;

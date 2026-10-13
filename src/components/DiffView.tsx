@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { DiffEditor, type MonacoDiffEditor } from "@monaco-editor/react";
 import { t } from "../lib/i18n";
 import "../lib/monaco";
-import type { ComparePair, DiffStats } from "../lib/types";
+import { sideKey, type ComparePair, type DiffStats } from "../lib/types";
 
 interface Props {
   pair: ComparePair;
@@ -43,12 +43,14 @@ export default function DiffView({
   /**
    * Derived from the pair *in order*: swapping the two sides has to yield different URIs.
    * A stable per-tab URI would not, and the diff editor reuses whatever model already
-   * sits at the path it is handed — the swap would keep showing the old sides.
+   * sits at the path it is handed — the swap would keep showing the old sides. The side
+   * identity carries the kind as well as the path, so a file compared against its own
+   * unsaved buffer (same path on both sides) still gets two distinct models.
    */
   const base = useMemo(
     () =>
-      `inmemory://compare/${encodeURIComponent(pair.left.path)}~${encodeURIComponent(pair.right.path)}`,
-    [pair.left.path, pair.right.path]
+      `inmemory://compare/${encodeURIComponent(sideKey(pair.left.kind, pair.left.path))}~${encodeURIComponent(sideKey(pair.right.kind, pair.right.path))}`,
+    [pair.left.kind, pair.left.path, pair.right.kind, pair.right.path]
   );
 
   /**

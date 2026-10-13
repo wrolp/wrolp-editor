@@ -12,7 +12,17 @@ import {
 } from "../lib/tauri";
 import { basename, dirname, isUntitled, langOf, modelUri, rekeyPath } from "../lib/path";
 import { tabKey, toStoredTab } from "../lib/group";
-import { pathKey, isFileTab, type ComparePair, type CompareSide, type EditorHandle, type PendingRestore, type Tab } from "../lib/types";
+import {
+  pathKey,
+  isFileTab,
+  sideKey,
+  type ComparePair,
+  type CompareRef,
+  type CompareSide,
+  type EditorHandle,
+  type PendingRestore,
+  type Tab,
+} from "../lib/types";
 import type { DraftWriter } from "./useDraft";
 
 interface RestoreResult {
@@ -296,46 +306,126 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
   }, []);
 
   /**
-   * Open a read-only comparison of two files as its own tab.
+   * The text a tab holds right now. It lives in a Monaco model, not in React state: the editor
+   * only ever shows one tab, so a background tab's live text is reachable through its model and
+   * nowhere else. Undefined means the tab has no model yet, which is to say it still holds
+   * exactly what it was built from.
+   */
+  const liveContent = useCallback(
+    (tab: Tab): string | undefined => {
+      const h = editorRef.current;
+      if (!h) return undefined;
+      if (tab.id === activeRef.current) return h.editor.getValue();
+      return h.monaco.editor.getModel(h.monaco.Uri.parse(modelUri(tab.path)))?.getValue();
+    },
+    [editorRef]
+  );
+
+  /**
+   * Open a read-only comparison of two sources as its own tab.
    *
-   * Both sides are read from disk here and kept in the tab, rather than pointed at the
-   * live models of the two file tabs: a comparison is a snapshot of a question, and
-   * sharing models would make a diff follow every keystroke in either file while dragging
-   * drafts and dirty flags along. The pair is also not part of the group store, so it
-   * never comes back on the next start.
+   * A source is either a file read off the disk or the live buffer of an open tab, and
+   * the buffer is what makes an unsaved edit comparable — against a saved file or
+   * against another unsaved buffer. Either way the text is snapshotted into the tab
+   * rather than pointed at the live models: a comparison is a snapshot of a question,
+   * and sharing models would make a diff follow every keystroke in either file while
+   * dragging drafts and dirty flags along. The pair is also not part of the group
+   * store, so it never comes back on the next start.
+   *
+   * The synthetic `compare://` path below is a React key and an identity, never a real
+   * one: it embeds whatever the sides were named (an `untitled://` key included), and
+   * `isFileTab` keeps it out of every path lookup. Nothing may try to parse it.
    */
   const openCompare = useCallback(
-    async (leftPath: string, rightPath: string) => {
-      if (pathKey(leftPath) === pathKey(rightPath)) {
+    async (leftRef: CompareRef, rightRef: CompareRef) => {
+      if (sideKey(leftRef.kind, leftRef.path) === sideKey(rightRef.kind, rightRef.path)) {
         toast(t("cmp.same"));
         return;
       }
-      const side = async (path: string): Promise<CompareSide> => {
-        const disk = await api.openFile(path, false, encodingRef.current);
+      /**
+       * A tab's buffer as one side. `null` means the tab is gone — closed while a picker
+       * was open — and the caller says so rather than snapshotning nothing.
+       */
+      const bufferSide = (ref: CompareRef & { kind: "buffer" }): CompareSide | null => {
+        const tab = tabsRef.current.find((item) => item.id === ref.tabId);
+        if (!tab) return null;
+        // An unsaved file reads as "{name} · unsaved", the wording the conflict prompt
+        // already uses; an untitled buffer is unsaved by its name and needs no suffix.
+        const unsaved = tab.dirty && !isUntitled(tab.path);
+        return {
+          path: tab.path,
+          name: unsaved ? t("stale.mineSide", { name: tab.name }) : tab.name,
+          // A tab restored from the group store but never mounted has no model yet, so
+          // its text is the value the model would be seeded with, and failing that the
+          // baseline it was opened with. Skipping a rung snapshots an empty file.
+          content: liveContent(tab) ?? tab.initialValue ?? tab.original,
+          language: tab.language,
+          kind: "buffer",
+        };
+      };
+      const diskSide = async (ref: CompareRef & { kind: "disk" }): Promise<CompareSide> => {
+        const disk = await api.openFile(ref.path, false, encodingRef.current);
         return {
           path: disk.path,
           name: basename(disk.path),
           content: disk.content,
           language: langOf(disk.path),
+          kind: "disk",
         };
       };
       let left: CompareSide;
       let right: CompareSide;
       try {
-        [left, right] = await Promise.all([side(leftPath), side(rightPath)]);
+        const [maybeLeft, maybeRight] = await Promise.all([
+          leftRef.kind === "buffer" ? Promise.resolve(bufferSide(leftRef)) : diskSide(leftRef),
+          rightRef.kind === "buffer" ? Promise.resolve(bufferSide(rightRef)) : diskSide(rightRef),
+        ]);
+        if (!maybeLeft || !maybeRight) {
+          toast(t("cmp.gone"));
+          return;
+        }
+        left = maybeLeft;
+        right = maybeRight;
       } catch (e) {
         toast(errorMessage(e));
         return;
       }
-      // Same pair in the same order is the same question: show that tab instead of
-      // stacking duplicates. Mirrors openPath, which reuses an already-open file.
+      const leftKey = sideKey(left.kind, left.path);
+      const rightKey = sideKey(right.kind, right.path);
+      // The same path on both sides is the same-file comparison, and the kind is all
+      // that tells the two apart — so the disk side says so, the way the conflict prompt
+      // labels its two versions. The buffer side already carries its own "unsaved"
+      // marker when it holds edits, and a clean buffer needs no marker of its own.
+      if (pathKey(left.path) === pathKey(right.path)) {
+        const labelDisk = (side: CompareSide): CompareSide =>
+          side.kind === "disk"
+            ? { ...side, name: t("stale.diskSide", { name: side.name }) }
+            : side;
+        left = labelDisk(left);
+        right = labelDisk(right);
+      }
+      // Same pair in the same order is the same question: refresh it in place rather
+      // than stacking duplicates. Re-running a comparison is how a snapshot gets
+      // refreshed — either source may have moved on since it was opened. Mirrors
+      // openPath, which reuses an already-open file.
       const existing = tabsRef.current.find(
-        (t) =>
-          !!t.compare &&
-          pathKey(t.compare.left.path) === pathKey(left.path) &&
-          pathKey(t.compare.right.path) === pathKey(right.path)
+        (tab) =>
+          !!tab.compare &&
+          sideKey(tab.compare.left.kind, tab.compare.left.path) === leftKey &&
+          sideKey(tab.compare.right.kind, tab.compare.right.path) === rightKey
       );
       if (existing) {
+        setTabs((prev) =>
+          prev.map((tab) =>
+            tab.id === existing.id
+              ? {
+                  ...tab,
+                  name: t("cmp.label", { left: left.name, right: right.name }),
+                  compare: { left, right },
+                }
+              : tab
+          )
+        );
         await activate(existing.id);
         return;
       }
@@ -343,8 +433,8 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
         id: nextId(),
         // Not a real path, and never treated as one: it is only a key for React and for
         // telling this tab apart from a file. `isFileTab` keeps it out of every path lookup.
-        path: `compare://${left.path}|${right.path}`,
-        name: `${left.name} ↔ ${right.name}`,
+        path: `compare://${leftKey}|${rightKey}`,
+        name: t("cmp.label", { left: left.name, right: right.name }),
         language: right.language,
         original: "",
         dirty: false,
@@ -357,7 +447,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
       setTabs((prev) => [...prev, tab]);
       await activate(tab.id);
     },
-    [activate, toast]
+    [activate, liveContent, toast]
   );
 
   /**
@@ -373,7 +463,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
         return {
           ...tab,
           compare: { left: right, right: left },
-          name: `${right.name} ↔ ${left.name}`,
+          name: t("cmp.label", { left: right.name, right: left.name }),
           language: left.language,
         };
       })
@@ -582,7 +672,11 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
           if (!isFileTab(tab)) continue;
           const uri = h.monaco.Uri.parse(modelUri(tab.path));
           if (h.monaco.editor.getModel(uri)) continue;
-          h.monaco.editor.createModel(tab.original, tab.language, uri);
+          // `initialValue` first: a restored untitled tab keeps its text there, while
+          // `original` is empty for a buffer with no file behind it. Priming the empty
+          // string would make <Editor> reuse that model and silently drop the text —
+          // both when the tab is first visited and when anything reads it before then.
+          h.monaco.editor.createModel(tab.initialValue ?? tab.original, tab.language, uri);
         }
       };
       requestAnimationFrame(prime);
@@ -949,22 +1043,6 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
     [currentOffset, draft, editorRef, toast]
   );
 
-  /**
-   * The text a tab holds right now. It lives in a Monaco model, not in React state: the editor
-   * only ever shows one tab, so a background tab's live text is reachable through its model and
-   * nowhere else. Undefined means the tab has no model yet, which is to say it still holds
-   * exactly what it was built from.
-   */
-  const liveContent = useCallback(
-    (tab: Tab): string | undefined => {
-      const h = editorRef.current;
-      if (!h) return undefined;
-      if (tab.id === activeRef.current) return h.editor.getValue();
-      return h.monaco.editor.getModel(h.monaco.Uri.parse(modelUri(tab.path)))?.getValue();
-    },
-    [editorRef]
-  );
-
   /** Set while one sweep is running, so the timer and a focus change cannot interleave two. */
   const checking = useRef(false);
 
@@ -1166,12 +1244,19 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
       setConflict({
         tabId: id,
         pair: {
-          left: { path: disk.path, name: t("stale.diskSide", { name }), content: disk.content, language },
+          left: {
+            path: disk.path,
+            name: t("stale.diskSide", { name }),
+            content: disk.content,
+            language,
+            kind: "disk",
+          },
           right: {
             path: disk.path,
             name: t("stale.mineSide", { name }),
             content: liveContent(tab) ?? tab.original,
             language,
+            kind: "buffer",
           },
         },
       });

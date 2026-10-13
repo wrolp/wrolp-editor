@@ -19,6 +19,7 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | Language | English by default, switchable to 中文 from a dropdown in Settings. All strings, including messages coming from the Rust side, resolve through one key table |
 | Tab groups | A group is a **named set of open tabs**. The chip in the title bar switches between them inside the same window; tabs and caret positions come back on the next start |
 | Move / copy tabs | A tab can be re-homed into another group from its context menu. This changes *which group lists the tab*, never the file on disk |
+| Comparison | A read-only side-by-side diff of any two contents. Either side may be a file on disk or an unsaved buffer (an untitled tab included); a file against its own unsaved text has an entry of its own, and re-running a comparison refreshes its snapshot |
 | Window | Size, position and the maximized flag come back on the next start. A window left on a monitor that is no longer connected is pulled back onto a screen you still have, and says so |
 
 ## Keyboard shortcuts
@@ -142,6 +143,29 @@ twice inside a group. A build that still has the older `workspaces.json` and no 
 on **read**: the legacy file is parsed, written out under the new name, and only then deleted — so a
 corrupt or unreadable legacy file is never destroyed by a later save. Unknown fields in old records
 (`root`, `autoName`, `sidebarView`) are ignored, which is why the rename needed no migration step.
+
+## File comparison
+
+A read-only side-by-side diff of any two contents, in a tab of its own (titled `a.txt ↔ b.txt`).
+
+- **Either side may be unsaved.** A tab's buffer — an untitled one included — is a side like any other:
+  unsaved vs saved and unsaved vs unsaved both work. The left side is the tab you started from, comparing
+  its **current** text rather than what is on disk; the right side is picked from what is already open, or
+  browsed from a file that is not.
+- **A file against its own unsaved text** is the tab menu's *Compare with saved version*: the disk side is
+  read fresh on the left, the buffer on the right, the sides labelled "· on disk" / "· unsaved" — the same
+  orientation the conflict prompt uses when another program has written the file.
+- **Snapshot.** Both texts are frozen into the tab when it opens; later edits to either source do not
+  change it. **Re-running the same comparison** (same pair of sources, same order) refreshes it. The tab's
+  context menu can swap the two sides.
+- **Read-only.** Open either file to edit it.
+- **Picker badges:** "unsaved" means the tab holds edits that were never saved; "untitled" means there is
+  no file behind it. Pictures, the settings panel and other comparisons are never offered as a side, and a
+  source is never both sides at once — disk vs disk and buffer vs buffer are refused, while buffer vs disk
+  is allowed (that is the same-file case above).
+- A comparison tab is temporary: it is not part of the group store and does not come back on the next
+  start. Closing a source tab leaves an open comparison alone (it holds its own snapshot) — it just cannot
+  be refreshed, and re-running it then says the tab was closed.
 
 ## Window state
 

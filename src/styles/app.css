@@ -1601,6 +1601,18 @@ body.resizing .editor-host {
   white-space: nowrap;
   color: var(--text);
 }
+/* Marks a row whose text was never saved: an untitled buffer, or a file whose edits are
+   still in the buffer. Small and quiet — the row's name is what the user came to read. */
+.pick-badge {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--chip);
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.6;
+  white-space: nowrap;
+}
 .pick-path {
   flex: 1 1 auto;
   min-width: 0;
