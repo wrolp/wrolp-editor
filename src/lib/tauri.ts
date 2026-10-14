@@ -16,6 +16,12 @@ export interface OpenedFile {
   bytes: number;
   /** A picture: `content` is empty and the editor must stay out of the way. */
   binary: boolean;
+  /** The file on disk is an encrypted container. `mtime` and `bytes` then describe the
+   * ciphertext, which is what a later save has to beat. */
+  encrypted: boolean;
+  /** Encrypted with no key available, so `content` is empty because nothing was decrypted.
+   * This is a lock to be shown, not an empty buffer to be typed into. */
+  locked: boolean;
 }
 
 export interface SavedFile {
@@ -286,8 +292,10 @@ export const api = {
    */
   removeEntry: (path: string) => invoke<void>("remove_entry", { path }),
   getDraft: (path: string) => invoke<Draft | null>("get_draft", { path }),
+  /** `null` means nothing was written because the file is encrypted and locked. Drafting
+   * runs in the background, so that is an answer rather than an error. */
   saveDraft: (path: string, content: string, cursor: number) =>
-    invoke<Draft>("save_draft", { path, content, cursor }),
+    invoke<Draft | null>("save_draft", { path, content, cursor }),
   clearDraft: (path: string) => invoke<boolean>("clear_draft", { path }),
   listDir: (path: string) => invoke<FsEntry[]>("list_dir", { path }),
   fileSettingsView: (path: string) => invoke<FileSettingsView>("file_settings_view", { path }),

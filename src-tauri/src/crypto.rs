@@ -34,9 +34,11 @@ pub const HEADER_LEN: usize = 50;
 const FORMAT_VERSION: u8 = 1;
 const KDF_ARGON2ID: u8 = 1;
 
-const SALT_LEN: usize = 16;
-const NONCE_LEN: usize = 12;
-const KEY_LEN: usize = 32;
+/// Public because [`random_salt`] hands one out for a caller-chosen salt.
+pub const SALT_LEN: usize = 16;
+/// Public because the draft envelope carries its own nonce alongside the sealed payload.
+pub const NONCE_LEN: usize = 12;
+pub const KEY_LEN: usize = 32;
 /// AES-GCM appends the tag to the ciphertext, so anything shorter cannot be a container body.
 const TAG_LEN: usize = 16;
 
@@ -183,24 +185,55 @@ fn fill_random(buf: &mut [u8]) -> Result<(), String> {
   getrandom::getrandom(buf).map_err(|e| format!("encrypted_random:{e}"))
 }
 
-/// Produces a complete container, header included. The nonce is fresh per call, so two
-/// saves of the same content under the same password differ on disk.
+/// A fresh salt. One per file: two files that share a password must not share a key, or a
+/// brute force against one would open both.
+pub fn random_salt() -> Result<[u8; SALT_LEN], String> {
+  let mut salt = [0u8; SALT_LEN];
+  fill_random(&mut salt)?;
+  Ok(salt)
+}
+
+/// Produces a complete container, header included, under the default parameters. The nonce
+/// is fresh per call, so two saves of the same content under the same password differ on
+/// disk. This is for making a document encrypted in the first place; re-saving one that
+/// already is goes through [`encrypt_under`] with the key and the parameters it carries.
 pub fn encrypt(plaintext: &[u8], password: &str) -> Result<Vec<u8>, String> {
   let params = KdfParams::default();
-  let mut salt = [0u8; SALT_LEN];
+  let salt = random_salt()?;
+  let mut key = derive_key(password, &salt, params)?;
+  let result = build_container(plaintext, &key, salt, params);
+  key.zeroize();
+  result
+}
+
+/// The container for `plaintext` under a key and salt the caller already has: re-saving an
+/// unlocked file, where the key comes from the session cache instead of a password so the
+/// KDF is not run again, and changing a password, where a fresh salt is drawn for the new
+/// key. Everything else here picks those two and then calls this.
+pub fn encrypt_under(
+  plaintext: &[u8],
+  key: &[u8; KEY_LEN],
+  salt: [u8; SALT_LEN],
+  params: KdfParams,
+) -> Result<Vec<u8>, String> {
+  params.validate()?;
+  build_container(plaintext, key, salt, params)
+}
+
+fn build_container(
+  plaintext: &[u8],
+  key: &[u8; KEY_LEN],
+  salt: [u8; SALT_LEN],
+  params: KdfParams,
+) -> Result<Vec<u8>, String> {
   let mut nonce = [0u8; NONCE_LEN];
-  fill_random(&mut salt)?;
   fill_random(&mut nonce)?;
   let header = ContainerHeader {
     params,
     salt,
     nonce,
   };
-
-  let mut key = derive_key(password, &salt, params)?;
-  let result = aead_encrypt(&header_bytes(&header), &nonce, &key, plaintext);
-  key.zeroize();
-  result
+  aead_encrypt(&header_bytes(&header), &nonce, key, plaintext)
 }
 
 fn aead_encrypt(
@@ -248,25 +281,53 @@ pub fn decrypt(bytes: &[u8], key: &[u8; KEY_LEN]) -> Result<Vec<u8>, String> {
     .map_err(|_| "encrypted_bad_password".to_string())
 }
 
-/// Encrypts with a caller-supplied key and a header the caller already parsed. Used when
-/// re-saving an unlocked file, where the key comes from the session cache rather than from
-/// a password, so the KDF is not run again.
-pub fn encrypt_with_key(
+/// Builds a container from a password and a salt the caller chose, so a test can make a
+/// file and then unlock it by password. Production always draws a fresh random salt:
+/// reusing one would let two files that share a password share a key.
+#[cfg(test)]
+pub(crate) fn encrypt_with_salt(
   plaintext: &[u8],
-  key: &[u8; KEY_LEN],
+  password: &str,
+  salt: &[u8; SALT_LEN],
   params: KdfParams,
 ) -> Result<Vec<u8>, String> {
-  params.validate()?;
-  let mut salt = [0u8; SALT_LEN];
+  let key = derive_key(password, salt, params)?;
+  encrypt_under(plaintext, &key, *salt, params)
+}
+
+/// A fresh nonce. Every write needs one of its own: reusing a nonce under a key breaks
+/// AES-GCM outright rather than degrading it, so this is not a convenience wrapper.
+pub fn random_nonce() -> Result<[u8; NONCE_LEN], String> {
   let mut nonce = [0u8; NONCE_LEN];
-  fill_random(&mut salt)?;
   fill_random(&mut nonce)?;
-  let header = ContainerHeader {
-    params,
-    salt,
-    nonce,
-  };
-  aead_encrypt(&header_bytes(&header), &nonce, key, plaintext)
+  Ok(nonce)
+}
+
+/// AES-256-GCM over an arbitrary payload with no associated data. Used by the draft
+/// envelope, which reuses the key of the file a draft belongs to but is not a container
+/// and therefore has no header to authenticate against.
+pub fn seal(
+  plaintext: &[u8],
+  key: &[u8; KEY_LEN],
+  nonce: &[u8; NONCE_LEN],
+) -> Result<Vec<u8>, String> {
+  let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
+  cipher
+    .encrypt(Nonce::from_slice(nonce), plaintext)
+    .map_err(|e| format!("encrypted_corrupt:{e}"))
+}
+
+/// The inverse of [`seal`]. A tag failure means the payload does not belong to this key or
+/// was damaged; the two cannot be told apart, so they are not reported as if they could.
+pub fn unseal(
+  sealed: &[u8],
+  key: &[u8; KEY_LEN],
+  nonce: &[u8; NONCE_LEN],
+) -> Result<Vec<u8>, String> {
+  let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key));
+  cipher
+    .decrypt(Nonce::from_slice(nonce), sealed)
+    .map_err(|_| "encrypted_corrupt".to_string())
 }
 
 #[cfg(test)]
@@ -456,8 +517,9 @@ mod tests {
       t_cost: MIN_T_COST,
       p_cost: MIN_P_COST,
     };
-    let key = derive_key(PASSWORD, &[7u8; SALT_LEN], params).expect("derive");
-    let container = encrypt_with_key(b"re-saved", &key, params).expect("encrypt_with_key");
+    let salt = [7u8; SALT_LEN];
+    let key = derive_key(PASSWORD, &salt, params).expect("derive");
+    let container = encrypt_under(b"re-saved", &key, salt, params).expect("encrypt_under");
     assert_eq!(decrypt(&container, &key).expect("decrypt"), b"re-saved");
     assert_eq!(parse_header(&container).expect("header").params, params);
   }
@@ -471,8 +533,51 @@ mod tests {
       p_cost: 1,
     };
     assert_eq!(
-      encrypt_with_key(b"x", &key, bad),
+      encrypt_under(b"x", &key, random_salt().expect("salt"), bad),
       Err("encrypted_params_invalid".to_string())
     );
+  }
+
+  #[test]
+  fn a_sealed_payload_needs_the_key_and_nonce_it_was_sealed_with() {
+    let key = [3u8; KEY_LEN];
+    let nonce = random_nonce().expect("nonce");
+    let sealed = seal(b"draft body", &key, &nonce).expect("seal");
+    assert_eq!(
+      unseal(&sealed, &key, &nonce).expect("unseal"),
+      b"draft body"
+    );
+
+    let other_key = [4u8; KEY_LEN];
+    assert_eq!(
+      unseal(&sealed, &other_key, &nonce),
+      Err("encrypted_corrupt".to_string())
+    );
+    let other_nonce = random_nonce().expect("nonce");
+    assert_eq!(
+      unseal(&sealed, &key, &other_nonce),
+      Err("encrypted_corrupt".to_string())
+    );
+  }
+
+  #[test]
+  fn a_sealed_payload_that_changed_by_one_byte_is_caught() {
+    let key = [5u8; KEY_LEN];
+    let nonce = random_nonce().expect("nonce");
+    let mut sealed = seal(b"draft body", &key, &nonce).expect("seal");
+    sealed[0] ^= 0x01;
+    assert_eq!(
+      unseal(&sealed, &key, &nonce),
+      Err("encrypted_corrupt".to_string())
+    );
+  }
+
+  #[test]
+  fn an_empty_payload_still_carries_a_tag() {
+    let key = [6u8; KEY_LEN];
+    let nonce = random_nonce().expect("nonce");
+    let sealed = seal(b"", &key, &nonce).expect("seal");
+    assert_eq!(sealed.len(), 16);
+    assert!(unseal(&sealed, &key, &nonce).expect("unseal").is_empty());
   }
 }

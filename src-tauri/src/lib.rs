@@ -7,6 +7,7 @@ mod entry;
 mod file_settings;
 mod group;
 mod rename;
+mod unlock;
 mod window;
 
 use tauri::Manager;
@@ -17,6 +18,7 @@ pub fn run() {
     .plugin(tauri_plugin_dialog::init())
     .plugin(tauri_plugin_opener::init())
     .manage(commands::PendingFiles::default())
+    .manage(unlock::UnlockStore::default())
     .setup(|app| {
       // "Open with WROLP" hands the file path over as argv[1..].
       for path in commands::paths_from_args(std::env::args()) {
@@ -45,6 +47,16 @@ pub fn run() {
       commands::save_file_settings,
       commands::clear_file_settings,
       file_settings::file_settings_view,
+      unlock::unlock_file,
+      unlock::lock_file,
+      unlock::lock_all,
+      unlock::change_password,
+      unlock::remove_encryption,
+      unlock::remember_password,
+      unlock::forget_password,
+      unlock::recall_password,
+      unlock::remembered_password_count,
+      unlock::clear_remembered_passwords,
       commands::get_history,
       commands::remove_history,
       commands::get_folder_history,

@@ -1,11 +1,19 @@
 //! Draft storage: unsaved editor content is mapped to a standalone draft file
 //! keyed by the SHA-256 of the normalized absolute path.
+//!
+//! A draft of an encrypted file is sealed with that file's key before it is written, so
+//! the text never reaches the disk in the clear next to a document the user encrypted.
+//! When no key is available the draft is not written at all, and an existing sealed draft
+//! is left on disk unread rather than deleted: it becomes readable again the moment the
+//! file is unlocked.
 
+use crate::crypto::{self, KEY_LEN};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::path::{Component, Path, PathBuf};
 use tauri::{AppHandle, Manager};
+use zeroize::Zeroize;
 
 /// Contents of a draft file. Serialized as camelCase so it maps 1:1 to the frontend type.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -19,6 +27,63 @@ pub struct Draft {
   pub cursor: usize,
   /// Last update time, ISO-8601 UTC.
   pub updated_at: String,
+}
+
+/// What a draft file holds for an encrypted file: the `Draft` JSON, sealed.
+///
+/// The path stays outside the ciphertext on purpose. It is not a secret — it is the name
+/// of a file sitting in a directory listing — and keeping it readable is what lets a
+/// rename move a sealed draft to its new key without the key being present.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SealedDraft {
+  /// 2. A version 1 draft is a bare `Draft` with no wrapper, and stays readable.
+  v: u8,
+  path: String,
+  /// Hex, 12 bytes.
+  nonce: String,
+  /// Hex of the sealed `Draft` JSON.
+  data: String,
+}
+
+const SEALED_VERSION: u8 = 2;
+
+/// Whether a draft may be written as it stands, has to be sealed first, or must not be
+/// written at all.
+///
+/// The key is owned, not borrowed: it arrives by value out of the session cache, so there
+/// is nothing for it to borrow from.
+pub enum DraftKey {
+  /// The file is not encrypted.
+  Plain,
+  /// The file is encrypted and unlocked.
+  Sealed([u8; KEY_LEN]),
+  /// The file is encrypted and locked. Writing the text out anyway would leave the
+  /// document's contents in the clear beside an encrypted file, which is the one thing
+  /// encrypting it was meant to prevent.
+  Locked,
+}
+
+impl Drop for DraftKey {
+  fn drop(&mut self) {
+    if let DraftKey::Sealed(key) = self {
+      key.zeroize();
+    }
+  }
+}
+
+fn to_hex(bytes: &[u8]) -> String {
+  bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn from_hex(text: &str) -> Option<Vec<u8>> {
+  if text.len() % 2 != 0 {
+    return None;
+  }
+  (0..text.len())
+    .step_by(2)
+    .map(|i| u8::from_str_radix(&text[i..i + 2], 16).ok())
+    .collect()
 }
 
 fn wrolp_dir(app: &AppHandle, sub: &str) -> Result<PathBuf, String> {
@@ -104,7 +169,11 @@ pub fn normalize_path(raw: &str) -> String {
   }
 }
 
-fn draft_key(raw: &str) -> String {
+/// The digest that identifies a path across every path-keyed store: draft file names,
+/// per-file overrides, and the credential-manager account for a remembered password. One
+/// derivation, so a path means the same thing everywhere and never appears in readable
+/// form in a store the user can browse.
+pub(crate) fn draft_key(raw: &str) -> String {
   let normalized = normalize_path(raw);
   if normalized.is_empty() {
     return String::new();
@@ -123,24 +192,99 @@ fn draft_file(app: &AppHandle, raw: &str) -> Result<PathBuf, String> {
   Ok(drafts_dir(app)?.join(format!("{key}.draft")))
 }
 
-pub fn load(app: &AppHandle, raw: &str) -> Result<Option<Draft>, String> {
+pub fn load(app: &AppHandle, raw: &str, key: DraftKey) -> Result<Option<Draft>, String> {
   let file = draft_file(app, raw)?;
   let bytes = match std::fs::read(&file) {
     Ok(b) => b,
     Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
     Err(e) => return Err(format!("draft_read:{e}")),
   };
-  match serde_json::from_slice::<Draft>(&bytes) {
-    Ok(d) => Ok(Some(d)),
-    Err(e) => {
-      // A broken draft must not block opening the file; drop it.
-      let _ = std::fs::remove_file(&file);
-      Err(format!("draft_corrupt:{e}"))
+  let outcome = match parse_stored(&bytes) {
+    Ok(Stored::Plain(draft)) => Ok(Some(draft)),
+    Ok(Stored::Sealed(sealed)) => {
+      let DraftKey::Sealed(key) = &key else {
+        // Locked, or the file is not encrypted any more. Either way the draft is not
+        // broken, only unreadable right now, so it stays on disk: deleting it would throw
+        // away edits that come back the moment the file is unlocked.
+        return Ok(None);
+      };
+      match open_sealed(&sealed, key) {
+        Ok(mut draft) => {
+          // The path outside the ciphertext says where a draft belongs, so a rename can
+          // move a sealed draft without the key that seals it.
+          draft.path = sealed.path;
+          Ok(Some(draft))
+        }
+        // The key is the one this file is unlocked under, so a payload that will not open
+        // is damaged beyond use. It cannot be recovered by waiting.
+        Err(e) => Err(e),
+      }
     }
+    Err(e) => Err(e),
+  };
+  if outcome.is_err() {
+    // A broken draft must not block opening the file; drop it.
+    let _ = std::fs::remove_file(&file);
   }
+  outcome
 }
 
-pub fn save(app: &AppHandle, raw: &str, content: &str, cursor: usize) -> Result<Draft, String> {
+enum Stored {
+  Plain(Draft),
+  Sealed(SealedDraft),
+}
+
+/// A draft file is either a bare version 1 `Draft` or a sealed version 2 wrapper, and the
+/// two cannot be confused: each has fields the other lacks and neither fills in defaults.
+fn parse_stored(bytes: &[u8]) -> Result<Stored, String> {
+  if let Ok(sealed) = serde_json::from_slice::<SealedDraft>(bytes) {
+    return Ok(Stored::Sealed(sealed));
+  }
+  serde_json::from_slice::<Draft>(bytes)
+    .map(Stored::Plain)
+    .map_err(|e| format!("draft_corrupt:{e}"))
+}
+
+fn open_sealed(sealed: &SealedDraft, key: &[u8; KEY_LEN]) -> Result<Draft, String> {
+  let hex_nonce =
+    from_hex(&sealed.nonce).ok_or_else(|| "draft_corrupt:nonce is not hex".to_string())?;
+  if hex_nonce.len() != crypto::NONCE_LEN {
+    return Err("draft_corrupt:nonce has the wrong length".into());
+  }
+  let mut nonce = [0u8; crypto::NONCE_LEN];
+  nonce.copy_from_slice(&hex_nonce);
+  let payload =
+    from_hex(&sealed.data).ok_or_else(|| "draft_corrupt:payload is not hex".to_string())?;
+  let json = crypto::unseal(&payload, key, &nonce)?;
+  serde_json::from_slice::<Draft>(&json).map_err(|e| format!("draft_corrupt:{e}"))
+}
+
+/// The bytes of a draft file for an encrypted document: the `Draft` JSON sealed under the
+/// file's key, in an envelope that carries the nonce and the path in the clear.
+fn seal_envelope(raw: &str, json: &[u8], key: &[u8; KEY_LEN]) -> Result<Vec<u8>, String> {
+  let nonce = crypto::random_nonce()?;
+  let sealed = SealedDraft {
+    v: SEALED_VERSION,
+    path: raw.to_string(),
+    data: to_hex(&crypto::seal(json, key, &nonce)?),
+    nonce: to_hex(&nonce),
+  };
+  serde_json::to_vec(&sealed).map_err(|e| e.to_string())
+}
+
+/// Write the draft, sealed when the file it belongs to is encrypted.
+///
+/// `Ok(None)` means nothing was written because the file is locked. That is not an error
+/// and must not be reported as one: drafting happens in the background while the user
+/// types, and a dialog for something they did not ask for would be noise. Saving the file
+/// itself does fail loudly, so nothing is silently lost.
+pub fn save(
+  app: &AppHandle,
+  raw: &str,
+  content: &str,
+  cursor: usize,
+  key: DraftKey,
+) -> Result<Option<Draft>, String> {
   let file = draft_file(app, raw)?;
   let draft = Draft {
     path: raw.to_string(),
@@ -149,14 +293,18 @@ pub fn save(app: &AppHandle, raw: &str, content: &str, cursor: usize) -> Result<
     updated_at: Utc::now().to_rfc3339(),
   };
   let json = serde_json::to_vec(&draft).map_err(|e| e.to_string())?;
-  // Write a temp file first, then swap: an interrupted write cannot leave half a JSON behind.
+  let bytes = match &key {
+    DraftKey::Locked => return Ok(None),
+    DraftKey::Plain => json,
+    DraftKey::Sealed(key) => seal_envelope(raw, &json, key)?,
+  };
+  // Write a temp file first, then swap: an interrupted write cannot leave half a JSON
+  // behind. Nothing is removed on the way, because `rename` already replaces the target on
+  // Windows and deleting it first would leave a moment in which the draft is simply gone.
   let tmp = file.with_extension("tmp");
-  std::fs::write(&tmp, &json).map_err(|e| format!("draft_write:{e}"))?;
-  if file.exists() {
-    std::fs::remove_file(&file).map_err(|e| format!("draft_replace:{e}"))?;
-  }
+  std::fs::write(&tmp, &bytes).map_err(|e| format!("draft_write:{e}"))?;
   std::fs::rename(&tmp, &file).map_err(|e| format!("draft_replace:{e}"))?;
-  Ok(draft)
+  Ok(Some(draft))
 }
 
 pub fn clear(app: &AppHandle, raw: &str) -> Result<bool, String> {
@@ -174,6 +322,8 @@ pub fn clear(app: &AppHandle, raw: &str) -> Result<bool, String> {
 /// A draft file is named by the hash of the path it was written for, so a rename cannot edit
 /// it in place: it has to be re-created under the new key and the old file removed. The
 /// `path` stored inside each one is what says where it belongs, since the name is opaque.
+/// A sealed draft keeps its payload untouched and only has that path rewritten, which is
+/// why the path is not part of what the key protects.
 pub fn rekey_prefix(app: &AppHandle, old: &str, new: &str) -> Result<(), String> {
   let read = match std::fs::read_dir(drafts_dir(app)?) {
     Ok(read) => read,
@@ -190,21 +340,43 @@ pub fn rekey_prefix(app: &AppHandle, old: &str, new: &str) -> Result<(), String>
     let Ok(bytes) = std::fs::read(&file) else {
       continue;
     };
-    let Ok(stored) = serde_json::from_slice::<Draft>(&bytes) else {
+    let Ok(stored) = parse_stored(&bytes) else {
       continue;
     };
-    let before = normalize_path(&stored.path);
-    let moved = crate::rename::rekey(&before, old, new);
-    if moved == before {
-      continue;
-    }
+    let (moved, rewritten) = match stored {
+      Stored::Plain(draft) => {
+        let before = normalize_path(&draft.path);
+        let moved = crate::rename::rekey(&before, old, new);
+        if moved == before {
+          continue;
+        }
+        let draft = Draft {
+          path: moved.clone(),
+          ..draft
+        };
+        (
+          moved,
+          serde_json::to_vec(&draft).map_err(|e| e.to_string())?,
+        )
+      }
+      Stored::Sealed(sealed) => {
+        let before = normalize_path(&sealed.path);
+        let moved = crate::rename::rekey(&before, old, new);
+        if moved == before {
+          continue;
+        }
+        let sealed = SealedDraft {
+          path: moved.clone(),
+          ..sealed
+        };
+        (
+          moved,
+          serde_json::to_vec(&sealed).map_err(|e| e.to_string())?,
+        )
+      }
+    };
     let target = draft_file(app, &moved)?;
-    let draft = Draft {
-      path: moved,
-      ..stored
-    };
-    let json = serde_json::to_vec(&draft).map_err(|e| e.to_string())?;
-    crate::commands::write_atomic(&target, &json)?;
+    crate::commands::write_atomic(&target, &rewritten)?;
     if target != file {
       let _ = std::fs::remove_file(&file);
     }
@@ -244,5 +416,98 @@ mod tests {
   #[test]
   fn empty_path_yields_empty_key() {
     assert_eq!(draft_key("   "), "");
+  }
+
+  const KEY: [u8; KEY_LEN] = [9u8; KEY_LEN];
+  const PATH: &str = r"C:\Users\x\notes.md";
+
+  fn draft_json(content: &str) -> Vec<u8> {
+    serde_json::to_vec(&Draft {
+      path: PATH.to_string(),
+      content: content.to_string(),
+      cursor: 3,
+      updated_at: "2026-01-01T00:00:00+00:00".to_string(),
+    })
+    .expect("draft json")
+  }
+
+  /// A draft written before encryption existed has no envelope. It has to stay readable:
+  /// the alternative is throwing away unsaved edits on the first run of a new build.
+  #[test]
+  fn a_version_1_draft_still_parses() {
+    match parse_stored(&draft_json("old text")).expect("parse") {
+      Stored::Plain(draft) => assert_eq!(draft.content, "old text"),
+      Stored::Sealed(_) => panic!("a bare Draft is not a sealed one"),
+    }
+  }
+
+  #[test]
+  fn a_sealed_draft_round_trips_under_its_key() {
+    let bytes = seal_envelope(PATH, &draft_json("secret"), &KEY).expect("seal");
+    match parse_stored(&bytes).expect("parse") {
+      Stored::Sealed(sealed) => {
+        let draft = open_sealed(&sealed, &KEY).expect("unseal");
+        assert_eq!(draft.content, "secret");
+        assert_eq!(draft.cursor, 3);
+      }
+      Stored::Plain(_) => panic!("an envelope is not a bare Draft"),
+    }
+  }
+
+  #[test]
+  fn a_sealed_draft_needs_the_key_it_was_sealed_with() {
+    let bytes = seal_envelope(PATH, &draft_json("secret"), &KEY).expect("seal");
+    let Stored::Sealed(sealed) = parse_stored(&bytes).expect("parse") else {
+      panic!("expected an envelope");
+    };
+    let err = open_sealed(&sealed, &[1u8; KEY_LEN]).expect_err("must fail");
+    assert_eq!(err, "encrypted_corrupt");
+  }
+
+  /// The path is what says where a draft belongs, and a rename has to be able to move one
+  /// without the key that seals it. So it stays outside the ciphertext on purpose.
+  #[test]
+  fn the_path_of_a_sealed_draft_is_readable_without_the_key() {
+    let bytes = seal_envelope(PATH, &draft_json("secret"), &KEY).expect("seal");
+    let value: serde_json::Value = serde_json::from_slice(&bytes).expect("envelope json");
+    assert_eq!(value["path"], PATH);
+    assert_eq!(value["v"], SEALED_VERSION);
+    assert!(
+      !bytes.windows("secret".len()).any(|w| w == b"secret"),
+      "the content must not appear in the clear"
+    );
+  }
+
+  #[test]
+  fn one_byte_of_damage_in_a_sealed_draft_is_caught() {
+    let bytes = seal_envelope(PATH, &draft_json("secret"), &KEY).expect("seal");
+    let Stored::Sealed(sealed) = parse_stored(&bytes).expect("parse") else {
+      panic!("expected an envelope");
+    };
+    // One hex digit of the payload changed: what a draft looks like after something on disk
+    // went wrong, with the envelope itself still intact.
+    let mut data = sealed.data.clone();
+    let tail = data.pop().expect("payload");
+    data.push(if tail == '0' { '1' } else { '0' });
+    let damaged = SealedDraft { data, ..sealed };
+    assert_eq!(
+      open_sealed(&damaged, &KEY).expect_err("must fail"),
+      "encrypted_corrupt"
+    );
+  }
+
+  #[test]
+  fn garbage_is_reported_as_a_corrupt_draft() {
+    match parse_stored(b"not json at all") {
+      Err(e) => assert!(e.starts_with("draft_corrupt:"), "{e}"),
+      Ok(_) => panic!("garbage must not parse as a draft"),
+    }
+  }
+
+  #[test]
+  fn hex_that_is_not_hex_or_is_the_wrong_length_is_refused() {
+    assert_eq!(from_hex("zz"), None);
+    assert_eq!(from_hex("abc"), None);
+    assert_eq!(to_hex(&[0u8, 255]), "00ff");
   }
 }

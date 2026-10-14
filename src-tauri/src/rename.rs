@@ -10,9 +10,11 @@ use crate::commands::{self, protected_roots, refused_by_scope, HistoryEntry, Set
 use crate::draft;
 use crate::file_settings;
 use crate::group::GroupStore;
+use crate::unlock::{self, UnlockStore};
 use serde::Serialize;
 use std::path::Path;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
+use zeroize::Zeroize;
 
 /// What moved. Both sides are normalized, because that is how every store keys them.
 #[derive(Serialize)]
@@ -154,7 +156,34 @@ fn rekey_state(app: &AppHandle, old: &str, new: &str) -> Result<(), String> {
   file_settings::rekey_prefix(app, old, new)?;
   rekey_groups(app, old, new)?;
   rekey_history(app, old, new)?;
+  rekey_unlock(app, old, new);
   rekey_sidebar_root(app, old, new)
+}
+
+/// What a rename does to the two halves of the unlock state.
+///
+/// The session key moves with the file. It was derived from the document's own header, which
+/// a rename does not touch, so it is as valid under the new name as under the old — and
+/// locking a document because of a rename would be a surprise that has nothing to do with
+/// encryption, arriving in the middle of somebody editing it.
+///
+/// A remembered password does not move. Both halves are keyed by a digest of the path, and a
+/// digest cannot be walked back to the path it came from, so after a *folder* rename there is
+/// no way to tell which entries moved and which did not. Forgetting the two paths this rename
+/// names is the honest half of that: for a single file it clears the entry that would
+/// otherwise linger, and entries under a renamed folder stay unreachable until "clear all
+/// remembered" is used. What the user sees is being asked for the password again, which is
+/// the recoverable direction.
+fn rekey_unlock(app: &AppHandle, old: &str, new: &str) {
+  let unlock = app.state::<UnlockStore>();
+  let idle = unlock::idle_limit(app);
+  if let Some(mut key) = unlock.get(old, idle) {
+    unlock.remove(old);
+    unlock.put(new, key, idle);
+    key.zeroize();
+  }
+  let _ = unlock.forget(old);
+  let _ = unlock.forget(new);
 }
 
 fn rekey_groups(app: &AppHandle, old: &str, new: &str) -> Result<(), String> {

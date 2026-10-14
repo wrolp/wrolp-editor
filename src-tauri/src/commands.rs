@@ -1,13 +1,17 @@
 //! Tauri commands exposed to the frontend: file IO, draft CRUD, directory listings,
 //! recently-opened history, settings, tab groups and the context-menu install switch.
 
-use crate::draft::{self, Draft};
+use crate::crypto::{self, KEY_LEN};
+use crate::draft::{self, Draft, DraftKey};
 use crate::group::{GroupStore, TabTransfer};
+use crate::unlock::UnlockStore;
 use crate::window::{MonitorRect, Placement, WindowState};
 use serde::{Deserialize, Serialize};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
+use zeroize::Zeroize;
 
 /// Files larger than this are refused so Monaco cannot freeze the window.
 pub(crate) const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
@@ -53,6 +57,13 @@ pub struct OpenedFile {
   /// frontend shows the image itself and keeps the editor out of the way, so a stray
   /// keystroke cannot write a decoded picture back over the original.
   pub binary: bool,
+  /// The file on disk is an encrypted container. `mtime` and `bytes` then describe the
+  /// ciphertext, which is what a save has to beat.
+  pub encrypted: bool,
+  /// Encrypted and no key is available, so `content` is empty because nothing has been
+  /// decrypted. The frontend shows a lock instead of an empty buffer: an empty buffer
+  /// looks like a file that can be typed into and saved over.
+  pub locked: bool,
 }
 
 #[derive(Serialize)]
@@ -145,6 +156,10 @@ pub struct Settings {
   /// Colour scheme: system | dark | light. `system` follows the OS preference at runtime,
   /// so a machine that switches at dusk does not need the app restarted.
   pub theme: String,
+  /// Minutes an encrypted file stays unlocked without being touched. 0 means never lock
+  /// automatically, which is a deliberate choice rather than a missing value, so it is
+  /// kept as written.
+  pub encrypt_idle_minutes: u32,
 }
 
 /// Used when settings.json is absent or a key is missing, so a first run must not
@@ -175,6 +190,7 @@ impl Default for Settings {
       preview_layout: "text".into(),
       preview_width: "narrow".into(),
       theme: "system".into(),
+      encrypt_idle_minutes: ENCRYPT_IDLE_DEFAULT_MINUTES,
     }
   }
 }
@@ -191,6 +207,9 @@ const PREVIEW_LAYOUT: [&str; 4] = ["auto", "text", "split", "preview"];
 /// Widths the markdown preview body can take, as capped reading measures. The numbers
 /// themselves live in the stylesheet; this only names the three choices.
 const PREVIEW_WIDTH: [&str; 3] = ["narrow", "wide", "full"];
+/// A key left in memory for a day is not an idle lock any more, so the setting stops there.
+const ENCRYPT_IDLE_DEFAULT_MINUTES: u32 = 10;
+const ENCRYPT_IDLE_MAX_MINUTES: u32 = 1440;
 
 impl Settings {
   pub(crate) fn filled(self) -> Self {
@@ -284,6 +303,9 @@ impl Settings {
       } else {
         "system".into()
       },
+      // 0 is "never lock" and must survive as written; only the upper end is clamped, since
+      // a huge value there is a typo rather than an intention.
+      encrypt_idle_minutes: self.encrypt_idle_minutes.min(ENCRYPT_IDLE_MAX_MINUTES),
     }
   }
 }
@@ -304,13 +326,22 @@ pub(crate) fn read_json<T: for<'de> Deserialize<'de>>(
 
 /// Replace `path` with `bytes` without ever leaving a half-written file behind:
 /// the whole payload goes to a sibling temp file first, then gets renamed over the target.
-/// Renaming onto an existing file fails on Windows, so the target is removed first.
+///
+/// Nothing is deleted on the way. `rename` replaces an existing file on Windows (std passes
+/// `MOVEFILE_REPLACE_EXISTING`), so removing the target first would only open a window in
+/// which the file does not exist at all — and for an encrypted document a crash inside that
+/// window is not a damaged file to be repaired by hand, it is a lost one.
 pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
-  let tmp = path.with_extension("json.tmp");
+  // `.tmp` is appended rather than swapped in for the extension: `with_extension` would turn
+  // `notes.md` and `notes.txt` into the same temp file in the same directory.
+  let tmp = path.with_file_name(format!(
+    "{}.tmp",
+    path
+      .file_name()
+      .map(|n| n.to_string_lossy())
+      .unwrap_or_default()
+  ));
   std::fs::write(&tmp, bytes).map_err(|e| format!("tmp_write:{e}"))?;
-  if path.exists() {
-    std::fs::remove_file(path).map_err(|e| format!("target_remove:{e}"))?;
-  }
   std::fs::rename(&tmp, path).map_err(|e| format!("tmp_replace:{e}"))
 }
 
@@ -341,18 +372,22 @@ pub(crate) fn mtime_ms(meta: &std::fs::Metadata) -> u64 {
     .unwrap_or(0)
 }
 
-#[tauri::command]
-pub fn open_file(
-  app: AppHandle,
-  path: String,
-  record: Option<bool>,
-  encoding: Option<String>,
-) -> Result<OpenedFile, String> {
-  let normalized = draft::normalize_path(&path);
-  if normalized.is_empty() {
+/// A file read off disk past the checks every reader needs: it resolves, it is a file
+/// rather than a directory, and it is not bigger than the editor will hold in memory.
+/// Shared by the plain and the encrypted open paths so the two cannot drift apart on what
+/// counts as openable.
+pub(crate) struct SourceFile {
+  pub path: String,
+  pub meta: std::fs::Metadata,
+  pub bytes: Vec<u8>,
+}
+
+pub(crate) fn read_source(raw: &str) -> Result<SourceFile, String> {
+  let path = draft::normalize_path(raw);
+  if path.is_empty() {
     return Err("path_empty".into());
   }
-  let file = Path::new(&normalized);
+  let file = Path::new(&path);
   let meta = std::fs::metadata(file).map_err(|e| format!("file_access:{e}"))?;
   if !meta.is_file() {
     return Err("file_not_file".into());
@@ -361,6 +396,141 @@ pub fn open_file(
     return Err(format!("file_too_large:{}", meta.len() / (1024 * 1024)));
   }
   let bytes = std::fs::read(file).map_err(|e| format!("file_read:{e}"))?;
+  Ok(SourceFile { path, meta, bytes })
+}
+
+/// The leading bytes of a file — enough to recognize a container — without reading the rest.
+///
+/// Drafting and saving ask this of a file they are not otherwise going to read, and the
+/// answer has to be cheap because drafting happens while the user types. `None` when there
+/// is no file at that path, which for a save is a first write rather than an error.
+fn read_head(raw: &str) -> Result<Option<Vec<u8>>, String> {
+  let normalized = draft::normalize_path(raw);
+  if normalized.is_empty() {
+    return Err("path_empty".into());
+  }
+  let mut file = match std::fs::File::open(Path::new(&normalized)) {
+    Ok(f) => f,
+    Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+    Err(e) => return Err(format!("file_read:{e}")),
+  };
+  let mut head = vec![0u8; crypto::HEADER_LEN];
+  let read = file.read(&mut head).map_err(|e| format!("file_read:{e}"))?;
+  head.truncate(read);
+  Ok(Some(head))
+}
+
+/// How the draft of `path` may be written: as it stands, sealed under a cached key, or not
+/// at all because the file is a container this session cannot open.
+///
+/// The disk decides, not a flag handed in by the caller. What a tab believes about its file
+/// goes stale — encryption removed in another window, the file replaced underneath us — and
+/// asking the disk each time is what keeps the two agreeing. It is self-correcting in both
+/// directions: once the encryption goes, the next draft overwrites the sealed one with a
+/// plain one at the same file name.
+pub(crate) fn draft_key_for(
+  app: &AppHandle,
+  state: &UnlockStore,
+  path: &str,
+) -> Result<DraftKey, String> {
+  let encrypted = read_head(path)?.is_some_and(|head| crypto::is_container(&head));
+  if !encrypted {
+    return Ok(DraftKey::Plain);
+  }
+  let idle = crate::unlock::idle_limit(app);
+  Ok(match state.get(path, idle) {
+    Some(key) => DraftKey::Sealed(key),
+    // Not written at all. Sealing needs a key, and writing the text in the clear next to a
+    // document the user encrypted is the one thing encryption was supposed to prevent.
+    None => DraftKey::Locked,
+  })
+}
+
+/// The `OpenedFile` of a container that has just been decrypted. Shared by the open path and
+/// by `unlock_file` so the two cannot drift on what an unlocked document reports.
+pub(crate) fn decrypted_file(source: SourceFile, content: String) -> OpenedFile {
+  OpenedFile {
+    path: source.path,
+    content,
+    mtime: mtime_ms(&source.meta),
+    // The plaintext of a container is UTF-8 by definition. There is no encoding field in
+    // the format: a file decrypted here was written by this editor.
+    encoding: "UTF-8".into(),
+    bom: false,
+    // The ciphertext size, which is what a later save has to beat when it checks whether
+    // somebody else wrote the file in between.
+    bytes: source.meta.len(),
+    binary: false,
+    encrypted: true,
+    locked: false,
+  }
+}
+
+/// The `OpenedFile` of a container with no key behind it. Nothing was decrypted, so there is
+/// no text and no encoding to report.
+pub(crate) fn locked_file(source: SourceFile) -> OpenedFile {
+  OpenedFile {
+    path: source.path,
+    content: String::new(),
+    mtime: mtime_ms(&source.meta),
+    encoding: String::new(),
+    bom: false,
+    bytes: source.meta.len(),
+    binary: false,
+    encrypted: true,
+    locked: true,
+  }
+}
+
+/// Open a container with whatever this session already has: a cached key, or a password the
+/// user asked to be remembered.
+///
+/// A container nobody has unlocked opens *locked* instead of failing. The tab exists and
+/// shows a lock, and the password is asked for when its contents are wanted, which is what
+/// lets a session of encrypted files come back without a wall of dialogs first.
+fn open_container(
+  app: &AppHandle,
+  state: &UnlockStore,
+  source: SourceFile,
+  record: Option<bool>,
+) -> Result<OpenedFile, String> {
+  let idle = crate::unlock::idle_limit(app);
+  match state.decrypt_if_possible(&source.path, &source.bytes, idle) {
+    Some(Ok(plaintext)) => {
+      // Strict: a tag that verifies but yields invalid UTF-8 is a damaged file, and showing
+      // the replacement characters would invite the user to save them over the original.
+      let content = String::from_utf8(plaintext).map_err(|_| "encrypted_corrupt".to_string())?;
+      if record.unwrap_or(true) {
+        push_history_entry(app, &source.path)?;
+      }
+      Ok(decrypted_file(source, content))
+    }
+    Some(Err(e)) => Err(e),
+    // No history entry for a locked open. The file was found, not opened; the entry is made
+    // by `unlock_file`, at the moment it actually is.
+    None => Ok(locked_file(source)),
+  }
+}
+
+#[tauri::command]
+pub fn open_file(
+  app: AppHandle,
+  state: State<'_, UnlockStore>,
+  path: String,
+  record: Option<bool>,
+  encoding: Option<String>,
+) -> Result<OpenedFile, String> {
+  let source = read_source(&path)?;
+  // Both encrypted checks come before any decoding. Ciphertext is not text in any encoding,
+  // and a buffer decoded from it would be mojibake that must never be written back; a
+  // foreign format gets named rather than shown as garbage.
+  if crypto::looks_foreign(&source.bytes) {
+    return Err("encrypted_foreign_format".into());
+  }
+  if crypto::is_container(&source.bytes) {
+    return open_container(&app, &state, source, record);
+  }
+  let normalized = source.path;
   // A picture is not text: decoding one either fails outright (which used to make the file
   // unopenable) or succeeds into a mojibake buffer that must never be written back. It is
   // read for its metadata only, and the frontend renders it through the preview.
@@ -375,9 +545,9 @@ pub fn open_file(
   let decoded = if binary {
     None
   } else {
-    Some(crate::encoding::decode(&bytes, &preference)?)
+    Some(crate::encoding::decode(&source.bytes, &preference)?)
   };
-  let mtime = mtime_ms(&meta);
+  let mtime = mtime_ms(&source.meta);
 
   // Reopening a whole workspace is not "the user just opened these": recording it would
   // bury the files actually touched today under whatever was left open last session.
@@ -393,8 +563,10 @@ pub fn open_file(
       .map(|d| d.encoding.clone())
       .unwrap_or_default(),
     bom: decoded.as_ref().is_some_and(|d| d.bom),
-    bytes: meta.len(),
+    bytes: source.meta.len(),
     binary,
+    encrypted: false,
+    locked: false,
   })
 }
 
@@ -447,6 +619,7 @@ pub(crate) fn stored_encoding(app: &AppHandle) -> String {
 #[tauri::command]
 pub fn save_file(
   app: AppHandle,
+  state: State<'_, UnlockStore>,
   path: String,
   content: String,
   encoding: Option<String>,
@@ -459,6 +632,13 @@ pub fn save_file(
   let file = Path::new(&normalized);
   if let Some(parent) = file.parent() {
     std::fs::create_dir_all(parent).map_err(|e| format!("dir_create:{e}"))?;
+  }
+  // Whether this save is encrypted is settled by the file on disk, not by anything the
+  // caller says: writing ciphertext over a plain file, or plaintext over a container, would
+  // both be silent damage. Only a container on disk keeps a file encrypted, which is also
+  // what makes removing the encryption stick — the next save writes it plain.
+  if read_head(&normalized)?.is_some_and(|head| crypto::is_container(&head)) {
+    return save_container(&app, &state, &normalized, &content);
   }
   // Write back in the encoding the file was read in, so a legacy file stays legacy.
   let target = match encoding.filter(|e| !e.trim().is_empty()) {
@@ -478,6 +658,69 @@ pub fn save_file(
     encoding: crate::encoding::resolve(&target)?.name().to_string(),
     bytes: written.len() as u64,
   })
+}
+
+/// Re-encrypt and replace a container.
+///
+/// The write always goes through the temp file and rename. A plain text file cut short by a
+/// crash can be salvaged by hand; a container cut short verifies to nothing and is simply
+/// gone, so there is no trade to make here.
+fn save_container(
+  app: &AppHandle,
+  state: &UnlockStore,
+  normalized: &str,
+  content: &str,
+) -> Result<SavedFile, String> {
+  let source = read_source(normalized)?;
+  let idle = crate::unlock::idle_limit(app);
+  let mut key = state
+    .get(normalized, idle)
+    .ok_or_else(|| "encrypted_locked".to_string())?;
+  let written = encrypt_over(&source, &key, content);
+  key.zeroize();
+  // A key that will not open the file it is about to replace is no key at all: drop it so
+  // the next attempt asks for the password instead of failing the same way again.
+  if matches!(written, Err(ref e) if e == "encrypted_locked") {
+    state.remove(normalized);
+  }
+  let written = written?;
+  write_atomic(Path::new(normalized), &written)?;
+  let mtime = std::fs::metadata(normalized)
+    .map(|m| mtime_ms(&m))
+    .unwrap_or(0);
+  push_history_entry(app, normalized)?;
+  Ok(SavedFile {
+    path: normalized.to_string(),
+    mtime,
+    encoding: "UTF-8".into(),
+    bytes: written.len() as u64,
+  })
+}
+
+/// The ciphertext for `content` under a key that has to open `source` first.
+///
+/// Verifying is not redundant. Keys are cached per path, and a path can come to hold a
+/// different document — replaced by another program, restored from a backup, re-encrypted
+/// elsewhere. Writing a cached key into that document's header, whose salt the key was never
+/// derived from, produces a file no password can open. Being asked to unlock again is
+/// recoverable; that is not.
+///
+/// The salt and the cost parameters are the file's own, so a save changes neither what
+/// password opens the document nor how long deriving it takes.
+fn encrypt_over(
+  source: &SourceFile,
+  key: &[u8; KEY_LEN],
+  content: &str,
+) -> Result<Vec<u8>, String> {
+  let header = crypto::parse_header(&source.bytes)?;
+  crypto::decrypt(&source.bytes, key).map_err(|_| "encrypted_locked".to_string())?;
+  let written = crypto::encrypt_under(content.as_bytes(), key, header.salt, header.params)?;
+  // Checked on the ciphertext, which is what has to fit when the file is read back: the
+  // header and the tag make it slightly bigger than the text that went in.
+  if written.len() as u64 > MAX_FILE_BYTES {
+    return Err(format!("file_too_large:{}", written.len() / (1024 * 1024)));
+  }
+  Ok(written)
 }
 
 /// Directories a document may never be able to read, however it spells the path.
@@ -693,18 +936,37 @@ pub fn clear_file_settings(app: AppHandle, path: String) -> Result<(), String> {
   crate::file_settings::clear(&app, &path)
 }
 
+/// The draft of `path`, or `None` when there is none to read.
+///
+/// A sealed draft of a locked file also answers `None`, and deliberately stays on disk: it
+/// is not broken, only unreadable until the file is unlocked, and the edits in it come back
+/// at that point.
 #[tauri::command]
-pub fn get_draft(app: AppHandle, path: String) -> Result<Option<Draft>, String> {
-  draft::load(&app, &path)
+pub fn get_draft(
+  app: AppHandle,
+  state: State<'_, UnlockStore>,
+  path: String,
+) -> Result<Option<Draft>, String> {
+  let key = draft_key_for(&app, &state, &path)?;
+  draft::load(&app, &path, key)
 }
+
+/// Write the draft of `path`.
+///
+/// `Ok(None)` means nothing was written because the file is encrypted and locked. Drafting
+/// runs in the background while the user types, so that is not reported as an error: a
+/// dialog about something nobody asked for is noise, and saving the document itself fails
+/// loudly, so no text is lost without the user being told.
 #[tauri::command]
 pub fn save_draft(
   app: AppHandle,
+  state: State<'_, UnlockStore>,
   path: String,
   content: String,
   cursor: usize,
-) -> Result<Draft, String> {
-  draft::save(&app, &path, &content, cursor)
+) -> Result<Option<Draft>, String> {
+  let key = draft_key_for(&app, &state, &path)?;
+  draft::save(&app, &path, &content, cursor, key)
 }
 
 #[tauri::command]
@@ -1232,6 +1494,32 @@ mod tests {
     assert_eq!(s.sidebar_width, 240.0);
   }
 
+  /// The idle lock is the one setting where 0 is a choice rather than a missing value:
+  /// it means the user asked for keys to stay in memory. Treating it as unset would
+  /// silently re-enable locking, so the distinction is pinned here.
+  #[test]
+  fn encrypt_idle_minutes_keeps_zero_and_clamps_only_the_top() {
+    assert_eq!(Settings::default().encrypt_idle_minutes, 10);
+    assert_eq!(
+      Settings {
+        encrypt_idle_minutes: 0,
+        ..Default::default()
+      }
+      .filled()
+      .encrypt_idle_minutes,
+      0
+    );
+    assert_eq!(
+      Settings {
+        encrypt_idle_minutes: 100_000,
+        ..Default::default()
+      }
+      .filled()
+      .encrypt_idle_minutes,
+      1440
+    );
+  }
+
   /// The asset scope is the one place where a document could ask to read outside its own
   /// folder, so the line has to be pinned by tests rather than by a comment.
   #[test]
@@ -1474,6 +1762,41 @@ mod tests {
     assert!(write_atomic(&blocked, b"new").is_err());
     // ...and the state that was already on disk is still readable.
     assert_eq!(std::fs::read(&target).expect("read"), b"old");
+    std::fs::remove_dir_all(&dir).ok();
+  }
+
+  /// Drafting and saving both ask whether a file is a container, and drafting happens while
+  /// the user types, so the answer must not cost a read of the whole document.
+  #[test]
+  fn the_head_of_a_file_is_enough_to_recognize_a_container() {
+    let dir = scratch_dir("read-head");
+    let file = dir.join("secret.wrolpenc");
+    let mut bytes = crypto::MAGIC.to_vec();
+    bytes.extend_from_slice(&[7u8; 4096]);
+    std::fs::write(&file, &bytes).expect("write");
+
+    let head = read_head(&file.to_string_lossy())
+      .expect("read")
+      .expect("a file that is there");
+    assert!(crypto::is_container(&head));
+    assert_eq!(head.len(), crypto::HEADER_LEN);
+
+    // No file at all is a first save rather than an error.
+    let missing = dir.join("missing.wrolpenc");
+    assert!(read_head(&missing.to_string_lossy())
+      .expect("read")
+      .is_none());
+
+    // A short file is reported as itself, not padded into something it is not.
+    let short = dir.join("short.txt");
+    std::fs::write(&short, b"hi").expect("write");
+    assert_eq!(
+      read_head(&short.to_string_lossy())
+        .expect("read")
+        .expect("some"),
+      b"hi"
+    );
+    assert!(!crypto::is_container(b"hi"));
     std::fs::remove_dir_all(&dir).ok();
   }
 
