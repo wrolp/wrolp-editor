@@ -9,7 +9,6 @@ import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import * as monaco from "monaco-editor";
 import { t } from "./i18n";
 import { MenuId, MenuRegistry } from "monaco-editor/platform/actions/common/actions";
-import { CommandsRegistry } from "monaco-editor/platform/commands/common/commands";
 
 /**
  * Add "Select All".
@@ -64,10 +63,11 @@ for (const item of MenuRegistry.getMenuItems(MenuId.EditorContext)) {
  * grants it, so the entry did nothing while `Ctrl+V` worked — the browser handles that key
  * itself, and Monaco deliberately does not bind it. Re-registering the id is enough: the command
  * registry keeps a list per id and reads the head of it, and a menu entry resolves its command
- * through the command service at click time. Cut and Copy are left as Monaco wrote them, since
- * those go through `execCommand`, which is not blocked.
+ * through the command service at click time — and `monaco.editor.registerCommand` writes into that
+ * same registry, so this part needs no internals. Cut and Copy are left as Monaco wrote them,
+ * since those go through `execCommand`, which is not blocked.
  */
-CommandsRegistry.registerCommand("editor.action.clipboardPasteAction", async () => {
+monaco.editor.registerCommand("editor.action.clipboardPasteAction", async () => {
   const target = monaco.editor.getEditors().find((editor) => editor.hasTextFocus());
   if (!target || !target.getModel()) return;
   const text = await readText().catch(() => null);

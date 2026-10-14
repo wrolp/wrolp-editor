@@ -8,6 +8,13 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(() => ({
   plugins: [react()],
 
+  // Monaco's own module graph has to stay one copy. Vite pre-bundles dependencies, and a deep
+  // import like `monaco-editor/platform/actions/common/actions` gets its *own* chunk next to the
+  // bundled root — two live instances of `MenuRegistry` and `CommandsRegistry`, so anything
+  // `src/lib/editorMenu.ts` registers lands in a registry the editor never reads. Excluding the
+  // package leaves both the root and the deep paths as the real ESM files at one URL each.
+  optimizeDeps: { exclude: ["monaco-editor"] },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors
