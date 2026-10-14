@@ -173,6 +173,18 @@ export function IconFilePlus({ size = 14 }: IconProps) {
   );
 }
 
+/** A new encrypted file: the document of a new file, with the padlock that says what is in it. */
+export function IconFileLock({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.6}>
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5z" />
+      <path d="M14 3v5h5" />
+      <path d="M10.6 15v-1.2a1.4 1.4 0 0 1 2.8 0V15" />
+      <rect x="9.1" y="15" width="5.8" height="4.2" rx="1" />
+    </svg>
+  );
+}
+
 /** A new folder: the folder, with the plus that says it does not exist yet. */
 export function IconFolderPlus({ size = 14 }: IconProps) {
   return (

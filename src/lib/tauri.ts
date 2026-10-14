@@ -320,6 +320,38 @@ export const api = {
    */
   rememberPassword: (path: string, password: string) =>
     invoke<void>("remember_password", { path, password }),
+  /** Stop keeping the password of one file. The session key is untouched, so an open tab
+   * stays readable until it is locked. */
+  forgetPassword: (path: string) => invoke<void>("forget_password", { path }),
+  /**
+   * Only whether a password is kept, never the password: it stays in Rust, because a value in
+   * a JavaScript heap is a value in a devtools console.
+   */
+  recallPassword: (path: string) => invoke<boolean>("recall_password", { path }),
+  rememberedPasswordCount: () => invoke<number>("remembered_password_count"),
+  clearRememberedPasswords: () => invoke<number>("clear_remembered_passwords"),
+  /** Drop the session key of one file, locking it without waiting for the idle limit. */
+  lockFile: (path: string) => invoke<void>("lock_file", { path }),
+  /**
+   * Write text out as a brand new encrypted file. The container gets a fresh salt at the
+   * current cost, and the key is cached, so the tab that follows opens unlocked.
+   */
+  saveFileAsEncrypted: (path: string, content: string, password: string) =>
+    invoke<SavedFile>("save_file_as_encrypted", { path, content, password }),
+  /** Create an empty encrypted file in `parent`; the backend supplies `.wrolpenc` when the
+   * typed name has no extension of its own. */
+  createEncrypted: (parent: string, name: string, password: string) =>
+    invoke<FsEntry>("create_encrypted", { parent, name, password }),
+  /**
+   * Re-encrypt a file under a new password. The old one is verified rather than taken from the
+   * cache: the user is asserting what it is, and acting on a wrong assertion would hand back a
+   * file they can no longer open.
+   */
+  changePassword: (path: string, oldPassword: string, newPassword: string) =>
+    invoke<SavedFile>("change_password", { path, oldPassword, newPassword }),
+  /** Verify the password and write the plaintext back out as UTF-8. */
+  removeEncryption: (path: string, password: string) =>
+    invoke<SavedFile>("remove_encryption", { path, password }),
   listDir: (path: string) => invoke<FsEntry[]>("list_dir", { path }),
   fileSettingsView: (path: string) => invoke<FileSettingsView>("file_settings_view", { path }),
   saveFileSettings: (path: string, settings: FileSettings) =>

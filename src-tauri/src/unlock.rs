@@ -471,6 +471,120 @@ pub fn remove_encryption(
   })
 }
 
+/// Put a document under encryption for the first time, and cache the key that opens it.
+///
+/// Separate from saving a file that already is encrypted: that one goes through `save_file` and
+/// keeps the container's own salt and cost parameters, because a cached key was derived under
+/// them. There is no container here yet, so this draws a fresh salt at the current defaults.
+/// Caching the result is what lets the tab that follows open unlocked instead of asking for the
+/// password it was just handed.
+fn write_new_container(
+  state: &UnlockStore,
+  normalized: &str,
+  plaintext: &[u8],
+  password: &str,
+  idle: Option<Duration>,
+) -> Result<u64, String> {
+  let salt = crypto::random_salt()?;
+  let params = crypto::KdfParams::default();
+  let mut key = crypto::derive_key(password, &salt, params)?;
+  // The atomic write, for the reason every other container write has it: a truncated ciphertext
+  // verifies to nothing, so a half-written file here is not damaged but gone.
+  let written = crypto::encrypt_under(plaintext, &key, salt, params).and_then(|bytes| {
+    // A container is the text plus a header and a tag, so the limit is faced by what actually
+    // lands on disk rather than by what the user typed.
+    if bytes.len() as u64 > commands::MAX_FILE_BYTES {
+      return Err(format!("file_too_large:{}", bytes.len() / (1024 * 1024)));
+    }
+    commands::write_atomic(Path::new(normalized), &bytes).map(|()| bytes.len() as u64)
+  });
+  // Only a key that is on disk somewhere is worth caching: caching one whose write failed would
+  // leave the session believing it can save a file that was never created.
+  if written.is_ok() {
+    state.put(normalized, key, idle);
+  }
+  key.zeroize();
+  written
+}
+
+/// Write text out as a new encrypted file, at a path the caller chose.
+///
+/// The text goes in as UTF-8 and nothing else. The format carries no encoding field, so a
+/// legacy encoding written inside a container would produce a file this app itself could not
+/// read back correctly — the one kind of damage encryption is supposed to prevent.
+#[tauri::command]
+pub fn save_file_as_encrypted(
+  app: AppHandle,
+  state: State<'_, UnlockStore>,
+  path: String,
+  content: String,
+  password: String,
+) -> Result<commands::SavedFile, String> {
+  let normalized = draft::normalize_path(&path);
+  if normalized.is_empty() {
+    return Err("path_empty".into());
+  }
+  let target = Path::new(&normalized);
+  if let Some(parent) = target.parent() {
+    std::fs::create_dir_all(parent).map_err(|e| format!("dir_create:{e}"))?;
+  }
+  let mut content = content;
+  let written = write_new_container(
+    &state,
+    &normalized,
+    content.as_bytes(),
+    &password,
+    idle_limit(&app),
+  );
+  content.zeroize();
+  let bytes = written?;
+  let mtime = std::fs::metadata(target)
+    .map(|m| commands::mtime_ms(&m))
+    .unwrap_or(0);
+  commands::push_history_entry(&app, &normalized)?;
+  Ok(commands::SavedFile {
+    path: normalized,
+    mtime,
+    encoding: "UTF-8".into(),
+    bytes,
+  })
+}
+
+/// Create an empty encrypted file inside `parent`.
+///
+/// Empty rather than holding a placeholder, for the reason `create_file` has: it is a file the
+/// user asked to exist, not one with anything in it. Text nobody typed would be worse here than
+/// there, because it would arrive already encrypted.
+#[tauri::command]
+pub fn create_encrypted(
+  app: AppHandle,
+  state: State<'_, UnlockStore>,
+  parent: String,
+  name: String,
+  password: String,
+) -> Result<commands::FsEntry, String> {
+  let (target, named) = crate::entry::new_entry_path(&parent, &name, crate::entry::ENCRYPTED_EXT)?;
+  // Reserved before anything is written, so a name taken in between is refused rather than
+  // overwritten. The reservation is an empty file, which is not a container and so reads as
+  // corrupt rather than as somebody's document; it is replaced atomically a moment later, and
+  // taken back out if that fails.
+  std::fs::OpenOptions::new()
+    .write(true)
+    .create_new(true)
+    .open(&target)
+    .map_err(|e| format!("create_failed:{e}"))?;
+  let normalized = draft::normalize_path(&target.to_string_lossy());
+  if let Err(e) = write_new_container(&state, &normalized, &[], &password, idle_limit(&app)) {
+    let _ = std::fs::remove_file(&target);
+    return Err(e);
+  }
+  Ok(commands::FsEntry {
+    name: named,
+    path: normalized,
+    is_dir: false,
+  })
+}
+
 #[tauri::command]
 pub fn lock_file(state: State<'_, UnlockStore>, path: String) {
   state.remove(&path);
@@ -1078,5 +1192,55 @@ mod tests {
       .get_mut(&normalized)
       .unwrap_or_else(|| panic!("no cached key for {normalized}"));
     cached.last_used -= by;
+  }
+
+  #[test]
+  fn a_new_container_is_written_and_its_key_cached() {
+    let unlock = store_without_keyring();
+    let p = path(31);
+    let _ = std::fs::remove_file(&p);
+    let plaintext = b"held under a password";
+    let bytes =
+      write_new_container(&unlock, &p, plaintext, "correct horse", None).expect("written");
+    let on_disk = std::fs::read(&p).expect("read back");
+    // The count returned is the ciphertext, which is what a tab has to compare against later.
+    assert_eq!(bytes, on_disk.len() as u64);
+    assert!(crypto::is_container(&on_disk));
+    // The cached key opens what was written. That is the whole point of caching it here: a key
+    // derived under a different salt than the header carries would leave the file locked at
+    // birth, with no password that could ever open it.
+    let key = unlock.get(&p, None).expect("cached key");
+    assert_eq!(
+      crypto::decrypt(&on_disk, &key).expect("decrypts"),
+      plaintext
+    );
+    std::fs::remove_file(&p).expect("cleanup");
+  }
+
+  #[test]
+  fn an_empty_password_is_weak_and_writes_nothing() {
+    let unlock = store_without_keyring();
+    let p = path(32);
+    let _ = std::fs::remove_file(&p);
+    let err = write_new_container(&unlock, &p, b"text", "", None).expect_err("must fail");
+    assert_eq!(err, "encrypted_weak_password");
+    assert!(!Path::new(&p).exists());
+    assert!(unlock.get(&p, None).is_none());
+  }
+
+  #[test]
+  fn a_key_is_cached_only_once_the_file_is_on_disk() {
+    let unlock = store_without_keyring();
+    // A directory that is not there, so the temp write fails. A key cached anyway would leave
+    // the session believing it can save a file that was never created.
+    let p = std::env::temp_dir()
+      .join("wrolp-unlock-test-no-such-dir")
+      .join("secret.wrolpenc")
+      .to_string_lossy()
+      .to_string();
+    let err =
+      write_new_container(&unlock, &p, b"text", "correct horse", None).expect_err("must fail");
+    assert!(err.starts_with("tmp_write"), "unexpected error {err}");
+    assert!(unlock.get(&p, None).is_none());
   }
 }

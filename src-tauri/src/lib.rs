@@ -52,6 +52,8 @@ pub fn run() {
       unlock::lock_all,
       unlock::change_password,
       unlock::remove_encryption,
+      unlock::save_file_as_encrypted,
+      unlock::create_encrypted,
       unlock::remember_password,
       unlock::forget_password,
       unlock::recall_password,

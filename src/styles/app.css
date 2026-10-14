@@ -779,6 +779,25 @@ body {
 .pwd-field .btn {
   flex: 0 0 auto;
 }
+/* The second and third masked fields of a create or change: the first one is spaced by the
+   paragraph above it, and these have nothing above them but another field. */
+.pwd-field + .pwd-field {
+  margin-top: 6px;
+}
+/* Why a new password is not accepted yet, said in words instead of a meter.
+   Two colours rather than one, because "will be refused" and "worth thinking about" are not
+   the same statement: making both red teaches the user to ignore the second one. */
+.pwd-strength {
+  font-size: 12px;
+  margin: 6px 0 0;
+  color: var(--muted);
+}
+.pwd-strength.is-warn {
+  color: var(--warn);
+}
+.pwd-strength.is-block {
+  color: var(--danger);
+}
 .btn.small {
   padding: 4px 10px;
   font-size: 12px;

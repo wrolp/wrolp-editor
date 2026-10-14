@@ -4,6 +4,7 @@ import {
   IconCompare,
   IconCopy,
   IconFile,
+  IconFileLock,
   IconFilePlus,
   IconFolder,
   IconFolderPlus,
@@ -45,13 +46,29 @@ interface MenuTarget extends NodeTarget {
 }
 
 /**
+ * What the name being typed will produce.
+ *
+ * An encrypted file is a kind of its own rather than a flag on "file": nothing is written
+ * until a password has been accepted, so both the row it is named in and the call it ends up
+ * making differ from a plain new file's.
+ */
+export type EntryKind = "file" | "dir" | "encrypted";
+
+/**
  * A new entry being named: the folder it will go into, and what it will be.
  *
  * `null` when nothing is being created. Only one at a time, because there is one input.
  */
 interface CreatingTarget {
   dir: string;
-  isDir: boolean;
+  kind: EntryKind;
+}
+
+/** The naming row's placeholder, which is the only place the three kinds read differently. */
+function kindPlaceholder(kind: EntryKind) {
+  if (kind === "dir") return t("side.newFolderName");
+  if (kind === "encrypted") return t("side.newEncryptedName");
+  return t("side.newFileName");
 }
 
 /**
@@ -252,7 +269,7 @@ interface TreeHandlers {
   /** The folder a new entry is being named in, and what it will be; null when idle. */
   creating: CreatingTarget | null;
   /** Creates a node on disk; resolves false when the name or the disk refused it. */
-  onCreate: (dir: string, name: string, isDir: boolean) => Promise<boolean>;
+  onCreate: (dir: string, name: string, kind: EntryKind) => Promise<boolean>;
   /** Gives up on the new entry without touching the disk. */
   onCreateEnd: () => void;
   /**
@@ -291,23 +308,31 @@ function indent(depth: number) {
  */
 function NewRow({
   depth,
-  isDir,
+  kind,
   onCommit,
   onCancel,
 }: {
   depth: number;
-  isDir: boolean;
+  kind: EntryKind;
   onCommit: (name: string) => Promise<boolean>;
   onCancel: () => void;
 }) {
   return (
     <div className="tree-row file" style={indent(depth)}>
       <span className="chev" />
-      <span className="ti">{isDir ? <IconFolder /> : <FileIcon name="" />}</span>
+      <span className="ti">
+        {kind === "dir" ? (
+          <IconFolder />
+        ) : kind === "encrypted" ? (
+          <IconFileLock />
+        ) : (
+          <FileIcon name="" />
+        )}
+      </span>
       <RowName
         editing
         name=""
-        placeholder={t(isDir ? "side.newFolderName" : "side.newFileName")}
+        placeholder={kindPlaceholder(kind)}
         onCommit={onCommit}
         onCancel={onCancel}
       />
@@ -478,8 +503,8 @@ function FolderNode({
           {naming && (
             <NewRow
               depth={depth + 1}
-              isDir={creating.isDir}
-              onCommit={(name) => onCreate(entry.path, name, creating.isDir)}
+              kind={creating.kind}
+              onCommit={(name) => onCreate(entry.path, name, creating.kind)}
               onCancel={onCreateEnd}
             />
           )}
@@ -536,10 +561,12 @@ interface Props extends Omit<
   /** Points the Explorer at a folder, the same action as the tab menu's. */
   onSetRoot: (dir: string) => void;
   /**
-   * Creates a file or a folder in `dir`; resolves false when the name was refused, which
-   * leaves the input open with the text picked out.
+   * Creates a file, a folder or an encrypted file in `dir`; resolves false when the name was
+   * refused, which leaves the input open with the text picked out. An encrypted one also
+   * resolves false when the password question was answered with nothing, and resolves only
+   * once the container is on disk.
    */
-  onCreate: (dir: string, name: string, isDir: boolean) => Promise<boolean>;
+  onCreate: (dir: string, name: string, kind: EntryKind) => Promise<boolean>;
   /**
    * Copies `source` into the folder `target`, whole if it is a folder. Resolves false when
    * nothing was copied, in which case the tree is left showing what it already has.
@@ -714,9 +741,15 @@ export default function Sidebar(props: Props) {
     return true;
   };
 
-  /** Create the entry being named, then re-read the folder it went into. */
-  const commitCreate = async (dir: string, name: string, isDir: boolean) => {
-    if (!(await props.onCreate(dir, name, isDir))) return false;
+  /**
+   * Create the entry being named, then re-read the folder it went into.
+   *
+   * An encrypted file resolves once its password has been accepted and the container is on
+   * disk, so the re-read happens after the file exists rather than after the click. A password
+   * that was never given resolves false and leaves the name input where it was.
+   */
+  const commitCreate = async (dir: string, name: string, kind: EntryKind) => {
+    if (!(await props.onCreate(dir, name, kind))) return false;
     setCreating(null);
     bumpFolder(dir);
     return true;
@@ -984,8 +1017,8 @@ export default function Sidebar(props: Props) {
               {creating && pathKey(creating.dir) === pathKey(rootDir) && (
                 <NewRow
                   depth={0}
-                  isDir={creating.isDir}
-                  onCommit={(name) => commitCreate(rootDir, name, creating.isDir)}
+                  kind={creating.kind}
+                  onCommit={(name) => commitCreate(rootDir, name, creating.kind)}
                   onCancel={() => setCreating(null)}
                 />
               )}
@@ -1063,7 +1096,7 @@ export default function Sidebar(props: Props) {
                 <div
                   className="ctx-item"
                   onClick={() => {
-                    setCreating({ dir: rootDir, isDir: false });
+                    setCreating({ dir: rootDir, kind: "file" });
                     setMenu(null);
                   }}
                 >
@@ -1075,7 +1108,19 @@ export default function Sidebar(props: Props) {
                 <div
                   className="ctx-item"
                   onClick={() => {
-                    setCreating({ dir: rootDir, isDir: true });
+                    setCreating({ dir: rootDir, kind: "encrypted" });
+                    setMenu(null);
+                  }}
+                >
+                  <span className="ctx-icon">
+                    <IconFileLock size={14} />
+                  </span>
+                  {t("enc.menuNew")}
+                </div>
+                <div
+                  className="ctx-item"
+                  onClick={() => {
+                    setCreating({ dir: rootDir, kind: "dir" });
                     setMenu(null);
                   }}
                 >
@@ -1150,7 +1195,7 @@ export default function Sidebar(props: Props) {
               <div className="ws-sep" />
               {/* Both edits replace this menu, so the node they were aimed at is
                   remembered first. A new entry goes *into* a folder, never out of a
-                  file, which is why these two are offered on a folder only. */}
+                  file, which is why these are offered on a folder only. */}
               {menu.isDir && (
                 <>
                   {/* Re-reads this folder and everything open inside it, and leaves every
@@ -1171,7 +1216,7 @@ export default function Sidebar(props: Props) {
                   <div
                     className="ctx-item"
                     onClick={() => {
-                      setCreating({ dir: menu.path, isDir: false });
+                      setCreating({ dir: menu.path, kind: "file" });
                       setMenu(null);
                     }}
                   >
@@ -1183,7 +1228,19 @@ export default function Sidebar(props: Props) {
                   <div
                     className="ctx-item"
                     onClick={() => {
-                      setCreating({ dir: menu.path, isDir: true });
+                      setCreating({ dir: menu.path, kind: "encrypted" });
+                      setMenu(null);
+                    }}
+                  >
+                    <span className="ctx-icon">
+                      <IconFileLock size={14} />
+                    </span>
+                    {t("enc.menuNew")}
+                  </div>
+                  <div
+                    className="ctx-item"
+                    onClick={() => {
+                      setCreating({ dir: menu.path, kind: "dir" });
                       setMenu(null);
                     }}
                   >

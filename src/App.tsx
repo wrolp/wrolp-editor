@@ -9,7 +9,7 @@ import DraftRestoreDialog from "./components/DraftRestoreDialog";
 import NewGroupDialog from "./components/NewGroupDialog";
 import SettingsPanel from "./components/SettingsPanel";
 import FileSettingsDialog from "./components/FileSettingsDialog";
-import Sidebar from "./components/Sidebar";
+import Sidebar, { type EntryKind } from "./components/Sidebar";
 import SidebarResizer from "./components/SidebarResizer";
 import StatusBar from "./components/StatusBar";
 import TitleBar, { type PreviewMode } from "./components/TitleBar";
@@ -28,6 +28,7 @@ import {
   IconCompare,
   IconCopy,
   IconFolder,
+  IconLock,
   IconMinimap,
   IconModePreview,
   IconMoveTo,
@@ -708,16 +709,22 @@ export default function App() {
   );
 
   /**
-   * Create a file or a folder in the Explorer's tree.
+   * Create a file, a folder, or an encrypted file in the Explorer's tree.
    *
    * A new file opens straight away: it is empty, so there is nothing to decide about it, and
    * an Explorer that made a file and left the user somewhere else has made one they then
    * have to go and find. Resolves false when the name was refused, which is what keeps the
    * tree's input open with the text picked out.
+   *
+   * An encrypted file is handed to the tabs hook rather than created here: it needs a password
+   * first, and the question that collects one already belongs to that hook, along with the
+   * open and the toast that follow. What comes back is the same answer under the same meaning,
+   * only settled once a container exists instead of once a call returns.
    */
   const createEntry = useCallback(
-    async (dir: string, name: string, isDir: boolean): Promise<boolean> => {
-      const made = await (isDir
+    async (dir: string, name: string, kind: EntryKind): Promise<boolean> => {
+      if (kind === "encrypted") return tabs.createEncryptedIn(dir, name);
+      const made = await (kind === "dir"
         ? api.createDir(dir, name)
         : api.createFile(dir, name)
       ).catch((e) => {
@@ -726,7 +733,7 @@ export default function App() {
       });
       if (!made) return false;
       toast(t("side.created", { name: made.name.replace(/\/$/, "") }));
-      if (!isDir) void tabs.openPath(made.path);
+      if (kind === "file") void tabs.openPath(made.path);
       return true;
     },
     [tabs, toast]
@@ -1567,6 +1574,7 @@ const defaultModeFor = useCallback(
               menuBusy={menuBusy}
               onSaveSettings={saveSettings}
               onSetMenu={setMenu}
+              onToast={toast}
             />
           )}
         </div>
@@ -1723,6 +1731,54 @@ const defaultModeFor = useCallback(
                   </span>
                   {t("cmp.menu")}
                 </div>
+              )}
+              {/* Encryption sits with the file actions rather than the view toggles: each of
+                  these rewrites the file on disk. A tab that was never decrypted is left out —
+                  its buffer is the empty stand-in for a document nobody has read, so writing
+                  that back over the real one is the exact damage the lock exists to prevent.
+                  Unlocking it first costs one password the user is going to type anyway. */}
+              {menuTabIsFile && !isBitmapImage(menuTabPath) && !isLockedBlank(menuTab) && (
+                menuTab?.encrypted ? (
+                  <>
+                    <div
+                      className="ctx-item"
+                      onClick={() => {
+                        tabs.changeEncryptedPassword(tabMenu.tabId);
+                        setTabMenu(null);
+                      }}
+                    >
+                      <span className="ctx-icon">
+                        <IconLock size={14} />
+                      </span>
+                      {t("enc.menuChange")}
+                    </div>
+                    <div
+                      className="ctx-item"
+                      onClick={() => {
+                        tabs.removeEncryptionFrom(tabMenu.tabId);
+                        setTabMenu(null);
+                      }}
+                    >
+                      <span className="ctx-icon">
+                        <IconLock size={14} locked={false} />
+                      </span>
+                      {t("enc.menuRemove")}
+                    </div>
+                  </>
+                ) : (
+                  <div
+                    className="ctx-item"
+                    onClick={() => {
+                      void tabs.saveAsEncrypted(tabMenu.tabId);
+                      setTabMenu(null);
+                    }}
+                  >
+                    <span className="ctx-icon">
+                      <IconLock size={14} />
+                    </span>
+                    {t("enc.menuSaveAs")}
+                  </div>
+                )
               )}
               <div
                 className="ctx-item"
@@ -1951,14 +2007,19 @@ const defaultModeFor = useCallback(
           the same key, so until this is answered there is nothing else to offer for it. */}
       {passwordAsk && (
         <PasswordDialog
-          // Keyed so the next file in the queue starts with an empty field: the password typed
-          // for one file is not an answer for another, and must not be shown as a suggestion.
-          key={passwordAsk.path}
+          // Keyed on the question rather than on the file, so the next one starts from an empty
+          // field: the password typed for one file is not an answer for another, and must not be
+          // shown as a suggestion. Asking one file twice — unlocked now, password changed later —
+          // is the case a path key would get wrong.
+          key={passwordAsk.id}
+          mode={tabs.passwordMode}
           name={passwordAsk.name}
           count={tabs.passwordAsk.length}
           error={tabs.passwordError}
           busy={tabs.passwordBusy}
-          onSubmit={(password, remember) => void tabs.submitPassword(password, remember)}
+          onSubmit={(password, remember, previous) =>
+            void tabs.submitPassword(password, remember, previous)
+          }
           onCancel={tabs.cancelPassword}
         />
       )}

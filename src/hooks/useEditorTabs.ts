@@ -10,6 +10,7 @@ import {
   type FileStat,
   type GroupTab,
   type OpenedFile,
+  type SavedFile,
 } from "../lib/tauri";
 import { basename, dirname, isUntitled, langOf, modelUri, rekeyPath } from "../lib/path";
 import { tabKey, toStoredTab } from "../lib/group";
@@ -62,23 +63,65 @@ interface GoneAsk {
 }
 
 /**
- * What an unlock was asked for, to be run once the password has been accepted.
+ * What a password was asked for, to be run once it has been accepted.
  *
  * The ask is not only "let me read this file": saving and reloading both end up needing the
- * key too, and each has a different thing to do afterwards, so the follow-up travels with
- * the question instead of being guessed from the tab's state when the answer arrives.
+ * key too, and the three that invent a password have a file to write afterwards. Each has a
+ * different thing to do with the answer, so the follow-up travels with the question instead of
+ * being guessed from the tab's state when the answer arrives.
+ *
+ * A `create` carries the text to encrypt rather than reading it later: the dialog is modal, so
+ * the buffer cannot change while it is open, and holding the text here means the write does not
+ * depend on the tab still being there.
  */
 type PasswordThen =
   | { kind: "open" }
   | { kind: "save"; overwrite: boolean }
+  | { kind: "create"; target: string; content: string }
+  | { kind: "newFile"; parent: string; name: string }
+  | { kind: "change" }
+  | { kind: "remove" }
   | { kind: "none" };
 
-/** An encrypted file this session has no key for, waiting for its password. */
+/** A password this dialog is waiting for, and what happens to the file once it arrives. */
 interface PasswordAsk {
-  tabId: number;
+  /**
+   * Identity of the question rather than of the file. The dialog is keyed on it so that asking
+   * about the same path twice — unlocked now, password changed later — starts from an empty
+   * field instead of showing the password that was typed the first time.
+   */
+  id: number;
+  /** The tab the ask came from, or null when it came from the Explorer and has no tab yet. */
+  tabId: number | null;
+  /** What the password is for: the file being unlocked, or the file about to be written. */
   path: string;
   name: string;
   then: PasswordThen;
+}
+
+/** Hands out `PasswordAsk.id`. Module scope because an ask outlives no state that could hold it. */
+let nextAskId = 1;
+/**
+ * Which dialog an ask needs.
+ *
+ * Read off the follow-up rather than stored beside it: the two would then be able to disagree
+ * about what was asked, and a dialog that says "unlock" over a call that writes a new file is a
+ * lie the user has no way to check.
+ */
+function passwordModeOf(
+  then: PasswordThen | undefined
+): "unlock" | "create" | "change" | "remove" {
+  switch (then?.kind) {
+    case "create":
+    case "newFile":
+      return "create";
+    case "change":
+      return "change";
+    case "remove":
+      return "remove";
+    default:
+      return "unlock";
+  }
 }
 
 /**
@@ -199,15 +242,27 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
    * Queue a password question. One per file: a startup handover and a session restore can
    * both reach the same encrypted file, and being asked twice for one password is being
    * asked once too often.
+   *
+   * Returns the id the question was given, or null when one for that path is already waiting.
+   * The id is handed out here rather than read back from the state because a caller that is
+   * waiting on the answer needs to know which question is theirs.
    */
-  const askPassword = useCallback((tabId: number, path: string, then: PasswordThen) => {
-    setPasswordError(null);
-    setPasswordAsk((q) =>
-      q.some((a) => pathKey(a.path) === pathKey(path))
-        ? q
-        : [...q, { tabId, path, name: basename(path), then }]
-    );
-  }, []);
+  const askPassword = useCallback(
+    (tabId: number | null, path: string, then: PasswordThen): number | null => {
+      // Checked against the mirror as well as inside the updater: the updater runs later than
+      // the call that queued it, so a caller asking "was this asked?" cannot wait for it.
+      if (passwordRef.current.some((a) => pathKey(a.path) === pathKey(path))) return null;
+      const id = nextAskId++;
+      setPasswordError(null);
+      setPasswordAsk((q) =>
+        q.some((a) => pathKey(a.path) === pathKey(path))
+          ? q
+          : [...q, { id, tabId, path, name: basename(path), then }]
+      );
+      return id;
+    },
+    []
+  );
 
   /** Queue a question for a tab that is already known to be locked. */
   const askForTab = useCallback(
@@ -217,6 +272,33 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
     },
     [askPassword]
   );
+
+  /**
+   * Callers waiting on a question that has no tab of its own.
+   *
+   * The Explorer's "new encrypted file" is the case this exists for: the file is not on disk
+   * until the password is accepted, so the tree cannot be refreshed from the click, and no
+   * part of the create is visible to the caller that started it.
+   */
+  const askWaiters = useRef(new Map<number, (created: boolean) => void>());
+
+  /** Answer a waiter exactly once, whether the answer is that the file exists or that it does not. */
+  const settleAsk = useCallback((id: number, created: boolean) => {
+    const settle = askWaiters.current.get(id);
+    if (!settle) return;
+    askWaiters.current.delete(id);
+    settle(created);
+  }, []);
+
+  // A question that leaves the queue without succeeding is one the waiter would never hear
+  // about: a cancel drops it, a lock empties the whole queue, and a duplicate never joins it.
+  // Settling those false is what keeps the name input from waiting on a file that is not coming.
+  useEffect(() => {
+    const live = new Set(passwordAsk.map((a) => a.id));
+    for (const id of [...askWaiters.current.keys()]) {
+      if (!live.has(id)) settleAsk(id, false);
+    }
+  }, [passwordAsk, settleAsk]);
 
   /**
    * The half of an open that only makes sense once the text is in hand: comparing the draft
@@ -734,6 +816,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
           .filter((tab) => tab.locked)
           .filter((tab) => !q.some((a) => pathKey(a.path) === pathKey(tab.path)))
           .map((tab) => ({
+            id: nextAskId++,
             tabId: tab.id,
             path: tab.path,
             name: tab.name,
@@ -1254,43 +1337,190 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
   );
 
   /**
+   * Take a file that was rewritten in place — a new password, or the encryption taken off — and
+   * make the tab agree with what is now on disk.
+   *
+   * The text does not change, so neither does the baseline or the dirty flag: the buffer is the
+   * same document it was, and calling it clean or dirty here would be a claim about edits nobody
+   * made. What does change is everything a later save compares against, because both rewrites
+   * replace the file: its size, its stamp, and which of the two forms it is in.
+   */
+  const applyRewritten = useCallback(
+    (tabId: number | null, saved: SavedFile, stillEncrypted: boolean) => {
+      if (tabId === null) return;
+      const patch = (prev: Tab): Tab =>
+        prev.id !== tabId
+          ? prev
+          : {
+              ...prev,
+              mtime: saved.mtime,
+              bytes: saved.bytes,
+              encoding: saved.encoding,
+              encrypted: stillEncrypted,
+              // Whichever way it went, the password just typed is the one that opens the file,
+              // so nothing here is locked.
+              locked: false,
+            };
+      const next = tabsRef.current.map(patch);
+      tabsRef.current = next;
+      setTabs(next);
+      const last = lastFileTabRef.current;
+      if (last && last.id === tabId) lastFileTabRef.current = patch(last);
+    },
+    []
+  );
+
+  /**
+   * Move a tab onto a file that was just written for it, which is what an encrypted save-as
+   * ends with.
+   *
+   * The tab follows the file it now holds, the way an untitled buffer follows the path its first
+   * save picked. The file the tab came from is left exactly as it was on disk — what moves is
+   * the tab, not the bytes.
+   */
+  const finishCreated = useCallback(
+    async (tabId: number, from: string, saved: SavedFile, content: string) => {
+      const h = editorRef.current;
+      const oldModel = h?.monaco.editor.getModel(h.monaco.Uri.parse(modelUri(from)));
+      // The text has a home now, so no draft should offer it back: not the old path's, which no
+      // longer holds these edits, and not the new one's, which holds them properly.
+      draft.forget(from);
+      await api.clearDraft(from).catch(() => {});
+      await api.clearDraft(saved.path).catch(() => {});
+      const patch = (prev: Tab): Tab =>
+        prev.id !== tabId
+          ? prev
+          : {
+              ...prev,
+              path: saved.path,
+              name: basename(saved.path),
+              language: langOf(saved.path),
+              original: content,
+              // Cleared rather than carried over: a restored tab keeps its text here, and the
+              // editor reads this field first when it builds the model for the new path, so
+              // leaving it would show the pre-save text over the file just written.
+              initialValue: undefined,
+              mtime: saved.mtime,
+              dirty: false,
+              encoding: saved.encoding,
+              bom: false,
+              bytes: saved.bytes,
+              encrypted: true,
+              locked: false,
+            };
+      const next = tabsRef.current.map(patch);
+      tabsRef.current = next;
+      setTabs(next);
+      const last = lastFileTabRef.current;
+      if (last && last.id === tabId) lastFileTabRef.current = patch(last);
+      // Nothing in the old model is unsaved any more, and keeping it would keep the undo stack
+      // of a document this tab no longer shows.
+      setTimeout(() => oldModel?.dispose(), 0);
+      onFileOpened?.(dirname(saved.path));
+      toast(t("enc.encrypted", { name: basename(saved.path) }));
+    },
+    [draft, editorRef, onFileOpened, toast]
+  );
+
+  /**
    * Take the password the dialog collected and try it.
    *
    * A failure leaves the ask at the head of the queue: a wrong password is a reason to type
    * it again, not a reason to give up on the file. On success the question leaves the queue
    * and whatever asked it is carried out, which is what makes an unlock reached from a save
    * behave like the save the user pressed.
+   *
+   * The three asks that *invent* a password never reach the unlock call: there is no key to
+   * check one against, and each of them writes a file of its own.
    */
   const submitPassword = useCallback(
-    async (password: string, remember: boolean) => {
+    async (password: string, remember: boolean, previous?: string) => {
       const ask = passwordRef.current[0];
       if (!ask || passwordBusy) return;
       setPasswordBusy(true);
       setPasswordError(null);
-      let opened: OpenedFile;
       try {
-        opened = await api.unlockFile(ask.path, password);
+        if (ask.then.kind === "create") {
+          const { target, content } = ask.then;
+          const saved = await api.saveFileAsEncrypted(target, content, password);
+          if (remember) {
+            // After the write, never instead of as part of it: the file exists either way, and
+            // a credential store that refuses is one toast rather than a failed save.
+            await api
+              .rememberPassword(saved.path, password)
+              .catch((e) => toast(errorMessage(e)));
+          }
+          setPasswordAsk((q) => q.slice(1));
+          if (ask.tabId !== null) await finishCreated(ask.tabId, ask.path, saved, content);
+          return;
+        }
+        if (ask.then.kind === "newFile") {
+          const made = await api.createEncrypted(ask.then.parent, ask.then.name, password);
+          // Settled before the ask leaves the queue, so the waiter hears "created" rather than
+          // the queue-empty effect hearing "gone".
+          settleAsk(ask.id, true);
+          if (remember) {
+            await api
+              .rememberPassword(made.path, password)
+              .catch((e) => toast(errorMessage(e)));
+          }
+          setPasswordAsk((q) => q.slice(1));
+          toast(t("side.created", { name: made.name }));
+          // Opened through the normal path rather than built here: the key is cached by the
+          // create, so this reads the container back as an ordinary unlocked encrypted file,
+          // and every half of an open that is not about the text still happens.
+          await openPath(made.path);
+          return;
+        }
+        if (ask.then.kind === "change") {
+          const saved = await api.changePassword(ask.path, previous ?? "", password);
+          setPasswordAsk((q) => q.slice(1));
+          applyRewritten(ask.tabId, saved, true);
+          toast(t("enc.passwordChanged", { name: ask.name }));
+          return;
+        }
+        if (ask.then.kind === "remove") {
+          const saved = await api.removeEncryption(ask.path, password);
+          setPasswordAsk((q) => q.slice(1));
+          applyRewritten(ask.tabId, saved, false);
+          toast(t("enc.encryptionRemoved", { name: ask.name }));
+          return;
+        }
+
+        const opened = await api.unlockFile(ask.path, password);
+        if (remember) {
+          // After the unlock, never instead of as part of it: the file is open either way, and
+          // a credential store that refuses is one toast rather than a failed unlock.
+          await api.rememberPassword(ask.path, password).catch((e) => toast(errorMessage(e)));
+        }
+        setPasswordAsk((q) => q.slice(1));
+        // An ask with no tab came from the Explorer, which has no buffer to put the text in;
+        // opening the file is that caller's next step, not this one's.
+        if (ask.tabId === null) return;
+        applyUnlocked(ask.tabId, opened);
+        if (ask.then.kind !== "save") toast(t("enc.unlocked", { name: ask.name }));
+        if (ask.then.kind === "open") {
+          await finishOpen(opened, ask.tabId);
+        } else if (ask.then.kind === "save") {
+          await saveTab(ask.tabId, { overwrite: ask.then.overwrite });
+        }
       } catch (e) {
         setPasswordError(errorMessage(e));
-        return;
       } finally {
         setPasswordBusy(false);
       }
-      if (remember) {
-        // After the unlock, never instead of as part of it: the file is open either way, and
-        // a credential store that refuses is one toast rather than a failed unlock.
-        await api.rememberPassword(ask.path, password).catch((e) => toast(errorMessage(e)));
-      }
-      setPasswordAsk((q) => q.slice(1));
-      applyUnlocked(ask.tabId, opened);
-      if (ask.then.kind !== "save") toast(t("enc.unlocked", { name: ask.name }));
-      if (ask.then.kind === "open") {
-        await finishOpen(opened, ask.tabId);
-      } else if (ask.then.kind === "save") {
-        await saveTab(ask.tabId, { overwrite: ask.then.overwrite });
-      }
     },
-    [applyUnlocked, finishOpen, passwordBusy, saveTab, toast]
+    [
+      applyRewritten,
+      applyUnlocked,
+      finishCreated,
+      finishOpen,
+      openPath,
+      passwordBusy,
+      saveTab,
+      settleAsk,
+      toast,
+    ]
   );
 
   /** Leave a file locked. The tab keeps its lock, and nothing about the buffer changes. */
@@ -1303,6 +1533,71 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
   const unlockTab = useCallback(
     (id: number) => askForTab(id, { kind: "none" }),
     [askForTab]
+  );
+
+  /**
+   * Write a tab's text out as a new encrypted file, chosen first and passworded second.
+   *
+   * The path is picked before the password is asked for, because the dialog is where the flow
+   * ends: asking first would mean holding a password in state while a file dialog is open, which
+   * is exactly the thing the dialog exists to avoid. The text travels with the ask for the same
+   * reason — the modal cannot be typed into while it is up, so the snapshot is still the buffer.
+   *
+   * Available for an unsaved buffer as well as a file: encrypting text that has no home yet is
+   * the moment a password is most worth asking for.
+   */
+  const saveAsEncrypted = useCallback(
+    async (id: number) => {
+      const tab = tabsRef.current.find((t) => t.id === id);
+      if (!tab || !isFileTab(tab) || tab.isBinary) return;
+      const content = liveContent(tab) ?? tab.initialValue ?? tab.original;
+      const target = await pickSaveAs(tab.name);
+      if (!target) return;
+      askPassword(id, target, { kind: "create", target, content });
+    },
+    [askPassword, liveContent]
+  );
+
+  /** Ask for a new password for a file that already has one. */
+  const changeEncryptedPassword = useCallback(
+    (id: number) => askForTab(id, { kind: "change" }),
+    [askForTab]
+  );
+
+  /**
+   * Ask for the password of an encrypted file in order to take the encryption off it.
+   *
+   * The password is verified rather than taken from the session cache, so this works on a locked
+   * tab too — and it is the one way to get out of a file whose key has been dropped without
+   * first unlocking it.
+   */
+  const removeEncryptionFrom = useCallback(
+    (id: number) => askForTab(id, { kind: "remove" }),
+    [askForTab]
+  );
+
+  /**
+   * Create an empty encrypted file in the Explorer's tree.
+   *
+   * The ask carries no tab, because there is no file yet and so nothing to show; the tab is
+   * opened once the write has succeeded. The path here is a key and a title rather than a
+   * promise — the backend still validates the name, supplies the extension and refuses a name
+   * that is taken, and what it made is what gets opened.
+   *
+   * Resolves once the password question has been answered, true only when the container is on
+   * disk. The tree re-reads from that answer rather than from the click, and a question that
+   * was cancelled, replaced or dropped resolves false so the name being typed is not lost.
+   */
+  const createEncryptedIn = useCallback(
+    (parent: string, name: string): Promise<boolean> => {
+      const shown = `${parent.replace(/[\\/]+$/, "")}\\${name}`;
+      const id = askPassword(null, shown, { kind: "newFile", parent, name });
+      if (id === null) return Promise.resolve(false);
+      return new Promise<boolean>((resolve) => {
+        askWaiters.current.set(id, resolve);
+      });
+    },
+    [askPassword]
   );
 
   /**
@@ -1659,6 +1954,8 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
     answerGone,
     /** Encrypted files waiting for a password, one dialog at a time. */
     passwordAsk,
+    /** Which dialog the head of that queue needs. */
+    passwordMode: passwordModeOf(passwordAsk[0]?.then),
     /** Why the password at the head of that queue last failed, or null. */
     passwordError,
     passwordBusy,
@@ -1666,6 +1963,14 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
     cancelPassword,
     /** Ask again for a tab that is already open and locked. */
     unlockTab,
+    /** Pick a path, then ask for the password the copy of this buffer will be written under. */
+    saveAsEncrypted,
+    /** Ask for a new password for a file that already has one. */
+    changeEncryptedPassword,
+    /** Ask for the password in order to write the file back as plain UTF-8. */
+    removeEncryptionFrom,
+    /** Ask for the password of an encrypted file the Explorer is about to create. */
+    createEncryptedIn,
     /** Mark every encrypted tab locked; the caller has already dropped the keys. */
     lockEncrypted,
     /** The conflict comparison popup, while it is open. */

@@ -25,23 +25,17 @@ use tauri::AppHandle;
 /// hole every other tool has for an extensionless name.
 const DEFAULT_EXT: &str = "txt";
 
+/// Extension given to a new *encrypted* file typed without one.
+///
+/// Naming it after the container rather than after a text format matters here in a way it does
+/// not for `DEFAULT_EXT`: an encrypted file is not readable by anything else, and an extension
+/// that promised text would invite the user to open it in a tool that shows them noise.
+pub(crate) const ENCRYPTED_EXT: &str = "wrolpenc";
+
 fn name_error(e: NameError) -> String {
   match e {
     NameError::Empty => "create_name_empty".to_string(),
     NameError::Invalid => "create_name_invalid".to_string(),
-  }
-}
-
-/// The name an entry will be created under, extension included.
-///
-/// A name that carries any dot at all is left as typed: that covers a real extension and a
-/// dotfile such as `.gitignore` alike, and appending to those would invent a name the user
-/// did not ask for. Only a bare word gets `.txt`.
-fn entry_name(typed: &str) -> String {
-  if typed.contains('.') {
-    typed.to_string()
-  } else {
-    format!("{typed}.{DEFAULT_EXT}")
   }
 }
 
@@ -66,22 +60,49 @@ fn target_of(parent: &str, name: &str) -> Result<PathBuf, String> {
   Ok(PathBuf::from(path))
 }
 
+/// The name an entry will be created under, extension included.
+///
+/// A name that carries any dot at all is left as typed: that covers a real extension and a
+/// dotfile such as `.gitignore` alike, and appending to those would invent a name the user
+/// did not ask for. Only a bare word gets `default_ext`.
+fn entry_name(typed: &str, default_ext: &str) -> String {
+  if typed.contains('.') {
+    typed.to_string()
+  } else {
+    format!("{typed}.{default_ext}")
+  }
+}
+
+/// Resolve a typed name to where a new entry will be created, and to the name it will carry.
+///
+/// Shared with the encrypted variant in `unlock` so the name discipline — checked, extended,
+/// checked again for the length the extension added, resolved under a parent that is there, and
+/// refused when the name is taken — is one rule rather than two that can drift apart.
+pub(crate) fn new_entry_path(
+  parent: &str,
+  name: &str,
+  default_ext: &str,
+) -> Result<(PathBuf, String), String> {
+  let typed = check_name(name).map_err(name_error)?;
+  let named = entry_name(&typed, default_ext);
+  // The extension is part of the segment, so the finished name has to face the limit again.
+  if check_name(&named).is_err() {
+    return Err("create_name_too_long".into());
+  }
+  let path = target_of(parent, &named)?;
+  if path.exists() {
+    return Err("create_exists".into());
+  }
+  Ok((path, named))
+}
+
 /// Create an empty file inside `parent`.
 ///
 /// The file starts empty: it is a file the user asked to exist, not one with anything in it,
 /// and an editor that invented content would be writing text nobody typed.
 #[tauri::command]
 pub fn create_file(parent: String, name: String) -> Result<FsEntry, String> {
-  let typed = check_name(&name).map_err(name_error)?;
-  let named = entry_name(&typed);
-  // The extension is part of the segment, so the finished name has to face the limit again.
-  if check_name(&named).is_err() {
-    return Err("create_name_too_long".into());
-  }
-  let path = target_of(&parent, &named)?;
-  if path.exists() {
-    return Err("create_exists".into());
-  }
+  let (path, named) = new_entry_path(&parent, &name, DEFAULT_EXT)?;
   // `create_new` rather than a plain write: it refuses a name that was taken between the
   // check above and here, so the one file that must never be destroyed by a "create" is
   // never truncated by one.
@@ -446,20 +467,47 @@ mod tests {
 
   #[test]
   fn a_bare_word_gets_a_text_extension_and_a_named_one_is_left_alone() {
-    assert_eq!(entry_name("notes"), "notes.txt");
-    assert_eq!(entry_name("notes.md"), "notes.md");
-    assert_eq!(entry_name("archive.tar.gz"), "archive.tar.gz");
+    assert_eq!(entry_name("notes", DEFAULT_EXT), "notes.txt");
+    assert_eq!(entry_name("notes.md", DEFAULT_EXT), "notes.md");
+    assert_eq!(entry_name("archive.tar.gz", DEFAULT_EXT), "archive.tar.gz");
     // A dotfile is a whole name, not a stem missing its extension.
-    assert_eq!(entry_name(".gitignore"), ".gitignore");
-    assert_eq!(entry_name("v1.2"), "v1.2");
+    assert_eq!(entry_name(".gitignore", DEFAULT_EXT), ".gitignore");
+    assert_eq!(entry_name("v1.2", DEFAULT_EXT), "v1.2");
+    // The extension is the caller's, so an encrypted entry can carry its own.
+    assert_eq!(entry_name("notes", ENCRYPTED_EXT), "notes.wrolpenc");
+    assert_eq!(entry_name("notes.md", ENCRYPTED_EXT), "notes.md");
   }
 
   #[test]
   fn the_extension_counts_towards_the_name_limit() {
     let edge = "n".repeat(crate::rename::MAX_NAME_LEN);
     // Room for the extension is what makes this createable, one character more is not.
-    assert!(check_name(&entry_name(&edge[..edge.len() - 4])).is_ok());
-    assert!(check_name(&entry_name(&edge)).is_err());
+    assert!(check_name(&entry_name(&edge[..edge.len() - 4], DEFAULT_EXT)).is_ok());
+    assert!(check_name(&entry_name(&edge, DEFAULT_EXT)).is_err());
+  }
+
+  #[test]
+  fn an_encrypted_entry_gets_the_container_extension() {
+    let dir = scratch("enc-ext");
+    let (resolved, named) = new_entry_path(&dir, "secret", ENCRYPTED_EXT).expect("resolved");
+    assert_eq!(named, "secret.wrolpenc");
+    assert!(resolved.to_string_lossy().ends_with("secret.wrolpenc"));
+    // A name carrying its own extension keeps it: a container is recognised by its header, not
+    // by its name, and renaming what the user typed would point them at a file they cannot find.
+    let (_, named) = new_entry_path(&dir, "notes.md", ENCRYPTED_EXT).expect("resolved");
+    assert_eq!(named, "notes.md");
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn a_taken_name_is_refused_before_anything_is_written() {
+    let dir = scratch("enc-taken");
+    create_file(dir.clone(), "notes".into()).expect("created");
+    assert_eq!(
+      new_entry_path(&dir, "notes.txt", ENCRYPTED_EXT).expect_err("taken"),
+      "create_exists"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
   }
 
   #[test]

@@ -4,9 +4,9 @@ import { LANGUAGES, t } from "../lib/i18n";
 import { parseExtensionList } from "../lib/path";
 import SettingCheck from "./SettingCheck";
 import SettingField from "./SettingField";
-import type { MenuTarget, Settings } from "../lib/tauri";
+import { api, errorMessage, type MenuTarget, type Settings } from "../lib/tauri";
 
-type Category = "context" | "general" | "about";
+type Category = "context" | "general" | "encryption" | "about";
 
 interface Props {
   settings: Settings;
@@ -14,13 +14,24 @@ interface Props {
   menuBusy: boolean;
   onSaveSettings: (patch: Partial<Settings>) => void;
   onSetMenu: (installed: boolean) => void;
+  /** Says what a change here did, which for the credential store is the only report there is. */
+  onToast: (message: string) => void;
 }
 
 const NAV: { cat: Category; key: string }[] = [
   { cat: "general", key: "settings.catGeneral" },
   { cat: "context", key: "settings.catContext" },
+  { cat: "encryption", key: "enc.category" },
   { cat: "about", key: "settings.catAbout" },
 ];
+
+/**
+ * Idle limits offered, in minutes, with 0 last because it is the one that turns the lock off.
+ *
+ * A list rather than a number field: "never" has no minute count to type, and a field that
+ * took 0 for it would show a bare `0` where the choice deserves a word.
+ */
+const IDLE_MINUTES = [5, 10, 30, 60, 240, 0];
 
 const WHITESPACE_MODES = ["none", "boundary", "selection", "all", "trailing"] as const;
 /** `auto` last: it is the fallback that decides by file type, not a layout of its own. */
@@ -45,10 +56,14 @@ export default function SettingsPanel({
   menuBusy,
   onSaveSettings,
   onSetMenu,
+  onToast,
 }: Props) {
   // The first entry in NAV, so opening Settings lands on it rather than on the second one.
   const [category, setCategory] = useState<Category>("general");
   const [version, setVersion] = useState("…");
+  /** How many passwords the credential store is holding, or null when it would not say. */
+  const [remembered, setRemembered] = useState<number | null>(null);
+  const [rememberedError, setRememberedError] = useState<string | null>(null);
   // The exclusion list is typed as free text, so what is being edited and what is stored
   // are two things: `excludedText` is the field's own state (it takes `png, JPG` and
   // `.png` alike) and is only parsed on the way out. The stored value is written back into
@@ -73,6 +88,43 @@ export default function SettingsPanel({
   useEffect(() => {
     getVersion().then(setVersion).catch(() => setVersion("unknown"));
   }, []);
+
+  /**
+   * Ask the credential store how much it is holding.
+   *
+   * Read when the panel opens rather than when the encryption page is chosen: it is one call,
+   * and a count that arrives a beat after the click reads as a page still loading. Only the
+   * number is ever asked for, never the passwords themselves — those stay in Rust.
+   */
+  const readRemembered = () => {
+    api
+      .rememberedPasswordCount()
+      .then((n) => {
+        setRemembered(n);
+        setRememberedError(null);
+      })
+      .catch((e) => {
+        setRemembered(null);
+        setRememberedError(errorMessage(e));
+      });
+  };
+  useEffect(() => {
+    readRemembered();
+  }, []);
+
+  const clearRemembered = () => {
+    api
+      .clearRememberedPasswords()
+      .then((n) => {
+        setRemembered(0);
+        setRememberedError(null);
+        onToast(t("enc.clearedRemembered", { n: String(n) }));
+      })
+      .catch((e) => {
+        setRemembered(null);
+        setRememberedError(errorMessage(e));
+      });
+  };
 
   return (
     <div className="settings-panel" style={{ display: "flex" }}>
@@ -322,6 +374,52 @@ export default function SettingsPanel({
                 </select>
               </SettingField>
               <p className="muted">{t("settings.persisted")}</p>
+            </div>
+          </div>
+        )}
+
+        {category === "encryption" && (
+          <div className="settings-cat">
+            <h2>{t("enc.category")}</h2>
+            <div className="setting-group">
+              <SettingField label={t("enc.idleMinutes")}>
+                <select
+                  className="select"
+                  value={settings.encryptIdleMinutes}
+                  onChange={(e) =>
+                    onSaveSettings({ encryptIdleMinutes: Number(e.target.value) })
+                  }
+                >
+                  {IDLE_MINUTES.map((minutes) => (
+                    <option key={minutes} value={minutes}>
+                      {minutes === 0
+                        ? t("enc.idleNever")
+                        : t("enc.idleMinutesValue", { n: String(minutes) })}
+                    </option>
+                  ))}
+                </select>
+              </SettingField>
+              <p className="muted">{t("enc.idleHint")}</p>
+              {/* The store is asked how many it holds rather than counted here: the list of
+                  remembered passwords lives in Rust and in Windows, and neither is something
+                  this panel should keep a second copy of. */}
+              <SettingField label={t("enc.remembered")}>
+                <button
+                  className="btn small"
+                  disabled={remembered === 0}
+                  onClick={clearRemembered}
+                >
+                  {t("enc.clearRemembered")}
+                </button>
+              </SettingField>
+              <p className="muted">
+                {remembered === null
+                  ? t("enc.rememberedUnknown")
+                  : remembered === 0
+                    ? t("enc.rememberedNone")
+                    : t("enc.rememberedCount", { n: String(remembered) })}
+              </p>
+              {rememberedError && <p className="setting-warn">{rememberedError}</p>}
             </div>
           </div>
         )}
