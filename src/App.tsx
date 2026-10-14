@@ -22,6 +22,7 @@ import ReloadConfirmDialog from "./components/ReloadConfirmDialog";
 import DeletedFileDialog from "./components/DeletedFileDialog";
 import StaleChangeDialog from "./components/StaleChangeDialog";
 import ConflictCompareModal from "./components/ConflictCompareModal";
+import PasswordDialog from "./components/PasswordDialog";
 import {
   IconClose,
   IconCompare,
@@ -57,6 +58,7 @@ import {
 } from "./lib/path";
 import {
   isFileTab,
+  isLockedBlank,
   pathKey,
   sideKey,
   type CompareRef,
@@ -111,7 +113,18 @@ const DEFAULT_SETTINGS: Settings = {
   // A capped line length is the readable default; the other two are for readers who want
   // the text to use the room they gave it.
   previewWidth: "narrow",
+  // An encrypted file is left unlocked for as long as it is being used, then locked: long
+  // enough to read and edit without being asked again, short enough that walking away from
+  // the machine does not leave the key sitting in memory indefinitely.
+  encryptIdleMinutes: 10,
 }
+
+/**
+ * How often the idle lock looks at the clock. Half a minute against a limit measured in
+ * minutes: the check is one subtraction, and being late by less than half a minute is not
+ * something a user setting a ten-minute lock can tell.
+ */
+const IDLE_LOCK_CHECK_MS = 30_000;
 
 /** The only values Monaco accepts for `renderWhitespace`. */
 const WHITESPACE_MODES = ["none", "boundary", "selection", "all", "trailing"] as const;
@@ -511,6 +524,54 @@ export default function App() {
     };
   }, [flushEverything]);
 
+  /**
+   * The idle lock: give up the keys of every encrypted file once the user has been away for
+   * as long as the setting says.
+   *
+   * Drafts are flushed first, and the order matters. A draft of an encrypted file is sealed
+   * with the same key, so a write attempted after the key is gone is dropped rather than
+   * written — unsaved text would quietly stop being kept. Flushing while the key still
+   * exists is what stops that.
+   *
+   * What is deliberately not done is clearing the screen. The text on display was decrypted
+   * with a password the user typed; what the lock means is that nothing more can be written
+   * or drafted from here, not that the document is taken back from someone reading it.
+   */
+  const idleMinutes = settings.encryptIdleMinutes;
+  // Reached through a ref so the timer is not rebuilt — and the idle clock not reset — by
+  // every re-render of the app around it.
+  const idleLockRef = useRef<() => Promise<void>>(async () => {});
+  idleLockRef.current = async () => {
+    await draft.flushAll();
+    await api.lockAll().catch(() => {});
+    tabs.lockEncrypted();
+  };
+  useEffect(() => {
+    // 0 is the user asking never to be locked out; anything negative is a bad settings file.
+    if (idleMinutes <= 0) return;
+    const limit = idleMinutes * 60_000;
+    let last = Date.now();
+    // Any input counts as presence, not only typing in the editor: scrolling and clicking
+    // around a document is using it, and locking underneath that is locking a reader out.
+    const activity = () => {
+      last = Date.now();
+    };
+    window.addEventListener("keydown", activity);
+    window.addEventListener("pointerdown", activity);
+    const timer = setInterval(() => {
+      if (Date.now() - last < limit) return;
+      // Restarted from the moment of locking, not from the last input, so a window left
+      // alone is checked once per idle period rather than on every tick from then on.
+      last = Date.now();
+      void idleLockRef.current();
+    }, IDLE_LOCK_CHECK_MS);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("keydown", activity);
+      window.removeEventListener("pointerdown", activity);
+    };
+  }, [idleMinutes]);
+
   // Refocusing the window is the moment a change made elsewhere is about to matter, so the disk
   // is asked then rather than only when the hook's own timer next comes round.
   const checkDiskRef = useRef(tabs.checkDisk);
@@ -753,14 +814,14 @@ export default function App() {
    * drops the tabs of its own file, which keeps "compare a file with itself" a question
    * only the tab's own menu asks.
    *
-   * Note for the encryption plan: a locked encrypted tab holds no text (an empty buffer
-   * behind a lock overlay), so it is not a side either. Add `&& !tab.locked` here once
-   * that field exists — until then there is nothing to exclude.
+   * A locked encrypted tab is out too. Behind its lock there is no text — the buffer is
+   * the empty stand-in for a document nobody has decrypted — so offering it as a side
+   * would offer a comparison against nothing.
    */
   const compareCandidates = useCallback(
     (left: CompareRef) =>
       tabs.tabs
-        .filter((tab) => isFileTab(tab) && !tab.isBinary)
+        .filter((tab) => isFileTab(tab) && !tab.isBinary && !isLockedBlank(tab))
         .filter((tab) => !(left.kind === "buffer" && tab.id === left.tabId))
         .filter((tab) => !(left.kind === "disk" && pathKey(tab.path) === pathKey(left.path)))
         .map((tab) => ({
@@ -1130,6 +1191,18 @@ export default function App() {
    */
   const goneAsk = tabs.gone[0] ?? null;
   const goneTab = goneAsk ? tabs.tabs.find((t) => t.id === goneAsk.tabId) ?? null : null;
+  /**
+   * The encrypted file at the front of the password queue. Keyed by path where it is rendered,
+   * so answering one and moving to the next starts the dialog with an empty field rather than
+   * showing the password that was just typed for a different file.
+   */
+  const passwordAsk = tabs.passwordAsk[0] ?? null;
+  /**
+   * The encrypted file the editor is sitting on with no text to show. It gets a lock over the
+   * pane rather than an empty document: an empty buffer reads as "this file has nothing in
+   * it", which is a claim about a file this window has not been let into.
+   */
+  const lockedTab = tabs.fileTab && isLockedBlank(tabs.fileTab) ? tabs.fileTab : null;
   /** Only a real file tab has a path for the path actions (reveal, copy, per-file settings). */
   const menuTabIsFile = !!menuTab && isFileTab(menuTab);
   const menuMinimapOn = menuTab?.fileSettings.minimap ?? settings.minimap;
@@ -1402,6 +1475,23 @@ const defaultModeFor = useCallback(
                   editorRef.current = handle;
                 }}
               />
+              {lockedTab && (
+                <div
+                  className="editor-locked"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => tabs.unlockTab(lockedTab.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      tabs.unlockTab(lockedTab.id);
+                    }
+                  }}
+                >
+                  <span className="editor-locked-name">{lockedTab.name}</span>
+                  <span className="editor-locked-hint">{t("enc.lockedHint")}</span>
+                </div>
+              )}
             </div>
           )}
 
@@ -1854,6 +1944,22 @@ const defaultModeFor = useCallback(
             void tabs.saveTab(conflictTab.id, { overwrite: true });
           }}
           onClose={() => tabs.hideConflict()}
+        />
+      )}
+
+      {/* An encrypted file is asked about ahead of the drafts: a draft of one is sealed with
+          the same key, so until this is answered there is nothing else to offer for it. */}
+      {passwordAsk && (
+        <PasswordDialog
+          // Keyed so the next file in the queue starts with an empty field: the password typed
+          // for one file is not an answer for another, and must not be shown as a suggestion.
+          key={passwordAsk.path}
+          name={passwordAsk.name}
+          count={tabs.passwordAsk.length}
+          error={tabs.passwordError}
+          busy={tabs.passwordBusy}
+          onSubmit={(password, remember) => void tabs.submitPassword(password, remember)}
+          onCancel={tabs.cancelPassword}
         />
       )}
 

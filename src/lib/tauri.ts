@@ -130,6 +130,12 @@ export interface Settings {
    * preview renders a document that sets its own width.
    */
   previewWidth: string;
+  /**
+   * Minutes an encrypted file stays unlocked without being touched. 0 means never lock
+   * automatically, and is a choice rather than a missing value: the backend keeps it as
+   * written, so the frontend has to carry it back or a save would reset it to the default.
+   */
+  encryptIdleMinutes: number;
 }
 
 /** One restored tab: either a file (path + cursor) or scratch text (untitled + content). */
@@ -297,6 +303,23 @@ export const api = {
   saveDraft: (path: string, content: string, cursor: number) =>
     invoke<Draft | null>("save_draft", { path, content, cursor }),
   clearDraft: (path: string) => invoke<boolean>("clear_draft", { path }),
+  /**
+   * Decrypt a file with a password the user just typed, and cache the key for the session.
+   *
+   * The password goes one way: neither it nor the key is ever handed back, so the only
+   * thing a caller can do with a success is read the returned document.
+   */
+  unlockFile: (path: string, password: string) =>
+    invoke<OpenedFile>("unlock_file", { path, password }),
+  /** Drop every cached key, which is what the idle lock asks for. */
+  lockAll: () => invoke<void>("lock_all"),
+  /**
+   * Put the password in the OS credential store, so a later session opens the file without
+   * asking. Best-effort by design: it is called after an unlock that already succeeded, and
+   * a credential store that refuses must not be reported as a failure to open the file.
+   */
+  rememberPassword: (path: string, password: string) =>
+    invoke<void>("remember_password", { path, password }),
   listDir: (path: string) => invoke<FsEntry[]>("list_dir", { path }),
   fileSettingsView: (path: string) => invoke<FileSettingsView>("file_settings_view", { path }),
   saveFileSettings: (path: string, settings: FileSettings) =>

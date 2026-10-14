@@ -264,3 +264,23 @@ export function IconMinimap({ size = 14 }: IconProps) {
     </svg>
   );
 }
+
+/**
+ * A file under encryption.
+ *
+ * `locked` closes the shackle: the same shape says "this document is encrypted" and "this
+ * document is encrypted *and* nobody here can read it yet", which is one distinction worth
+ * carrying in the one glyph that has room for it in a tab.
+ */
+export function IconLock({ size = 14, locked = true }: IconProps & { locked?: boolean }) {
+  return (
+    <svg {...base(size)} strokeWidth={1.8}>
+      <rect x="4.5" y="10.5" width="15" height="10" rx="2" />
+      {locked ? (
+        <path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" />
+      ) : (
+        <path d="M8 10.5V7.5a4 4 0 0 1 7.5-1.9" />
+      )}
+    </svg>
+  );
+}

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { t } from "../lib/i18n";
 import { TabIcon } from "./FileIcon";
+import { IconLock } from "./icons";
 import type { Tab } from "../lib/types";
 
 interface Props {
@@ -388,6 +389,17 @@ export default function TabBar({
             />
           ) : (
             <span className="tab-name">{tab.name}</span>
+          )}
+          {/* The lock sits on the name rather than next to the dirty mark: it says what the
+              file is, not what is pending for it, and it has to stay put while the dirty
+              mark comes and goes. */}
+          {tab.encrypted && (
+            <span
+              className={`tab-lock${tab.locked ? " is-locked" : ""}`}
+              title={t(tab.locked ? "enc.lockedTab" : "enc.statusEncrypted")}
+            >
+              <IconLock size={11} locked={!!tab.locked} />
+            </span>
           )}
           {tab.dirty && !tab.isSettings && (
             // A real button, on the same terms as the × next to it: a pointer press is settled

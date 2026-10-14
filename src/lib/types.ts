@@ -43,6 +43,31 @@ export interface Tab {
   bytes: number | null;
   /** This file's overrides of the global editor view settings; null means "inherit". */
   fileSettings: FileSettings;
+  /**
+   * The file on disk is an encrypted container. `bytes` and `mtime` then describe the
+   * ciphertext, which is what a save has to beat when it checks that nobody else wrote it.
+   */
+  encrypted?: boolean;
+  /**
+   * Encrypted with no key this session can reach, so a read of it comes back empty and a
+   * write is refused until a password is accepted. Text already on screen stays: locking
+   * stops what happens next, it does not take back what was legitimately decrypted.
+   */
+  locked?: boolean;
+}
+
+/**
+ * A locked tab the text never reached: opened encrypted, no password accepted yet, so its
+ * buffer is empty because nothing was decrypted into it. This is the state that gets an
+ * overlay.
+ *
+ * The empty baseline is what tells the two locked states apart, and it is exact rather than
+ * a guess — a tab locked *after* being read holds the plaintext in `original`, so covering
+ * it would hide the user's own document. An encrypted file whose plaintext really is empty
+ * unlocks to `locked: false` and never comes here.
+ */
+export function isLockedBlank(tab: Tab): boolean {
+  return !!tab.locked && tab.original === "";
 }
 
 /**

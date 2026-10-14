@@ -1,5 +1,6 @@
 import { t } from "../lib/i18n";
 import { isBitmapImage } from "../lib/path";
+import { IconLock } from "./icons";
 import { isFileTab, type DiffStats, type EditStats, type Tab } from "../lib/types";
 
 interface Props {
@@ -63,6 +64,12 @@ export default function StatusBar({ tab, line, column, stats, diff }: Props) {
       )}
       {file && tab.bytes !== null && (
         <span className="sb-size">{formatBytes(tab.bytes)}</span>
+      )}
+      {file && tab.encrypted && (
+        <span className={`sb-lock${tab.locked ? " is-locked" : ""}`}>
+          <IconLock size={11} locked={!!tab.locked} />
+          {t(tab.locked ? "enc.statusLocked" : "enc.statusEncrypted")}
+        </span>
       )}
       {counters && tab.dirty && <span className="sb-dirty is-dirty">{t("status.dirty")}</span>}
       {counters && !tab.dirty && <span className="sb-dirty">{t("status.saved")}</span>}

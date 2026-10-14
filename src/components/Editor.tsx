@@ -136,6 +136,12 @@ export default function Editor({
         fontSize,
         minimap: { enabled: minimap },
         automaticLayout: true,
+        // A locked encrypted file is read-only rather than merely covered: text decrypted
+        // earlier in the session stays on screen and stays readable, but edits typed after
+        // the key was dropped could neither be saved nor drafted, so accepting them would be
+        // accepting work this app cannot keep.
+        readOnly: !!tab.locked,
+        domReadOnly: !!tab.locked,
         tabSize,
         insertSpaces,
         // On by default so a file keeps the indentation style it was written with; the

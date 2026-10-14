@@ -9,12 +9,14 @@ import {
   type FileSettings,
   type FileStat,
   type GroupTab,
+  type OpenedFile,
 } from "../lib/tauri";
 import { basename, dirname, isUntitled, langOf, modelUri, rekeyPath } from "../lib/path";
 import { tabKey, toStoredTab } from "../lib/group";
 import {
   pathKey,
   isFileTab,
+  isLockedBlank,
   sideKey,
   type ComparePair,
   type CompareRef,
@@ -57,6 +59,26 @@ interface GoneAsk {
   tabId: number;
   path: string;
   name: string;
+}
+
+/**
+ * What an unlock was asked for, to be run once the password has been accepted.
+ *
+ * The ask is not only "let me read this file": saving and reloading both end up needing the
+ * key too, and each has a different thing to do afterwards, so the follow-up travels with
+ * the question instead of being guessed from the tab's state when the answer arrives.
+ */
+type PasswordThen =
+  | { kind: "open" }
+  | { kind: "save"; overwrite: boolean }
+  | { kind: "none" };
+
+/** An encrypted file this session has no key for, waiting for its password. */
+interface PasswordAsk {
+  tabId: number;
+  path: string;
+  name: string;
+  then: PasswordThen;
 }
 
 /**
@@ -130,6 +152,14 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
   const [gone, setGone] = useState<GoneAsk[]>([]);
   const goneRef = useRef(gone);
   goneRef.current = gone;
+  /** Encrypted files waiting for a password, one dialog at a time, in the order asked. */
+  const [passwordAsk, setPasswordAsk] = useState<PasswordAsk[]>([]);
+  const passwordRef = useRef(passwordAsk);
+  passwordRef.current = passwordAsk;
+  /** Why the last password failed, or null. The ask stays queued so it can be retried. */
+  const [passwordError, setPasswordError] = useState<string | null>(null);
+  /** Set while a password is being checked, so Enter cannot start a second attempt. */
+  const [passwordBusy, setPasswordBusy] = useState(false);
 
   const currentOffset = useCallback(() => {
     const h = editorRef.current;
@@ -165,6 +195,83 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
     [currentOffset, draft, editorRef]
   );
 
+  /**
+   * Queue a password question. One per file: a startup handover and a session restore can
+   * both reach the same encrypted file, and being asked twice for one password is being
+   * asked once too often.
+   */
+  const askPassword = useCallback((tabId: number, path: string, then: PasswordThen) => {
+    setPasswordError(null);
+    setPasswordAsk((q) =>
+      q.some((a) => pathKey(a.path) === pathKey(path))
+        ? q
+        : [...q, { tabId, path, name: basename(path), then }]
+    );
+  }, []);
+
+  /** Queue a question for a tab that is already known to be locked. */
+  const askForTab = useCallback(
+    (id: number, then: PasswordThen) => {
+      const tab = tabsRef.current.find((t) => t.id === id);
+      if (tab) askPassword(id, tab.path, then);
+    },
+    [askPassword]
+  );
+
+  /**
+   * The half of an open that only makes sense once the text is in hand: comparing the draft
+   * against it, reading this file's own view overrides, and letting a document show its own
+   * pictures.
+   *
+   * Its own function because an encrypted file gets here twice — the first read stops at the
+   * password question with no text at all, and the accepted password brings the text and runs
+   * this. Sharing it is what keeps that from becoming a second open path that has to be told
+   * about every future change to the first one.
+   */
+  const finishOpen = useCallback(
+    async (disk: OpenedFile, tabId: number) => {
+      let draftInfo: Draft | null;
+      try {
+        draftInfo = await api.getDraft(disk.path);
+      } catch (e) {
+        toast(errorMessage(e));
+        return;
+      }
+      // Per-file overrides are needed before the first paint, not lazily: word wrap and
+      // whitespace rendering are read while the model is being attached.
+      try {
+        const overrides = await api.fileSettingsView(disk.path);
+        setTabs((prev) =>
+          prev.map((t) => (t.id === tabId ? { ...t, fileSettings: overrides.overrides } : t))
+        );
+      } catch {
+        // A missing override file is a normal first run; keep the global defaults.
+      }
+      // A document can show its own pictures, so allow the asset protocol to read the one
+      // folder it sits in. Fire-and-forget: a document without images works either way.
+      void api.allowAssetDir(dirname(disk.path)).catch(() => {});
+      if (draftInfo && draftInfo.content !== disk.content) {
+        setRestoreQueue((q) =>
+          q.some((item) => pathKey(item.path) === pathKey(disk.path))
+            ? q
+            : [
+                ...q,
+                {
+                  tabId,
+                  path: disk.path,
+                  name: basename(disk.path),
+                  draft: draftInfo,
+                },
+              ]
+        );
+      } else if (draftInfo) {
+        // Draft matches what is on disk: redundant, so drop it.
+        await api.clearDraft(disk.path).catch((e) => toast(errorMessage(e)));
+      }
+    },
+    [toast]
+  );
+
   /** @returns false when the file could not be read, so a session restore can count skips. */
   const openPath = useCallback(
     async (raw: string, opts?: { record?: boolean }): Promise<boolean> => {
@@ -184,6 +291,16 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
       let target: Tab;
       if (opened) {
         target = opened;
+        // Only the two lock flags follow the disk here. An open of a file that is already
+        // open does not touch its text — that would throw away the edits in it — and the
+        // flags are what every later save, reload and comparison asks before it acts.
+        if (opened.encrypted !== disk.encrypted || opened.locked !== disk.locked) {
+          setTabs((prev) =>
+            prev.map((t) =>
+              t.id === opened.id ? { ...t, encrypted: disk.encrypted, locked: disk.locked } : t
+            )
+          );
+        }
         await activate(opened.id);
       } else {
         target = {
@@ -200,50 +317,24 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
           encoding: disk.encoding,
           bom: disk.bom,
           bytes: disk.bytes,
+          encrypted: disk.encrypted,
+          locked: disk.locked,
           fileSettings: EMPTY_FILE_SETTINGS,
         };
         setTabs((prev) => [...prev, target]);
         await activate(target.id);
       }
-
-      let draftInfo: Draft | null;
-      try {
-        draftInfo = await api.getDraft(disk.path);
-      } catch (e) {
-        toast(errorMessage(e));
-        return false;
+      // A locked read carries no text, so there is nothing to compare a draft against and
+      // nothing to show. The tab exists and says it is locked; the rest of the open runs
+      // once a password has been accepted.
+      if (disk.locked) {
+        askPassword(target.id, disk.path, { kind: "open" });
+        return true;
       }
-      // Per-file overrides are needed before the first paint, not lazily: word wrap and
-      // whitespace rendering are read while the model is being attached.
-      try {
-        const overrides = await api.fileSettingsView(disk.path);
-        setTabs((prev) =>
-          prev.map((t) => (t.id === target.id ? { ...t, fileSettings: overrides.overrides } : t))
-        );
-      } catch {
-        // A missing override file is a normal first run; keep the global defaults.
-      }
-      // A document can show its own pictures, so allow the asset protocol to read the one
-      // folder it sits in. Fire-and-forget: a document without images works either way.
-      void api.allowAssetDir(dirname(disk.path)).catch(() => {});
-      if (draftInfo && draftInfo.content !== disk.content) {
-        // One prompt per file: a tab can be reached twice during startup (context menu
-        // handover plus session restore) and the answer must not be asked twice.
-        setRestoreQueue((q) =>
-          q.some((item) => pathKey(item.path) === pathKey(target.path))
-            ? q
-            : [
-                ...q,
-                { tabId: target.id, path: target.path, name: target.name, draft: draftInfo },
-              ]
-        );
-      } else if (draftInfo) {
-        // Draft matches what is on disk: redundant, so drop it.
-        await api.clearDraft(disk.path).catch((e) => toast(errorMessage(e)));
-      }
+      await finishOpen(disk, target.id);
       return true;
     },
-    [activate, onFileOpened, toast]
+    [activate, askPassword, finishOpen, onFileOpened, toast]
   );
 
   /**
@@ -365,6 +456,10 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
       };
       const diskSide = async (ref: CompareRef & { kind: "disk" }): Promise<CompareSide> => {
         const disk = await api.openFile(ref.path, false, encodingRef.current);
+        // A locked file reads back empty, and an empty side would be shown as a real
+        // difference against everything instead of as a file this session cannot open.
+        // Thrown as the code the backend uses, so the catch below localizes it the same way.
+        if (disk.locked) throw "encrypted_locked";
         return {
           path: disk.path,
           name: basename(disk.path),
@@ -579,6 +674,8 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
                 encoding: disk.encoding,
                 bom: disk.bom,
                 bytes: disk.bytes,
+                encrypted: disk.encrypted,
+                locked: disk.locked,
                 fileSettings: EMPTY_FILE_SETTINGS,
               };
             } catch {
@@ -627,10 +724,27 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
       setTabs(tabsBuilt);
       setActiveId(active ? active.id : null);
 
+      // An encrypted file nobody has decrypted yet is restored as a lock, and its password is
+      // asked for in the order the tabs sit in the strip — one dialog at a time, which is what
+      // makes a session holding several of them survivable. Each answer runs `finishOpen`, so
+      // the draft and override work below is skipped here rather than done twice.
+      setPasswordAsk((q) => [
+        ...q,
+        ...tabsBuilt
+          .filter((tab) => tab.locked)
+          .filter((tab) => !q.some((a) => pathKey(a.path) === pathKey(tab.path)))
+          .map((tab) => ({
+            tabId: tab.id,
+            path: tab.path,
+            name: tab.name,
+            then: { kind: "open" } as PasswordThen,
+          })),
+      ]);
+
       // Drafts and overrides are independent per file, so fetch them together.
       const extras = await Promise.all(
         tabsBuilt.map(async (tab) => {
-          if (!isFileTab(tab)) {
+          if (!isFileTab(tab) || tab.locked) {
             return { id: tab.id, overrides: EMPTY_FILE_SETTINGS, draft: null as Draft | null };
           }
           const [draft, view] = await Promise.all([
@@ -763,6 +877,9 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
       setTabs(remaining);
       // A prompt about a tab that no longer exists would sit in front of the ones still waiting.
       setStale((q) => q.filter((a) => a.tabId !== id));
+      // Same for a password question: the file it would unlock is no longer open, and leaving
+      // it queued would ask for a password with nothing behind the answer.
+      setPasswordAsk((q) => q.filter((a) => a.tabId !== id));
       setConflict((c) => (c && c.tabId === id ? null : c));
       // A closed tab's caret is no longer anybody's; the next open starts at 0.
       cursors.current.delete(pathKey(tab.path));
@@ -796,6 +913,10 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
     setRestoreQueue([]);
     // A conflict prompt belongs to the tabs that raised it, exactly as a draft prompt does.
     setStale([]);
+    // So does a password question: the encrypted file it was about belongs to the group being
+    // left, and the next group's locks ask for themselves when they are opened.
+    setPasswordAsk([]);
+    setPasswordError(null);
     dismissed.current.clear();
     setConflict(null);
     lastFileTabRef.current = null;
@@ -858,6 +979,14 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
     // A picture has no buffer to write. Saving one would write the empty text that stands
     // in for it and destroy the file, so this is refused rather than merely discouraged.
     if (!tab || !isFileTab(tab) || tab.isBinary || !h) return false;
+    // An encrypted file with no key behind it cannot be written: the backend refuses it, and
+    // for a tab that was never unlocked the buffer is empty, so writing it would be writing
+    // nothing over a document. Ask for the password and run the save again once it is
+    // accepted — the question is worth more than an error toast the user has to act on anyway.
+    if (tab.locked) {
+      askForTab(tab.id, { kind: "save", overwrite: !!opts?.overwrite });
+      return false;
+    }
     // The editor only ever holds the active tab's text; another tab's live text is in its
     // model. Reading the wrong one would save the file the user is looking at instead.
     const content =
@@ -947,7 +1076,7 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
       toast(errorMessage(e));
       return false;
     }
-  }, [draft, editorRef, onFileOpened, toast]);
+  }, [askForTab, draft, editorRef, onFileOpened, toast]);
 
   const saveActive = useCallback(
     () => (activeRef.current === null ? Promise.resolve(false) : saveTab(activeRef.current)),
@@ -974,6 +1103,17 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
       // A comparison has no buffer of its own, and a scratch buffer has nothing on disk to
       // read: both would silently do nothing here.
       if (!tab || !isFileTab(tab) || isUntitled(tab.path)) return;
+      // Reading an encrypted file needs a key this session no longer has, and the read comes
+      // back empty rather than failing. That empty text would then be poured over whatever is
+      // on screen — including plaintext the user was legitimately given before an idle lock,
+      // which is still there on purpose — with `setValue` taking the undo stack that could
+      // have brought it back. Ask for the password and leave the buffer exactly as it is; the
+      // reload is not performed, because deciding to throw a buffer away is a separate
+      // question and has to be asked about the text, not about a lock.
+      if (tab.locked) {
+        askForTab(tab.id, { kind: "none" });
+        return;
+      }
       let disk;
       try {
         // `record: false`: a reload is not a new open, so it must not touch the history.
@@ -981,6 +1121,13 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
       } catch (e) {
         // Most often the file was moved or deleted underneath the tab.
         toast(errorMessage(e));
+        return;
+      }
+      // The file can become locked between the check above and this read — re-encrypted
+      // elsewhere under a password this session does not have — and the answer is empty for
+      // exactly the reason the check exists.
+      if (disk.locked) {
+        askForTab(tab.id, { kind: "none" });
         return;
       }
       const key = pathKey(tab.path);
@@ -1006,6 +1153,10 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
               encoding: disk.encoding,
               bom: disk.bom,
               bytes: disk.bytes,
+              // The file may have been put under encryption, or had it taken off, since the
+              // tab was built; both are answered by the same read that brought the text.
+              encrypted: disk.encrypted,
+              locked: false,
             };
 
       mutating.current = true;
@@ -1038,10 +1189,142 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
       await api.clearDraft(tab.path).catch((e) => toast(errorMessage(e)));
       // The tab now agrees with disk, so any prompt about this file is answered by definition.
       setStale((q) => q.filter((a) => a.tabId !== id));
+      // The reload just re-read the file, so any password question about it is answered by
+      // definition — leaving one up would ask for a key that is already in the cache.
+      setPasswordAsk((q) => q.filter((a) => a.tabId !== id));
       toast(t("menu.reloaded", { name: tab.name }));
     },
-    [currentOffset, draft, editorRef, toast]
+    [askForTab, currentOffset, draft, editorRef, toast]
   );
+
+  /**
+   * Put the text a password just bought into the tab that was waiting for it.
+   *
+   * Only a tab that never had any text is written into. One that was read before it was
+   * locked still holds that document, possibly with edits on top of it, and replacing the
+   * buffer would destroy the work the lock exists to protect — so there the flags are the
+   * only thing that changes.
+   *
+   * `tabsRef` is written as well as the state, which the rest of this file leaves to the
+   * render that follows. Here it cannot: `submitPassword` goes straight on to retry a save
+   * that was refused, and a save reading the pre-unlock tab would see it still locked and
+   * ask for the same password again.
+   */
+  const applyUnlocked = useCallback(
+    (tabId: number, opened: OpenedFile) => {
+      const tab = tabsRef.current.find((t) => t.id === tabId);
+      if (!tab) return;
+      const blank = isLockedBlank(tab);
+      const patch = (t: Tab): Tab =>
+        t.id !== tabId
+          ? t
+          : {
+              ...t,
+              original: blank ? opened.content : t.original,
+              dirty: blank ? false : t.dirty,
+              mtime: opened.mtime,
+              encoding: opened.encoding,
+              bom: opened.bom,
+              bytes: opened.bytes,
+              encrypted: true,
+              locked: false,
+            };
+      const next = tabsRef.current.map(patch);
+      tabsRef.current = next;
+      setTabs(next);
+      // The editor keeps the last file tab mounted behind other views, so it has to be
+      // re-derived from the patched tab rather than left holding the locked one.
+      const last = lastFileTabRef.current;
+      if (last && last.id === tabId) lastFileTabRef.current = patch(last);
+      if (!blank) return;
+      const h = editorRef.current;
+      const model = h?.monaco.editor.getModel(h.monaco.Uri.parse(modelUri(tab.path)));
+      if (!h || !model || model.getValue() === opened.content) return;
+      // Under `mutating` for the same reason a reload is: the change event this fires is
+      // read against a tab object React has not re-rendered yet, and would otherwise mark
+      // the freshly unlocked file dirty and schedule a draft for it.
+      mutating.current = true;
+      try {
+        model.setValue(opened.content);
+      } finally {
+        mutating.current = false;
+      }
+    },
+    [editorRef]
+  );
+
+  /**
+   * Take the password the dialog collected and try it.
+   *
+   * A failure leaves the ask at the head of the queue: a wrong password is a reason to type
+   * it again, not a reason to give up on the file. On success the question leaves the queue
+   * and whatever asked it is carried out, which is what makes an unlock reached from a save
+   * behave like the save the user pressed.
+   */
+  const submitPassword = useCallback(
+    async (password: string, remember: boolean) => {
+      const ask = passwordRef.current[0];
+      if (!ask || passwordBusy) return;
+      setPasswordBusy(true);
+      setPasswordError(null);
+      let opened: OpenedFile;
+      try {
+        opened = await api.unlockFile(ask.path, password);
+      } catch (e) {
+        setPasswordError(errorMessage(e));
+        return;
+      } finally {
+        setPasswordBusy(false);
+      }
+      if (remember) {
+        // After the unlock, never instead of as part of it: the file is open either way, and
+        // a credential store that refuses is one toast rather than a failed unlock.
+        await api.rememberPassword(ask.path, password).catch((e) => toast(errorMessage(e)));
+      }
+      setPasswordAsk((q) => q.slice(1));
+      applyUnlocked(ask.tabId, opened);
+      if (ask.then.kind !== "save") toast(t("enc.unlocked", { name: ask.name }));
+      if (ask.then.kind === "open") {
+        await finishOpen(opened, ask.tabId);
+      } else if (ask.then.kind === "save") {
+        await saveTab(ask.tabId, { overwrite: ask.then.overwrite });
+      }
+    },
+    [applyUnlocked, finishOpen, passwordBusy, saveTab, toast]
+  );
+
+  /** Leave a file locked. The tab keeps its lock, and nothing about the buffer changes. */
+  const cancelPassword = useCallback(() => {
+    setPasswordAsk((q) => q.slice(1));
+    setPasswordError(null);
+  }, []);
+
+  /** Ask again for a tab the user clicked on, which is how the lock overlay is answered. */
+  const unlockTab = useCallback(
+    (id: number) => askForTab(id, { kind: "none" }),
+    [askForTab]
+  );
+
+  /**
+   * Mark every encrypted tab locked, which is what the idle lock does once the keys are gone.
+   *
+   * The text stays on screen. It was decrypted with a password the user typed, and what the
+   * lock means is that nothing more can be written or drafted from here — taking the document
+   * off the screen as well would punish having read it, and the plaintext is in the model for
+   * as long as the window is open either way.
+   */
+  const lockEncrypted = useCallback(() => {
+    if (!tabsRef.current.some((t) => t.encrypted && !t.locked)) return;
+    const next = tabsRef.current.map((t) => (t.encrypted ? { ...t, locked: true } : t));
+    tabsRef.current = next;
+    setTabs(next);
+    const last = lastFileTabRef.current;
+    if (last && last.encrypted) lastFileTabRef.current = { ...last, locked: true };
+    // A question nobody can answer any more: the key it would have produced is exactly what
+    // was just dropped, so it is retired rather than left up to fail.
+    setPasswordAsk([]);
+    setPasswordError(null);
+  }, []);
 
   /** Set while one sweep is running, so the timer and a focus change cannot interleave two. */
   const checking = useRef(false);
@@ -1075,6 +1358,9 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
         if (!isFileTab(tab) || isUntitled(tab.path) || tab.mtime === undefined || tab.isBinary) {
           continue;
         }
+        // A lock with no text behind it has nothing to compare and nothing to keep: every
+        // question this sweep asks would be about a file the window cannot read.
+        if (isLockedBlank(tab)) continue;
         // A tab with a draft prompt open is already being asked about, and one with a
         // conflict prompt open is waiting for an answer: reloading either would move the
         // text under a dialog that describes it.
@@ -1093,6 +1379,9 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
           );
           continue;
         }
+        // A locked tab that does hold text: whether the file is still there is worth knowing,
+        // but taking the new text is not possible, so the sweep stops at the answer above.
+        if (tab.locked) continue;
         if (stat.mtime === tab.mtime && stat.bytes === tab.bytes) continue;
         // The same write, already answered. A later write is a different question.
         if (dismissed.current.get(pathKey(tab.path)) === stat.mtime) continue;
@@ -1239,6 +1528,12 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
         toast(errorMessage(e));
         return;
       }
+      // The disk side of a conflict is read the same way, so a file the session lost the key
+      // for has nothing to show against the buffer.
+      if (disk.locked) {
+        toast(errorMessage("encrypted_locked"));
+        return;
+      }
       const name = basename(tab.path);
       const language = langOf(disk.path);
       setConflict({
@@ -1362,6 +1657,17 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
     /** Files found to be gone from the disk, one prompt at a time. */
     gone,
     answerGone,
+    /** Encrypted files waiting for a password, one dialog at a time. */
+    passwordAsk,
+    /** Why the password at the head of that queue last failed, or null. */
+    passwordError,
+    passwordBusy,
+    submitPassword,
+    cancelPassword,
+    /** Ask again for a tab that is already open and locked. */
+    unlockTab,
+    /** Mark every encrypted tab locked; the caller has already dropped the keys. */
+    lockEncrypted,
     /** The conflict comparison popup, while it is open. */
     conflict,
     showConflict,
