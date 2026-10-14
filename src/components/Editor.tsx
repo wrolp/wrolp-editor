@@ -142,6 +142,11 @@ export default function Editor({
         // accepting work this app cannot keep.
         readOnly: !!tab.locked,
         domReadOnly: !!tab.locked,
+        // On, and it is the app's only right-click menu for the text: the entries are Monaco's
+        // own, with "Select All" and a working "Paste" added in `src/lib/editorMenu.ts`. Said out
+        // loud because the default is `true` anyway, and a reader who finds no menu here would
+        // otherwise look for the code that turned it off.
+        contextmenu: true,
         tabSize,
         insertSpaces,
         // On by default so a file keeps the indentation style it was written with; the

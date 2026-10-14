@@ -42,4 +42,9 @@ window.MonacoEnvironment = {
 
 loader.config({ monaco });
 
+// The editor keeps Monaco's own right-click menu, and two of its parts have to be corrected:
+// imported for the side effect, and after `monaco-editor` above so the registrations here are the
+// ones that end up at the head of the command list.
+import "./editorMenu";
+
 export default monaco;
