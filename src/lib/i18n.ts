@@ -298,6 +298,13 @@ const EN: Table = {
 
   "dialog.allFiles": "All files",
 
+  // The editor's right-click menu. Monaco names these four itself in English when the bundle
+  // loads, so `editorMenu.ts` re-reads them on every opening — see the note there.
+  "editor.cut": "Cut",
+  "editor.copy": "Copy",
+  "editor.paste": "Paste",
+  "editor.selectAll": "Select All",
+
   "enc.unlockTitle": "Unlock {name}",
   "enc.unlockHint": "This file is encrypted. Its password is needed to read it.",
   "enc.password": "Password",
@@ -695,6 +702,11 @@ const ZH: Table = {
   "draft.reviewEach": "逐个查看",
 
   "dialog.allFiles": "所有文件",
+
+  "editor.cut": "剪切",
+  "editor.copy": "复制",
+  "editor.paste": "粘贴",
+  "editor.selectAll": "全选",
 
   "enc.unlockTitle": "解锁 {name}",
   "enc.unlockHint": "这个文件是加密的，需要口令才能读取。",

@@ -1,12 +1,13 @@
 /**
- * The two things Monaco's own right-click menu cannot do for this app.
+ * The three things Monaco's own right-click menu cannot do for this app.
  *
- * The editor keeps Monaco's menu rather than an overlay of the app's own, so these go through
- * the internals that build it (declared in `src/monaco-internals.d.ts`) and run once, at module
- * load, before any editor exists. Import this from `src/lib/monaco.ts`.
+ * The editor keeps Monaco's menu rather than an overlay of the app's own, so these go through the
+ * internals that build it (declared in `src/monaco-internals.d.ts`) and run once, at module load,
+ * before any editor exists. Import this from `src/lib/monaco.ts`.
  */
 import { readText } from "@tauri-apps/plugin-clipboard-manager";
 import * as monaco from "monaco-editor";
+import { t } from "./i18n";
 import { MenuId, MenuRegistry } from "monaco-editor/platform/actions/common/actions";
 import { CommandsRegistry } from "monaco-editor/platform/commands/common/commands";
 
@@ -15,15 +16,46 @@ import { CommandsRegistry } from "monaco-editor/platform/commands/common/command
  *
  * The command exists — `Ctrl+A` runs it — but 0.57 registers the menu entry only for
  * `MenuId.SimpleEditorContext`, while the standalone editor asks for `MenuId.EditorContext`
- * (`codeEditorWidget.js:198`), so the item never appeared. The title is a literal rather than an
- * `i18n` key: the three entries beside it are Monaco's own, frozen in English when the bundle
- * loads, and a fourth that followed the app's language would change without them.
+ * (`codeEditorWidget.js:198`), so the menu never showed it. It is registered in English, the way
+ * the three above it are; the loop below is what turns it to the app's language.
  */
 MenuRegistry.appendMenuItem(MenuId.EditorContext, {
   command: { id: "editor.action.selectAll", title: "Select All" },
   group: "9_select",
   order: 1,
 });
+
+/** The entries this app wants the language for, keyed by the command each one runs. */
+const MENU_TITLES: Record<string, string> = {
+  "editor.action.clipboardCutAction": "editor.cut",
+  "editor.action.clipboardCopyAction": "editor.copy",
+  "editor.action.clipboardPasteAction": "editor.paste",
+  "editor.action.selectAll": "editor.selectAll",
+};
+
+/**
+ * Make those entries follow the interface language.
+ *
+ * Monaco picks its own labels when the bundle loads — `localize()` in the shipped ESM returns a
+ * finished string, not something that re-reads a catalog — so the menu cannot track a language
+ * switch on its own. It is *built* on every right-click, though, and the label is read then
+ * (`actions.js:424`), so an entry can be given a getter instead of a string. Writing to them works
+ * because `getMenuItems` copies the list but not its elements (`actions.js:379`), so what is held
+ * here is what the registry will hand to the next menu.
+ *
+ * A future Monaco that stores its entries immutably would simply leave the menu English: nothing
+ * else about it changes, and that is the worst case worth accepting for this.
+ */
+for (const item of MenuRegistry.getMenuItems(MenuId.EditorContext)) {
+  const command = item.command;
+  if (!command) continue;
+  const key = MENU_TITLES[command.id];
+  if (!key) continue;
+  const title = { get value() { return t(key); } };
+  command.title = title;
+  // A submenu entry carries its title beside the command rather than inside it.
+  if (item.title !== undefined) item.title = title;
+}
 
 /**
  * Make the Paste that is already in the menu read the clipboard somewhere it can be read.

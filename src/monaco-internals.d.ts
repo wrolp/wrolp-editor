@@ -8,15 +8,25 @@
  * the registrations live as long as the bundle does.
  */
 declare module "monaco-editor/platform/actions/common/actions" {
+  /**
+   * What a menu entry calls itself. Monaco reads this when it builds a menu, and takes `.value`
+   * from anything that is not already a string (`actions.js:424`) — which is the seam that lets a
+   * label be looked up per opening instead of frozen at bundle load.
+   */
+  type IMenuTitle = string | { value: string };
+
   interface IMenuCommand {
     id: string;
-    title: string;
-    /** A context-key expression string; `undefined` means the item is always offered. */
+    title: IMenuTitle;
+    /** A context-key expression; `undefined` means the item is always offered. */
     precondition?: unknown;
   }
 
   interface IMenuItem {
-    command: IMenuCommand;
+    command?: IMenuCommand;
+    /** A submenu entry names itself here rather than through a command. */
+    title?: IMenuTitle;
+    submenu?: unknown;
     /** Menu items are grouped, and groups are ordered by name; `9_cutcopypaste` is Monaco's own. */
     group?: string;
     order?: number;
@@ -34,6 +44,8 @@ declare module "monaco-editor/platform/actions/common/actions" {
       menuId: typeof MenuId.EditorContext,
       item: IMenuItem
     ): { dispose(): void };
+    /** The array is new on every call; the entries inside it are the stored ones. */
+    getMenuItems(menuId: typeof MenuId.EditorContext): IMenuItem[];
   };
 }
 
