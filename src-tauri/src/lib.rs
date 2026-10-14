@@ -1,5 +1,6 @@
 mod commands;
 mod context_menu;
+mod crypto;
 mod draft;
 mod encoding;
 mod entry;
