@@ -470,9 +470,7 @@ pub fn save_file(
     return Err(format!("file_too_large:{}", written.len() / (1024 * 1024)));
   }
   std::fs::write(file, &written).map_err(|e| format!("file_write:{e}"))?;
-  let mtime = std::fs::metadata(file)
-    .map(|m| mtime_ms(&m))
-    .unwrap_or(0);
+  let mtime = std::fs::metadata(file).map(|m| mtime_ms(&m)).unwrap_or(0);
   push_history_entry(&app, &normalized)?;
   Ok(SavedFile {
     path: normalized,
@@ -633,7 +631,11 @@ fn run_diagram(
   // would report success for a diagram that did not render.
   let looks_broken = svg.contains("syntax error") || svg.contains("Syntax Error");
   if !status.success() || looks_broken || svg.trim().is_empty() {
-    let reason = if !stderr.is_empty() { stderr } else { "diagram_failed" };
+    let reason = if !stderr.is_empty() {
+      stderr
+    } else {
+      "diagram_failed"
+    };
     let trimmed: String = reason.chars().take(400).collect();
     return Err(if trimmed.is_empty() {
       format!("diagram_exit:{}", status.code().unwrap_or(-1))
@@ -1491,7 +1493,13 @@ mod tests {
   fn a_missing_diagram_program_is_reported_not_panicked() {
     // Nothing here can rely on what is installed, so this asks for a program that cannot
     // exist and checks the failure is a value rather than a panic.
-    let err = run_diagram("wrolp-no-such-diagram-program", "gv", &["-Tsvg"], "digraph{a}", &std::env::temp_dir());
+    let err = run_diagram(
+      "wrolp-no-such-diagram-program",
+      "gv",
+      &["-Tsvg"],
+      "digraph{a}",
+      &std::env::temp_dir(),
+    );
     let reason = err.expect_err("a missing program must fail");
     assert!(
       reason.starts_with("diagram_missing:")
@@ -1526,7 +1534,11 @@ mod tests {
     // the thing to assert, so both outcomes are checked rather than one being assumed.
     match render_diagram("graphviz".to_string(), "digraph{a}".to_string()) {
       Ok(svg) => {
-        assert!(svg.contains("<svg"), "expected an svg element, got: {}", &svg[..svg.len().min(120)]);
+        assert!(
+          svg.contains("<svg"),
+          "expected an svg element, got: {}",
+          &svg[..svg.len().min(120)]
+        );
         // The preamble is stripped so the drawing can be embedded directly.
         assert!(!svg.contains("<?xml"), "xml declaration should be gone");
         assert!(!svg.contains("<!DOCTYPE"), "doctype should be gone");
@@ -1537,8 +1549,14 @@ mod tests {
       ),
     }
     // Broken source must never come back as a drawing, whichever tool produced it.
-    if let Ok(svg) = render_diagram("graphviz".to_string(), "this is not dot source!!".to_string()) {
-      assert!(svg.contains("syntax error"), "a broken diagram drew something: {svg}");
+    if let Ok(svg) = render_diagram(
+      "graphviz".to_string(),
+      "this is not dot source!!".to_string(),
+    ) {
+      assert!(
+        svg.contains("syntax error"),
+        "a broken diagram drew something: {svg}"
+      );
     }
   }
 
@@ -1547,7 +1565,11 @@ mod tests {
       .map(|entries| {
         entries
           .filter_map(|e| e.ok())
-          .filter(|e| e.file_name().to_string_lossy().starts_with("wrolp-diagram-"))
+          .filter(|e| {
+            e.file_name()
+              .to_string_lossy()
+              .starts_with("wrolp-diagram-")
+          })
           .count()
       })
       .unwrap_or(0)

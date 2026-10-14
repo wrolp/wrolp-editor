@@ -518,7 +518,10 @@ mod tests {
       ("archive.tar".to_string(), ".gz".into())
     );
     // A dotfile is its own stem, so numbering it does not turn it into ".gitignore.txt".
-    assert_eq!(split_ext(".gitignore"), (".gitignore".to_string(), String::new()));
+    assert_eq!(
+      split_ext(".gitignore"),
+      (".gitignore".to_string(), String::new())
+    );
   }
 
   #[test]

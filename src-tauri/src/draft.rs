@@ -187,8 +187,12 @@ pub fn rekey_prefix(app: &AppHandle, old: &str, new: &str) -> Result<(), String>
     }
     // A draft that will not parse is left alone: opening its file drops it, and a rename
     // has no business destroying text it could not read.
-    let Ok(bytes) = std::fs::read(&file) else { continue };
-    let Ok(stored) = serde_json::from_slice::<Draft>(&bytes) else { continue };
+    let Ok(bytes) = std::fs::read(&file) else {
+      continue;
+    };
+    let Ok(stored) = serde_json::from_slice::<Draft>(&bytes) else {
+      continue;
+    };
     let before = normalize_path(&stored.path);
     let moved = crate::rename::rekey(&before, old, new);
     if moved == before {

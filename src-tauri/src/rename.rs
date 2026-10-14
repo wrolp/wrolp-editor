@@ -159,7 +159,7 @@ fn rekey_state(app: &AppHandle, old: &str, new: &str) -> Result<(), String> {
 
 fn rekey_groups(app: &AppHandle, old: &str, new: &str) -> Result<(), String> {
   let Some(mut store) = commands::read_json::<GroupStore>(app, commands::GROUPS_FILE)? else {
-    return Ok(())
+    return Ok(());
   };
   store.rekey_prefix(old, new);
   commands::write_json(app, commands::GROUPS_FILE, &store)
@@ -167,7 +167,7 @@ fn rekey_groups(app: &AppHandle, old: &str, new: &str) -> Result<(), String> {
 
 fn rekey_history(app: &AppHandle, old: &str, new: &str) -> Result<(), String> {
   let Some(mut history) = commands::read_json::<Vec<HistoryEntry>>(app, "history.json")? else {
-    return Ok(())
+    return Ok(());
   };
   let mut changed = false;
   for item in &mut history {
@@ -191,7 +191,7 @@ fn rekey_history(app: &AppHandle, old: &str, new: &str) -> Result<(), String> {
 
 fn rekey_sidebar_root(app: &AppHandle, old: &str, new: &str) -> Result<(), String> {
   let Some(settings) = commands::read_json::<Settings>(app, "settings.json")? else {
-    return Ok(())
+    return Ok(());
   };
   let root = draft::normalize_path(&settings.sidebar_root);
   if root.is_empty() {
