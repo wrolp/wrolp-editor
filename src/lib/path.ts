@@ -173,6 +173,11 @@ const GLYPHS: Record<string, FileGlyph> = {
   archive: { cls: "icon-archive", sym: "▦" },
   binary: { cls: "icon-binary", sym: "◆" },
 
+  // The app's own encrypted container. What a file is remains a question about its bytes --
+  // a container under any name is still one -- so this glyph only covers the extension the
+  // app hands a file it names itself.
+  encrypted: { cls: "icon-enc", sym: "En" },
+
   // Project files that carry no extension
   docker: { cls: "icon-docker", sym: "D" },
   git: { cls: "icon-git", sym: "G" },
@@ -333,6 +338,9 @@ const EXT_GLYPH: Record<string, string> = {
   so: "binary",
   dylib: "binary",
   obj: "binary",
+
+  // The container extension a new encrypted file gets when the typed name has none.
+  wrolpenc: "encrypted",
 };
 
 /** Extension-less files that still deserve a known face. Keyed by full name. */

@@ -424,6 +424,11 @@ body {
   color: #b0b0b0;
 }
 
+/* The encrypted container */
+.file-glyph.icon-enc {
+  color: #57c7b5;
+}
+
 /* Project files without an extension */
 .file-glyph.icon-docker {
   color: #2496ed;
