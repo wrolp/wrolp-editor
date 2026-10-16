@@ -1,5 +1,7 @@
 # WROLP Editor
 
+[English](README.md) | 简体中文
+
 一款 Windows 本地文本编辑器。
 
 技术栈：Tauri v2 + React + TypeScript，编辑区用 Monaco Editor。

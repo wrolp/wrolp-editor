@@ -1,5 +1,7 @@
 # WROLP Editor
 
+English | [简体中文](README.zh.md)
+
 A small local text editor for Windows.
 
 Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surface.
