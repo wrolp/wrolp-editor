@@ -37,6 +37,12 @@ interface RestoreResult {
   skipped: number;
 }
 
+/**
+ * How a save is asked for. `overwrite` answers the "the file changed on disk" question yes in
+ * advance; `quiet` holds back the notice, which the automatic save has no click to attach one to.
+ */
+type SaveOpts = { overwrite?: boolean; quiet?: boolean };
+
 /** A tab whose file no longer matches what it holds, waiting for the user to answer for it. */
 interface StaleAsk {
   tabId: number;
@@ -164,6 +170,12 @@ interface Options {
    * when a save runs, like the preferences above.
    */
   cleanupPref?: { trimTrailingWhitespace: boolean; insertFinalNewline: boolean };
+  /**
+   * The automatic save: whether it is on, and how many seconds pass between two sweeps. Off by
+   * default, and it only ever writes a file that already exists — an untitled buffer would have
+   * to be asked for a name, which is not something a timer gets to decide.
+   */
+  autoSave?: { enabled: boolean; intervalSec: number };
 }
 
 export function useEditorTabs({
@@ -175,6 +187,7 @@ export function useEditorTabs({
   draftRestorePref,
   lineEndingPref,
   cleanupPref,
+  autoSave,
 }: Options) {
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
@@ -1286,8 +1299,12 @@ export function useEditorTabs({
    * declined "Save as", a picture with no buffer, a file another program has since changed,
    * and a failed write all amount to: the caller has to know, because a close that was asked
    * to save must not go ahead without it.
+   *
+   * `quiet` is for the automatic save, which has no click behind it to acknowledge: the notice
+   * that a save was asked for would then arrive on its own, every few seconds, over a file the
+   * user is not looking at.
    */
-  const saveTab = useCallback(async (id: number, opts?: { overwrite?: boolean }): Promise<boolean> => {
+  const saveTab = useCallback(async (id: number, opts?: SaveOpts): Promise<boolean> => {
     const tab = tabsRef.current.find((t) => t.id === id);
     const h = editorRef.current;
     // A picture has no buffer to write. Saving one would write the empty text that stands
@@ -1359,7 +1376,7 @@ export function useEditorTabs({
         );
         setTimeout(() => oldModel?.dispose(), 0);
         onFileOpened?.(dirname(saved.path));
-        toast(t("menu.saved", { name: basename(saved.path) }));
+        if (!opts?.quiet) toast(t("menu.saved", { name: basename(saved.path) }));
         return true;
       }
 
@@ -1387,13 +1404,39 @@ export function useEditorTabs({
       // answering a question that stopped being true — and keeping it would then park a
       // second copy of text that already has a home.
       setGone((q) => q.filter((a) => a.tabId !== tab.id));
-      toast(t("menu.saved", { name: tab.name }));
+      if (!opts?.quiet) toast(t("menu.saved", { name: tab.name }));
       return true;
     } catch (e) {
       toast(errorMessage(e));
       return false;
     }
   }, [applySaveCleanup, askForTab, draft, editorRef, onFileOpened, toast]);
+
+  /**
+   * The automatic save: every interval, write back whatever is dirty and already has a file
+   * behind it. Reached through a ref because `saveTab` is rebuilt whenever an unrelated callback
+   * is, and an interval that restarts on every render would never fire.
+   */
+  const saveTabRef = useRef(saveTab);
+  saveTabRef.current = saveTab;
+  useEffect(() => {
+    if (!autoSave?.enabled) return;
+    const everyMs = Math.max(1, autoSave.intervalSec) * 1000;
+    const timer = window.setInterval(() => {
+      for (const tab of tabsRef.current) {
+        // A picture has no buffer, a lock has no key, and an untitled buffer has no file: the
+        // first two cannot be written and the third would have to be asked for a name.
+        if (!isFileTab(tab) || !tab.dirty || tab.isBinary || tab.locked || isUntitled(tab.path))
+          continue;
+        // A file another program has changed, or one that is gone from the disk, already has a
+        // question in front of the user. Answering it by writing is their call, not a timer's.
+        if (staleRef.current.some((ask) => ask.tabId === tab.id)) continue;
+        if (goneRef.current.some((ask) => ask.tabId === tab.id)) continue;
+        void saveTabRef.current(tab.id, { quiet: true });
+      }
+    }, everyMs);
+    return () => window.clearInterval(timer);
+  }, [autoSave?.enabled, autoSave?.intervalSec]);
 
   const saveActive = useCallback(
     () => (activeRef.current === null ? Promise.resolve(false) : saveTab(activeRef.current)),

@@ -122,6 +122,10 @@ const DEFAULT_SETTINGS: Settings = {
   // two trailing spaces are the line break. The file comes back byte for byte until asked.
   trimTrailingWhitespace: false,
   insertFinalNewline: false,
+  // Auto-save is a behaviour change with a file as its side effect, so it starts off. Five
+  // seconds is the interval a fresh install gets once it is turned on.
+  autoSave: false,
+  autoSaveInterval: 5,
   scrollBeyondLastLine: true,
   // A document is opened to be read and written, so the editor is what a file opens to.
   // The preview is one keystroke away; a preview nobody asked for costs a pane.
@@ -301,6 +305,7 @@ export default function App() {
       trimTrailingWhitespace: settings.trimTrailingWhitespace,
       insertFinalNewline: settings.insertFinalNewline,
     },
+    autoSave: { enabled: settings.autoSave, intervalSec: settings.autoSaveInterval },
   });
   const groups = useGroups({ onError: toast });
   // The window goes back where it was before anything else measures it.

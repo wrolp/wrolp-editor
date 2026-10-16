@@ -159,6 +159,13 @@ pub struct Settings {
   /// Add the line break a file is missing when it is saved. Off by default for the same reason,
   /// and the break that gets added is the one that file already uses.
   pub insert_final_newline: bool,
+  /// Write dirty files back on a timer, without being asked. Off by default, and it only ever
+  /// touches a file that already exists: an untitled buffer would have to be asked for a name,
+  /// which is not a decision a background task gets to make.
+  pub auto_save: bool,
+  /// Seconds between two sweeps of the automatic save, only read while `auto_save` is on. A
+  /// sweep is one stat and one write per dirty file, so the floor is one second.
+  pub auto_save_interval: u32,
   /// The line ending for a document that has none of its own: a new file, or one read with no
   /// break in it. A file that came with breaks is written back with those unless its own entry
   /// in `file-settings.json` says otherwise, so this setting never rewrites somebody's
@@ -214,6 +221,8 @@ impl Default for Settings {
       detect_indentation: true,
       trim_trailing_whitespace: false,
       insert_final_newline: false,
+      auto_save: false,
+      auto_save_interval: AUTO_SAVE_DEFAULT_SECONDS,
       line_ending: "lf".into(),
       scroll_beyond_last_line: true,
       preview_layout: "text".into(),
@@ -230,6 +239,11 @@ const SIDEBAR_MAX_WIDTH: f64 = 640.0;
 /// rather than recognised by shape; the high end is where the tree stops fitting its own column.
 const SIDEBAR_FONT_MIN: f64 = 11.0;
 const SIDEBAR_FONT_MAX: f64 = 20.0;
+/// The automatic save is off by default, so this is only the interval a fresh install starts
+/// with once somebody turns it on: long enough that typing is not interrupted by a write every
+/// other second, short enough that leaving the window for a coffee saves the file anyway.
+const AUTO_SAVE_DEFAULT_SECONDS: u32 = 5;
+const AUTO_SAVE_MAX_SECONDS: u32 = 3600;
 /// Whitespace rendering modes Monaco understands.
 const RENDER_WHITESPACE: [&str; 5] = ["none", "boundary", "selection", "all", "trailing"];
 /// Colour schemes the frontend knows how to apply.
@@ -330,6 +344,10 @@ impl Settings {
       detect_indentation: self.detect_indentation,
       trim_trailing_whitespace: self.trim_trailing_whitespace,
       insert_final_newline: self.insert_final_newline,
+      auto_save: self.auto_save,
+      // One second is already eager; an hour is as good as switching it off, so anything past
+      // that is read as a typo rather than an intention.
+      auto_save_interval: self.auto_save_interval.clamp(1, AUTO_SAVE_MAX_SECONDS),
       // Same rule as the encoding above: a value the editor cannot use is a stale or
       // hand-edited key, and the safe reading of that is the convention the app started with.
       line_ending: if crate::encoding::is_line_ending(&self.line_ending) {
@@ -1820,6 +1838,40 @@ mod tests {
   }
 
   #[test]
+  fn auto_save_interval_is_bounded_and_off_is_the_default() {
+    assert!(!Settings::default().auto_save);
+    // 0 would be a sweep every tick of the timer, which is what a typo looks like, not a plan.
+    assert_eq!(
+      Settings {
+        auto_save_interval: 0,
+        ..Default::default()
+      }
+      .filled()
+      .auto_save_interval,
+      1
+    );
+    assert_eq!(
+      Settings {
+        auto_save_interval: 999_999,
+        ..Default::default()
+      }
+      .filled()
+      .auto_save_interval,
+      3600
+    );
+    assert_eq!(
+      Settings {
+        auto_save: true,
+        auto_save_interval: 30,
+        ..Default::default()
+      }
+      .filled()
+      .auto_save_interval,
+      30
+    );
+  }
+
+  #[test]
   fn settings_defaults_are_applied() {
     let s = Settings {
       font_size: 0.0,
@@ -1885,7 +1937,12 @@ mod tests {
     // And a file it saves keeps the whitespace it was written with until somebody asks otherwise.
     assert!(!s.trim_trailing_whitespace);
     assert!(!s.insert_final_newline);
-    assert_eq!(s.filled().sidebar_root, "");
+    // Nothing writes to disk on its own in an install that predates the setting.
+    assert!(!s.auto_save);
+    let filled = s.filled();
+    assert_eq!(filled.sidebar_root, "");
+    // And the interval it never had is the one a fresh build starts with.
+    assert_eq!(filled.auto_save_interval, 5);
   }
 
   fn scratch_dir(name: &str) -> std::path::PathBuf {

@@ -16,6 +16,7 @@
 | 未保存的修改 | 与磁盘上那份不一致的行会被染色：新增的行偏绿，改掉了原有文字的行偏黄，保存后标记消失。比对在 `src/lib/dirtyDiff.ts`：工作台自带这套，独立版 Monaco 没有 |
 | 换行符 | 读到什么就按什么写回。想强制某个文件用 LF 或 CRLF，去那个标签的「文件设置」；本来没有换行符的文档（新建文件最常见）用设置 → 常规 里选的。状态栏显示的就是保存会写入的换行符。不单独提供 CR：Monaco 的模型只会用 LF 或 CRLF 拼接行 |
 | 草稿 | 编辑后约 500ms 防抖落盘；切标签、关标签、窗口失焦时立即冲刷 |
+| 自动保存 | 默认关闭。打开后按每 N 秒把磁盘上已存在、又有未保存改动的文件静默写回；未命名标签、锁定的文件、图片，以及磁盘检查正在询问的文件都不动 |
 | 恢复 | 打开文件时把磁盘内容与草稿比对，不一致就直接把草稿装回去，标签保持未保存状态；设置里可以改成每个文件弹「恢复草稿 / 丢弃」询问 |
 | 侧边栏 | 资源管理器目录树（子目录懒加载 + 刷新按钮）与最近打开的历史列表。拖动分隔条可调宽（180–640 px，双击复位），宽度会持久化。树的文字大小可在设置里调，11–20 px |
 | 单实例 | 再次启动时把路径交给已运行的窗口，新增标签并聚焦 |
@@ -85,7 +86,8 @@ wrolp/
     ├── history.json          最近打开，新的在前，最多 50 条
     ├── settings.json         fontSize、minimap、sidebarVisible、sidebarView、sidebarWidth、sidebarFont、
     │                         language、restoreSession、draftRestore、lineEnding、
-    │                         trimTrailingWhitespace、insertFinalNewline、sidebarRoot、encryptIdleMinutes
+    │                         trimTrailingWhitespace、insertFinalNewline、autoSave、autoSaveInterval、
+    │                         sidebarRoot、encryptIdleMinutes
     ├── groups.json           标签分组：名字、标签与光标位置
     └── window.json           x、y、width、height（物理像素）与是否最大化
 ```

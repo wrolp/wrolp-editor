@@ -16,6 +16,7 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | Unsaved changes | Lines that differ from the file on disk are tinted — green where text was added, amber where saved text was replaced — and the marks clear on save. The workbench has this built in; the standalone editor needs the comparison, which is `src/lib/dirtyDiff.ts` |
 | Line endings | Read from the file and written back as they are. One file can be forced to LF or CRLF from that tab's File settings, and a document with no breaks yet — a new file above all — takes what Settings → General names. The status bar shows the ending a save will write. A lone CR is not offered: Monaco's model joins lines with LF or CRLF and nothing else |
 | Drafts | Debounced ~500 ms after each edit; also flushed on tab switch, tab close and window blur |
+| Auto-save | Off by default. On, it writes back the dirty files that already exist on disk every N seconds — silently, and leaving alone an untitled buffer, a locked file, a picture, and anything the disk check already has a question about |
 | Restore | On open, disk content is compared with the draft; a differing draft is loaded back and the tab stays marked unsaved. Settings can switch this to a per-file Restore / Discard dialog |
 | Sidebar | Explorer file tree (lazy folders, refresh button) and a History list of recently opened files. Drag the divider to resize (180–640 px, double-click resets); the width is persisted. The tree's text size is a setting, 11–20 px |
 | Single instance | Launching a second time hands the path to the running window, adds a tab and focuses it |
@@ -89,7 +90,8 @@ wrolp/
     ├── history.json          recently opened files, newest first, capped at 50
     ├── settings.json         fontSize, minimap, sidebarVisible, sidebarView, sidebarWidth, sidebarFont,
     │                         language, restoreSession, draftRestore, lineEnding,
-    │                         trimTrailingWhitespace, insertFinalNewline, sidebarRoot, encryptIdleMinutes
+    │                         trimTrailingWhitespace, insertFinalNewline, autoSave, autoSaveInterval,
+    │                         sidebarRoot, encryptIdleMinutes
     ├── groups.json           the tab groups: name, tabs and caret positions
     └── window.json           x, y, width, height in physical pixels, plus the maximized flag
 ```

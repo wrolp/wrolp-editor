@@ -442,6 +442,27 @@ export default function SettingsPanel({
                 onChange={(v) => onSaveSettings({ insertFinalNewline: v })}
               />
               <p className="muted">{t("settings.finalNewlineDesc")}</p>
+              <SettingCheck
+                label={t("settings.autoSave")}
+                checked={settings.autoSave}
+                onChange={(v) => onSaveSettings({ autoSave: v })}
+              />
+              <SettingField label={t("settings.autoSaveInterval")}>
+                <input
+                  type="number"
+                  min={1}
+                  max={3600}
+                  step={1}
+                  disabled={!settings.autoSave}
+                  value={settings.autoSaveInterval}
+                  onChange={(e) => {
+                    const sec = Math.trunc(Number(e.target.value));
+                    if (Number.isNaN(sec) || sec < 1) return;
+                    onSaveSettings({ autoSaveInterval: Math.min(sec, 3600) });
+                  }}
+                />
+              </SettingField>
+              <p className="muted">{t("settings.autoSaveDesc")}</p>
               <SettingField label={t("settings.theme")}>
                 <select
                   className="select"

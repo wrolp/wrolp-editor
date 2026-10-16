@@ -135,6 +135,10 @@ export interface Settings {
   trimTrailingWhitespace: boolean;
   /** Add the line break a file is missing when it is saved. Off by default. */
   insertFinalNewline: boolean;
+  /** Write dirty files back on a timer. Off by default, and it never touches an untitled buffer. */
+  autoSave: boolean;
+  /** Seconds between two sweeps of the automatic save; only read while `autoSave` is on. */
+  autoSaveInterval: number;
   /** Allow scrolling past the end so the last line can sit above the bottom edge. */
   scrollBeyondLastLine: boolean;
   /**
