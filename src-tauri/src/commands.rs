@@ -201,6 +201,10 @@ pub struct Settings {
   /// Files bigger than this are left out of versioning, in UTF-8 bytes. A whole copy of a large
   /// file every save is not a history, it is a backup with worse ergonomics.
   pub versioning_max_file_size: u64,
+  /// Whether a write the automatic save made also records a version. Off by default, and it only
+  /// ever matters for a file versioning already covers: the timer runs whether or not anybody is
+  /// at the keyboard, so recording it fills the timeline with half-typed lines.
+  pub auto_save_versions: bool,
 }
 
 /// Used when settings.json is absent or a key is missing, so a first run must not
@@ -242,6 +246,7 @@ impl Default for Settings {
       versioning_enabled: false,
       versioning_show_limit: VERSIONING_DEFAULT_SHOW_LIMIT,
       versioning_max_file_size: VERSIONING_DEFAULT_MAX_FILE_SIZE,
+      auto_save_versions: false,
     }
   }
 }
@@ -417,6 +422,7 @@ impl Settings {
           .versioning_max_file_size
           .min(VERSIONING_MAX_FILE_SIZE_CEILING)
       },
+      auto_save_versions: self.auto_save_versions,
     }
   }
 }
@@ -1665,6 +1671,17 @@ mod tests {
     .filled();
     assert_eq!(filled.versioning_show_limit, 500);
     assert_eq!(filled.versioning_max_file_size, 33_554_432);
+    // The automatic save is a second source of writes over the same setting, and it defaults off
+    // too: turning on versioning must not silently mean every timer sweep adds a row.
+    assert!(!s.auto_save_versions);
+    let filled = Settings {
+      auto_save: true,
+      versioning_enabled: true,
+      auto_save_versions: true,
+      ..Default::default()
+    }
+    .filled();
+    assert!(filled.auto_save_versions);
   }
 
   /// The idle lock is the one setting where 0 is a choice rather than a missing value:

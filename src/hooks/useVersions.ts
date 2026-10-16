@@ -24,10 +24,15 @@ export interface BaselineInput {
  * What the save path needs of versioning, and nothing else: a recorder that cannot fail a save.
  */
 export interface VersionRecorder {
+  /**
+   * @param automatic whether the write came from the timer rather than from a person. The backend
+   * decides what that means; this only reports it, so the switch has one answer in one place.
+   */
   recordSave(
     path: string,
     content: string,
-    baseline: BaselineInput | null
+    baseline: BaselineInput | null,
+    automatic: boolean
   ): Promise<void>;
 }
 
@@ -74,7 +79,12 @@ export function useVersions({ toast }: Options) {
   );
 
   const recordSave = useCallback(
-    async (path: string, content: string, baseline: BaselineInput | null) => {
+    async (
+      path: string,
+      content: string,
+      baseline: BaselineInput | null,
+      automatic: boolean
+    ) => {
       const first: VersionBaseline | null =
         baseline && !versioned.current.has(path)
           ? {
@@ -87,7 +97,7 @@ export function useVersions({ toast }: Options) {
             }
           : null;
       try {
-        const outcome = await api.addVersion(path, content, null, first);
+        const outcome = await api.addVersion(path, content, null, first, automatic);
         if (outcome.status === "created") versioned.current.add(path);
       } catch (e) {
         reportFailure(e, path);
@@ -106,7 +116,7 @@ export function useVersions({ toast }: Options) {
     async (path: string, content: string): Promise<boolean> => {
       try {
         await api.setVersionOverride(path, "on");
-        const outcome = await api.addVersion(path, content, null, null);
+        const outcome = await api.addVersion(path, content, null, null, false);
         if (outcome.status === "skipped") {
           // The file already ends at exactly this text, so there is nothing new to keep. Said out
           // loud rather than letting the menu look like it did nothing.

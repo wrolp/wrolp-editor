@@ -183,6 +183,12 @@ interface Options {
    * version that could not be recorded is worth a notice rather than a lost save.
    */
   versions?: VersionRecorder;
+  /**
+   * Whether a write the automatic save made should be offered to the recorder at all. Off by
+   * default, and only a saving of effort on this side: the backend applies the same switch, so a
+   * stale value here can skip a recording but never invent one.
+   */
+  autoSaveVersions?: boolean;
 }
 
 export function useEditorTabs({
@@ -196,6 +202,7 @@ export function useEditorTabs({
   cleanupPref,
   autoSave,
   versions,
+  autoSaveVersions,
 }: Options) {
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
@@ -233,6 +240,8 @@ export function useEditorTabs({
   // through is, and a save must not be rebuilt along with it.
   const versionsRef = useRef(versions);
   versionsRef.current = versions ?? versionsRef.current;
+  const autoSaveVersionsRef = useRef(autoSaveVersions ?? false);
+  autoSaveVersionsRef.current = autoSaveVersions ?? autoSaveVersionsRef.current;
   /**
    * Set while a reload rewrites a buffer. The change and cursor events that rewrite fires are
    * read by the handlers below against the tab object React has not re-rendered yet, so
@@ -1444,7 +1453,7 @@ export function useEditorTabs({
         // Recorded after the write. A file that has just been named has no earlier state to stand
         // on, so the text that went to disk is its first version rather than a second row.
         if (!tab.encrypted) {
-          await versionsRef.current?.recordSave(saved.path, content, null);
+          await versionsRef.current?.recordSave(saved.path, content, null, false);
         }
         if (!opts?.quiet) toast(t("menu.saved", { name: basename(saved.path) }));
         return true;
@@ -1470,22 +1479,29 @@ export function useEditorTabs({
             : t
         )
       );
-      // A save the timer ran is not a version: nothing was asked for, and a history written by a
-      // clock would fill the timeline with half-typed lines. The recorder is only reached for a
-      // save somebody actually asked for.
+      // Whether this save is worth a version is the backend's call, and it is told who made the
+      // write: `quiet` is the automatic save's mark, and recording those is its own switch, off by
+      // default — a timer that runs while nobody is at the keyboard would otherwise fill the
+      // timeline with half-typed lines. The check here only skips the call for a setting that is
+      // off; the same switch is applied again in `add_version`, so a stale value can skip a
+      // recording but never invent one.
       //
       // An encrypted file is left out of versioning entirely. A version is the text as it was, kept
-      // in the app's data folder, and storing that in the clear beside a document the user took the
-      // trouble to encrypt undoes the encryption — drafts are sealed with the file's own key for
-      // exactly this reason, and a version history has no key at write time to seal itself with.
-      if (!opts?.quiet && !tab.encrypted) {
-        // From the tab as it was before this save: `tab.original` is the text the file held when
-        // it was opened, and `setTabs` above has just replaced it. Getting the baseline after that
-        // would record the new text twice and leave no row for the file as it was found.
-        await versionsRef.current?.recordSave(tab.path, content, {
-          content: tab.original,
-          mtimeMs: tab.mtime,
-        });
+      // in the app's data folder, and storing that in the clear beside a document the user chose to
+      // encrypt undoes the encryption — drafts are sealed with the file's own key for exactly this
+      // reason, and a version history has no key at write time to seal itself with.
+      //
+      // From the tab as it was before this save: `tab.original` is the text the file held when it
+      // was opened, and `setTabs` above has just replaced it. Getting the baseline after that would
+      // record the new text twice and leave no row for the file as it was found.
+      const automatic = !!opts?.quiet;
+      if (!tab.encrypted && (!automatic || autoSaveVersionsRef.current)) {
+        await versionsRef.current?.recordSave(
+          tab.path,
+          content,
+          { content: tab.original, mtimeMs: tab.mtime },
+          automatic
+        );
       }
       // A save writes the file back into existence, so a prompt saying it is gone would be
       // answering a question that stopped being true — and keeping it would then park a

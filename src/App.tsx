@@ -150,6 +150,7 @@ const DEFAULT_SETTINGS: Settings = {
   versioningEnabled: false,
   versioningShowLimit: 30,
   versioningMaxFileSize: 524288,
+  autoSaveVersions: false,
 }
 
 /**
@@ -321,6 +322,7 @@ export default function App() {
     },
     autoSave: { enabled: settings.autoSave, intervalSec: settings.autoSaveInterval },
     versions: versions.recorder,
+    autoSaveVersions: settings.autoSaveVersions,
   });
   const groups = useGroups({ onError: toast });
   // The window goes back where it was before anything else measures it.

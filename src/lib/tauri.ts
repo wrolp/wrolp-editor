@@ -173,6 +173,12 @@ export interface Settings {
   versioningShowLimit: number;
   /** Files bigger than this are left out of versioning, in bytes. 0 is read as the default. */
   versioningMaxFileSize: number;
+  /**
+   * Whether a write made by the automatic save also records a version. Off by default: the timer
+   * runs whether or not anybody is at the keyboard, and recording it fills the timeline with
+   * whatever the interval happened to catch. Only ever applies to a file versioning tracks.
+   */
+  autoSaveVersions: boolean;
 }
 
 /**
@@ -496,14 +502,17 @@ export const api = {
     invoke<VersionState>("set_version_override", { path, mode }),
   /**
    * Record a save. `baseline` is the text the file had before this edit, which only the editor
-   * still holds, and the backend writes it first when the file has no history yet.
+   * still holds, and the backend writes it first when the file has no history yet. `automatic`
+   * says the write came from the timer — the backend decides from the settings whether that counts,
+   * so the caller reports rather than judges.
    */
   addVersion: (
     path: string,
     content: string,
     message: string | null,
     baseline: VersionBaseline | null,
-  ) => invoke<AppendOutcome>("add_version", { path, content, message, baseline }),
+    automatic: boolean
+  ) => invoke<AppendOutcome>("add_version", { path, content, message, baseline, automatic }),
   getVersions: (path: string) => invoke<VersionEntry[]>("get_versions", { path }),
   /** One version's text, read when it is about to be shown or restored. */
   getVersionContent: (path: string, oid: string) =>

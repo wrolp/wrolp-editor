@@ -118,6 +118,18 @@ pub fn tracking_on(override_value: Option<&str>, default: bool) -> bool {
   }
 }
 
+/// Whether a save is to be recorded at all.
+///
+/// A tracked file is the first condition; the second is about who asked. The timer runs whether or
+/// not anybody is at the keyboard, so recording its writes fills the timeline with half-typed
+/// lines — and that is a choice the user makes, not something the recording path assumes either
+/// way. Kept apart from `tracking_on` because the two questions are asked together but by
+/// different switches, and a caller that folds them gets one setting where the interface promises
+/// two.
+pub fn records(automatic: bool, auto_save_versions: bool, tracking: bool) -> bool {
+  tracking && (!automatic || auto_save_versions)
+}
+
 /// Windows folds case for the whole filesystem; elsewhere a name is exactly what it says.
 fn name_eq(a: &str, b: &str) -> bool {
   if cfg!(windows) {
@@ -618,7 +630,7 @@ pub fn set_version_override(
 ///
 /// Tracking is checked here rather than trusted from the caller: the same rule that decides what
 /// the sidebar shows has to decide what gets written, or a stale frontend records a file the user
-/// just switched off.
+/// just switched off. `automatic` says the write came from the timer, which is off by default.
 #[tauri::command]
 pub fn add_version(
   app: AppHandle,
@@ -626,9 +638,11 @@ pub fn add_version(
   content: String,
   message: Option<String>,
   baseline: Option<VersionBaseline>,
+  automatic: bool,
 ) -> Result<AppendOutcome, String> {
   let settings = crate::commands::settings_of(&app);
-  if !state_of(&app, &path)?.tracking {
+  let state = state_of(&app, &path)?;
+  if !records(automatic, settings.auto_save_versions, state.tracking) {
     return Ok(AppendOutcome::Skipped);
   }
   let base = base_dir(&app)?;
@@ -1021,6 +1035,26 @@ mod tests {
     assert!(!tracking_on(None, false));
     // Anything the store does not recognise follows the default rather than guessing.
     assert!(tracking_on(Some(""), true));
+  }
+
+  /// The timer is a second source of writes over the same file, and it is a separate switch:
+  /// recording it by default would fill a timeline with whatever the interval happened to catch.
+  #[test]
+  fn an_untracked_or_unasked_save_records_nothing() {
+    assert!(records(false, false, true), "a hand save of a tracked file");
+    assert!(
+      records(true, true, true),
+      "the timer, when the user allowed it"
+    );
+    assert!(
+      !records(true, false, true),
+      "the timer records nothing by default"
+    );
+    assert!(
+      !records(false, true, false),
+      "neither switch records a file that is not tracked"
+    );
+    assert!(!records(true, true, false), "and neither does the timer");
   }
 
   #[test]

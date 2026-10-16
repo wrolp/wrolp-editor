@@ -573,6 +573,12 @@ export default function SettingsPanel({
                 onChange={(v) => onSaveSettings({ versioningEnabled: v })}
               />
               <p className="muted">{t("ver.defaultEnabledDesc")}</p>
+              <SettingCheck
+                label={t("ver.autoSaveVersions")}
+                checked={settings.autoSaveVersions}
+                onChange={(v) => onSaveSettings({ autoSaveVersions: v })}
+              />
+              <p className="muted">{t("ver.autoSaveVersionsDesc")}</p>
               {/* No `min`/`max` on either field: the browser answers an out-of-range keystroke
                   with its own message in its own language, and this app has already translated
                   everything else. The number is clamped here and always written back, so the
