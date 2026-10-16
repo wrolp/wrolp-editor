@@ -163,8 +163,10 @@ pub struct Settings {
   /// touches a file that already exists: an untitled buffer would have to be asked for a name,
   /// which is not a decision a background task gets to make.
   pub auto_save: bool,
-  /// Seconds between two sweeps of the automatic save, only read while `auto_save` is on. A
-  /// sweep is one stat and one write per dirty file, so the floor is one second.
+  /// Seconds the file on screen must go without an edit before the automatic save writes it. Only
+  /// read while `auto_save` is on. A quiet period rather than a polling interval, and counted for
+  /// the active tab: an edit starts this file's countdown again, so the write lands on the first
+  /// pause instead of in the middle of a sentence.
   pub auto_save_interval: u32,
   /// The line ending for a document that has none of its own: a new file, or one read with no
   /// break in it. A file that came with breaks is written back with those unless its own entry
@@ -257,9 +259,9 @@ const SIDEBAR_MAX_WIDTH: f64 = 640.0;
 /// rather than recognised by shape; the high end is where the tree stops fitting its own column.
 const SIDEBAR_FONT_MIN: f64 = 11.0;
 const SIDEBAR_FONT_MAX: f64 = 20.0;
-/// The automatic save is off by default, so this is only the interval a fresh install starts
-/// with once somebody turns it on: long enough that typing is not interrupted by a write every
-/// other second, short enough that leaving the window for a coffee saves the file anyway.
+/// The automatic save is off by default, so this is only the pause a fresh install starts with once
+/// somebody turns it on: long enough that typing is not interrupted by a write every other second,
+/// short enough that leaving the window for a coffee saves the file anyway.
 const AUTO_SAVE_DEFAULT_SECONDS: u32 = 5;
 const AUTO_SAVE_MAX_SECONDS: u32 = 3600;
 /// Whitespace rendering modes Monaco understands.

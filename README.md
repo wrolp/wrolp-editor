@@ -16,7 +16,7 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | Unsaved changes | Lines that differ from the file on disk are tinted — green where text was added, amber where saved text was replaced — and the marks clear on save. The workbench has this built in; the standalone editor needs the comparison, which is `src/lib/dirtyDiff.ts` |
 | Line endings | Read from the file and written back as they are. One file can be forced to LF or CRLF from that tab's File settings, and a document with no breaks yet — a new file above all — takes what Settings → General names. The status bar shows the ending a save will write. A lone CR is not offered: Monaco's model joins lines with LF or CRLF and nothing else |
 | Drafts | Debounced ~500 ms after each edit; also flushed on tab switch, tab close and window blur |
-| Auto-save | Off by default. On, it writes back the dirty files that already exist on disk every N seconds — silently, and leaving alone an untitled buffer, a locked file, a picture, and anything the disk check already has a question about. Its writes record no version unless Settings → Versions says otherwise |
+| Auto-save | Off by default. On, the file **on screen** is written once it has gone N seconds without an edit — typing restarts that file's countdown, so the write lands on a pause rather than mid-sentence. A tab you are not looking at neither starts a countdown nor loses one already running, and its unsaved text stays held by its draft. Untitled buffers, locked files, pictures, and anything the disk check already has a question about are left alone. Its writes record no version unless Settings → Versions says otherwise |
 | Restore | On open, disk content is compared with the draft; a differing draft is loaded back and the tab stays marked unsaved. Settings can switch this to a per-file Restore / Discard dialog |
 | Sidebar | Explorer file tree (lazy folders, refresh button), a History list of recently opened files, and a Versions view. Drag the divider to resize (180–640 px, double-click resets); the width is persisted. The tree's text size is a setting, 11–20 px |
 | Version history | Off by default. On, every save by hand records what the file said, and any earlier one can be compared against what is open or put back into the editor. One file's saves can be excluded, or forced in, from its tab menu. See [Version history](#version-history) |
@@ -205,8 +205,8 @@ this is not a repository you branch or push, and nothing about it reaches the fo
   an earlier save.
 - **What does not.** The automatic save writes the file and records nothing — unless Settings →
   Versions says otherwise, in which case its writes are recorded like any other. Off by default
-  because a timer catches whatever the interval lands on, half-typed line included, and nobody
-  asked for that moment to be kept. An **encrypted** file is never versioned, unlocked or not: a
+  because a pause in typing is not somebody answering "keep this", and history is never trimmed, so
+  recording every pause fills the list faster with moments nobody chose. An **encrypted** file is never versioned, unlocked or not: a
   version is that text stored in the clear in the app's own folder, beside a document you chose to
   encrypt — drafts are sealed with the file's key to avoid exactly that, and a version has no key at
   write time to seal itself with. A file bigger than the configured limit is saved normally and left

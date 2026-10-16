@@ -172,9 +172,14 @@ interface Options {
    */
   cleanupPref?: { trimTrailingWhitespace: boolean; insertFinalNewline: boolean };
   /**
-   * The automatic save: whether it is on, and how many seconds pass between two sweeps. Off by
-   * default, and it only ever writes a file that already exists — an untitled buffer would have
-   * to be asked for a name, which is not something a timer gets to decide.
+   * The automatic save: whether it is on, and how long the file on screen must go without an edit
+   * before its write happens. Off by default, and it only ever writes a file that already exists —
+   * an untitled buffer would have to be asked for a name, which is not something a timer gets to
+   * decide.
+   *
+   * The number is a quiet period, not a polling interval, and it is counted for the active tab
+   * only: typing restarts that file's countdown, and a tab left in the background neither starts
+   * one nor loses one already running.
    */
   autoSave?: { enabled: boolean; intervalSec: number };
   /**
@@ -1298,6 +1303,9 @@ export function useEditorTabs({
       }
       if (isUntitled(tab.path)) return;
       draft.schedule(tab.path, { content: value, cursor: currentOffset(), original: tab.original });
+      // An edit is what the quiet period counts from: the countdown for this one tab starts over,
+      // so the automatic write follows the pause rather than landing in the middle of typing.
+      if (dirty) autoSaveArm.current(tab.id);
     },
     [currentOffset, draft]
   );
@@ -1516,30 +1524,95 @@ export function useEditorTabs({
   }, [applySaveCleanup, askForTab, draft, editorRef, onFileOpened, toast]);
 
   /**
-   * The automatic save: every interval, write back whatever is dirty and already has a file
-   * behind it. Reached through a ref because `saveTab` is rebuilt whenever an unrelated callback
-   * is, and an interval that restarts on every render would never fire.
+   * The automatic save. Reached through a ref because `saveTab` is rebuilt whenever an unrelated
+   * callback is, and a timer that restarts on every render would never fire.
    */
   const saveTabRef = useRef(saveTab);
   saveTabRef.current = saveTab;
+  const autoSaveRef = useRef(autoSave);
+  autoSaveRef.current = autoSave ?? autoSaveRef.current;
+  /** One pending write per tab, keyed by its id. */
+  const autoSaveTimers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
+
+  /** Why this tab must not be written by the timer, or `false` when it may. */
+  const autoSaveBlocked = useCallback(
+    (tab: Tab): boolean => {
+      // A picture has no buffer, a lock has no key, and an untitled buffer has no file: the first
+      // two cannot be written and the third would have to be asked for a name.
+      if (!isFileTab(tab) || !tab.dirty || tab.isBinary || tab.locked || isUntitled(tab.path))
+        return true;
+      // A file another program has changed, or one that is gone from the disk, already has a
+      // question in front of the user. Answering it by writing is their call, not a timer's — and
+      // raising that question from the background would put a dialog over a file nobody is touching.
+      if (staleRef.current.some((ask) => ask.tabId === tab.id)) return true;
+      return goneRef.current.some((ask) => ask.tabId === tab.id);
+    },
+    []
+  );
+
+  /**
+   * Restart one tab's quiet countdown, and write it when that countdown is allowed to finish.
+   *
+   * In a ref like `saveTabRef`: the keystroke handler and the retry below both need the current
+   * closure, and neither of them can afford to become a dependency of the other.
+   */
+  const autoSaveArm = useRef<(id: number) => void>(() => {});
+  autoSaveArm.current = (id: number) => {
+    const setting = autoSaveRef.current;
+    if (!setting?.enabled) return;
+    const prior = autoSaveTimers.current.get(id);
+    if (prior) window.clearTimeout(prior);
+    const timer = window.setTimeout(() => {
+      autoSaveTimers.current.delete(id);
+      const tab = tabsRef.current.find((t) => t.id === id);
+      if (!tab || autoSaveBlocked(tab)) return;
+      void saveTabRef.current(id, { quiet: true }).then((saved) => {
+        if (saved) return;
+        // A write that did not happen leaves the tab dirty, so try again after another pause —
+        // while it is still the tab being edited, and unless the reason it failed is a question the
+        // user has to answer, which retrying cannot solve and would only bring back every few
+        // seconds. A tab that has since lost focus waits for it to be selected again: the countdown
+        // belongs to the file in front of somebody, not to everything with pending edits.
+        const after = tabsRef.current.find((t) => t.id === id);
+        if (after?.dirty && activeRef.current === id && !autoSaveBlocked(after))
+          autoSaveArm.current(id);
+      });
+    }, Math.max(1, setting.intervalSec) * 1000);
+    autoSaveTimers.current.set(id, timer);
+  };
+
+  /**
+   * Start the automatic save for the tab on screen.
+   *
+   * Only that tab: a countdown is a promise about the file somebody is editing, and a background
+   * tab's unsaved text is already held by its draft, which survives a quit. The one exception is
+   * that a countdown already running is left to finish when its tab loses focus — the write it
+   * promised is for text that stopped changing N seconds ago, and dropping it on the floor because
+   * the user moved on would mean the pause they made did not save anything after all. No new round
+   * starts for a tab that is not in front.
+   *
+   * Watching the tab list and the selection rather than only keystrokes is what arms a tab made
+   * dirty by something else — a draft restored at startup, a version put back — as soon as it is
+   * looked at.
+   */
   useEffect(() => {
-    if (!autoSave?.enabled) return;
-    const everyMs = Math.max(1, autoSave.intervalSec) * 1000;
-    const timer = window.setInterval(() => {
-      for (const tab of tabsRef.current) {
-        // A picture has no buffer, a lock has no key, and an untitled buffer has no file: the
-        // first two cannot be written and the third would have to be asked for a name.
-        if (!isFileTab(tab) || !tab.dirty || tab.isBinary || tab.locked || isUntitled(tab.path))
-          continue;
-        // A file another program has changed, or one that is gone from the disk, already has a
-        // question in front of the user. Answering it by writing is their call, not a timer's.
-        if (staleRef.current.some((ask) => ask.tabId === tab.id)) continue;
-        if (goneRef.current.some((ask) => ask.tabId === tab.id)) continue;
-        void saveTabRef.current(tab.id, { quiet: true });
+    if (!autoSave?.enabled) {
+      autoSaveTimers.current.forEach((timer) => window.clearTimeout(timer));
+      autoSaveTimers.current.clear();
+      return;
+    }
+    for (const tab of tabs) {
+      const pending = autoSaveTimers.current.get(tab.id);
+      if (autoSaveBlocked(tab)) {
+        if (pending) {
+          window.clearTimeout(pending);
+          autoSaveTimers.current.delete(tab.id);
+        }
+        continue;
       }
-    }, everyMs);
-    return () => window.clearInterval(timer);
-  }, [autoSave?.enabled, autoSave?.intervalSec]);
+      if (!pending && tab.id === activeId) autoSaveArm.current(tab.id);
+    }
+  }, [activeId, autoSave?.enabled, autoSave?.intervalSec, autoSaveBlocked, gone, stale, tabs]);
 
   const saveActive = useCallback(
     () => (activeRef.current === null ? Promise.resolve(false) : saveTab(activeRef.current)),

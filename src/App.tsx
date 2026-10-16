@@ -130,8 +130,8 @@ const DEFAULT_SETTINGS: Settings = {
   // two trailing spaces are the line break. The file comes back byte for byte until asked.
   trimTrailingWhitespace: false,
   insertFinalNewline: false,
-  // Auto-save is a behaviour change with a file as its side effect, so it starts off. Five
-  // seconds is the interval a fresh install gets once it is turned on.
+  // Auto-save is a behaviour change with a file as its side effect, so it starts off. Once it is
+  // turned on, five seconds is how long a file has to go without an edit before it is written.
   autoSave: false,
   autoSaveInterval: 5,
   scrollBeyondLastLine: true,
