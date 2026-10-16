@@ -228,7 +228,7 @@ impl UnlockStore {
   }
 
   fn account(path: &str) -> Result<String, String> {
-    let digest = draft::draft_key(path);
+    let digest = draft::path_key(path);
     if digest.is_empty() {
       return Err("path_unresolvable".into());
     }

@@ -191,6 +191,16 @@ pub struct Settings {
   /// automatically, which is a deliberate choice rather than a missing value, so it is
   /// kept as written.
   pub encrypt_idle_minutes: u32,
+  /// Record a version of a file each time it is saved by hand. Off by default: versioning writes
+  /// to the disk every save and never cleans up on its own, and an editor that fills a drive
+  /// without being asked has spent the trust that made it worth opening.
+  pub versioning_enabled: bool,
+  /// How many versions of one file the list reads. Not a retention limit — history is not trimmed
+  /// from the middle, so this only bounds how far the timeline is walked and what crosses IPC.
+  pub versioning_show_limit: u32,
+  /// Files bigger than this are left out of versioning, in UTF-8 bytes. A whole copy of a large
+  /// file every save is not a history, it is a backup with worse ergonomics.
+  pub versioning_max_file_size: u64,
 }
 
 /// Used when settings.json is absent or a key is missing, so a first run must not
@@ -229,6 +239,9 @@ impl Default for Settings {
       preview_width: "narrow".into(),
       theme: "system".into(),
       encrypt_idle_minutes: ENCRYPT_IDLE_DEFAULT_MINUTES,
+      versioning_enabled: false,
+      versioning_show_limit: VERSIONING_DEFAULT_SHOW_LIMIT,
+      versioning_max_file_size: VERSIONING_DEFAULT_MAX_FILE_SIZE,
     }
   }
 }
@@ -259,6 +272,16 @@ const PREVIEW_WIDTH: [&str; 3] = ["narrow", "wide", "full"];
 /// A key left in memory for a day is not an idle lock any more, so the setting stops there.
 const ENCRYPT_IDLE_DEFAULT_MINUTES: u32 = 10;
 const ENCRYPT_IDLE_MAX_MINUTES: u32 = 1440;
+/// How many versions of one file a list reads. Nothing is deleted when the count is passed — git
+/// history is not trimmed from the middle — so this is the depth of a walk and of one IPC payload.
+const VERSIONING_DEFAULT_SHOW_LIMIT: u32 = 30;
+const VERSIONING_MAX_SHOW_LIMIT: u32 = 500;
+/// Half a megabyte of text is a long document, and a version store that takes a whole copy of
+/// every save of something bigger stops being a history and becomes a backup.
+const VERSIONING_DEFAULT_MAX_FILE_SIZE: u64 = 524_288;
+/// The ceiling on that setting. A value above it is either a typo or an intent to version binary
+/// files, and neither is what a text editor's history is for.
+const VERSIONING_MAX_FILE_SIZE_CEILING: u64 = 33_554_432;
 
 impl Settings {
   pub(crate) fn filled(self) -> Self {
@@ -378,6 +401,22 @@ impl Settings {
       // 0 is "never lock" and must survive as written; only the upper end is clamped, since
       // a huge value there is a typo rather than an intention.
       encrypt_idle_minutes: self.encrypt_idle_minutes.min(ENCRYPT_IDLE_MAX_MINUTES),
+      versioning_enabled: self.versioning_enabled,
+      // 0 would ask for a list that is always empty, which is a mis-click rather than a wish to
+      // see no history.
+      versioning_show_limit: if self.versioning_show_limit == 0 {
+        VERSIONING_DEFAULT_SHOW_LIMIT
+      } else {
+        self.versioning_show_limit.min(VERSIONING_MAX_SHOW_LIMIT)
+      },
+      // Same: 0 would refuse every file, so the default is the reading of a stray zero.
+      versioning_max_file_size: if self.versioning_max_file_size == 0 {
+        VERSIONING_DEFAULT_MAX_FILE_SIZE
+      } else {
+        self
+          .versioning_max_file_size
+          .min(VERSIONING_MAX_FILE_SIZE_CEILING)
+      },
     }
   }
 }
@@ -1288,7 +1327,7 @@ pub fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, Str
   Ok(settings)
 }
 
-/// The two folders the user's own work lives in, one line each in Settings → About.
+/// The folders the user's own work lives in, one line each in Settings → About.
 ///
 /// Asked for rather than assembled in the frontend: `wrolp_dir` is what decides where these
 /// are, and a layout spelled out twice is a layout that can be wrong twice.
@@ -1299,13 +1338,23 @@ pub struct StoreDirs {
   pub state: String,
   /// The unsaved text of every file that has any.
   pub drafts: String,
+  /// The version history, which only exists once something has been recorded.
+  pub versions: String,
+  /// Whether that last folder is there to open. Created on the first recorded save rather than on
+  /// startup, so a build with versioning off leaves no trace — and a button that opens a folder
+  /// which does not exist is a dead button.
+  pub versions_present: bool,
 }
 
 #[tauri::command]
 pub fn get_store_dirs(app: AppHandle) -> Result<StoreDirs, String> {
+  let versions = crate::versioning::base_dir(&app)?;
+  let versions_present = versions.exists();
   Ok(StoreDirs {
     state: draft::store_dir(&app)?.to_string_lossy().into_owned(),
     drafts: draft::drafts_dir(&app)?.to_string_lossy().into_owned(),
+    versions: versions.to_string_lossy().into_owned(),
+    versions_present,
   })
 }
 
@@ -1585,6 +1634,37 @@ mod tests {
     assert_eq!(s.sidebar_view, "explorer");
     assert_eq!(s.font_size, 14.0);
     assert_eq!(s.sidebar_width, 240.0);
+  }
+
+  /// Versioning writes on every hand save and does not clean up afterwards, so a first run must
+  /// not have it on — and the two numbers that bound what it costs have to be the ones the README
+  /// tells people.
+  #[test]
+  fn versioning_starts_off_and_its_two_numbers_are_bounded() {
+    let s = Settings::default();
+    assert!(!s.versioning_enabled);
+    assert_eq!(s.versioning_show_limit, 30);
+    assert_eq!(s.versioning_max_file_size, 524_288);
+    // A zero in either would ask for a list that is always empty or a store that refuses every
+    // file, so a zero is read as a mis-click rather than as an intention.
+    let filled = Settings {
+      versioning_enabled: true,
+      versioning_show_limit: 0,
+      versioning_max_file_size: 0,
+      ..Default::default()
+    }
+    .filled();
+    assert!(filled.versioning_enabled);
+    assert_eq!(filled.versioning_show_limit, 30);
+    assert_eq!(filled.versioning_max_file_size, 524_288);
+    let filled = Settings {
+      versioning_show_limit: 9_999,
+      versioning_max_file_size: 9_999_999_999,
+      ..Default::default()
+    }
+    .filled();
+    assert_eq!(filled.versioning_show_limit, 500);
+    assert_eq!(filled.versioning_max_file_size, 33_554_432);
   }
 
   /// The idle lock is the one setting where 0 is a choice rather than a missing value:

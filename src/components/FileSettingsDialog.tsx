@@ -187,6 +187,22 @@ export default function FileSettingsDialog({
                 options={LINE_ENDINGS.map((v) => [v, t(`settings.lineEnding.${v}`)])}
                 onChange={(v) => set({ lineEnding: v })}
               />
+              {/* Here the global value is the honest fallback, unlike the line ending above: this
+                  setting says whether this file's saves are recorded, and following it means doing
+                  whatever Settings says. */}
+              <FollowSelect
+                label={t("ver.defaultEnabled")}
+                value={overrides.versioning}
+                inherited={view.defaults.versioning}
+                followText={t("ver.followDefault", {
+                  mode: view.defaults.versioning === "on" ? t("ver.on") : t("ver.off"),
+                })}
+                options={[
+                  ["on", t("ver.on")],
+                  ["off", t("ver.off")],
+                ]}
+                onChange={(v) => set({ versioning: v })}
+              />
             </div>
             <p className="muted">{t("fileSettings.scopeNote")}</p>
             <div className="modal-actions">

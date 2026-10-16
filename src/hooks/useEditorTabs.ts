@@ -31,6 +31,7 @@ import {
   type Tab,
 } from "../lib/types";
 import type { DraftWriter } from "./useDraft";
+import type { VersionRecorder } from "./useVersions";
 
 interface RestoreResult {
   restored: number;
@@ -176,6 +177,12 @@ interface Options {
    * to be asked for a name, which is not something a timer gets to decide.
    */
   autoSave?: { enabled: boolean; intervalSec: number };
+  /**
+   * Recording a version of what was just saved. Read through a ref like the preferences above,
+   * and never allowed to fail a save: by the time this runs the file is already written, and a
+   * version that could not be recorded is worth a notice rather than a lost save.
+   */
+  versions?: VersionRecorder;
 }
 
 export function useEditorTabs({
@@ -188,6 +195,7 @@ export function useEditorTabs({
   lineEndingPref,
   cleanupPref,
   autoSave,
+  versions,
 }: Options) {
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
@@ -221,6 +229,10 @@ export function useEditorTabs({
     cleanupPref ?? { trimTrailingWhitespace: false, insertFinalNewline: false }
   );
   cleanupRef.current = cleanupPref ?? cleanupRef.current;
+  // In a ref like the preferences above: the recorder is rebuilt whenever the toast it reports
+  // through is, and a save must not be rebuilt along with it.
+  const versionsRef = useRef(versions);
+  versionsRef.current = versions ?? versionsRef.current;
   /**
    * Set while a reload rewrites a buffer. The change and cursor events that rewrite fires are
    * read by the handlers below against the tab object React has not re-rendered yet, so
@@ -469,6 +481,42 @@ export function useEditorTabs({
   );
 
   /**
+   * Put one version's text into the editor, without writing it to disk.
+   *
+   * Shaped like a draft restore for a reason: the buffer changes, the tab is marked unsaved, and
+   * the draft is written straight away so a crash now does not lose what was just recovered. A
+   * user who does not like what came back closes without saving or undoes the change — which is
+   * the whole point of asking before writing. Restoring records no version either: the row it came
+   * from already is one, and a version per restore would make the timeline a record of looking at
+   * history rather than of saving.
+   */
+  const restoreVersion = useCallback(
+    async (path: string, content: string): Promise<boolean> => {
+      const key = pathKey(path);
+      const tab = tabsRef.current.find((t) => isFileTab(t) && pathKey(t.path) === key);
+      if (!tab) return false;
+      const waited = await waitForModel(tab.path);
+      if (!waited) return false;
+      const { h, model } = waited;
+      model.setValue(content);
+      setTabs((prev) => prev.map((t) => (t.id === tab.id ? { ...t, dirty: true } : t)));
+      const position = activeRef.current === tab.id ? h.editor.getPosition() : null;
+      const cursor = position ? model.getOffsetAt(position) : 0;
+      try {
+        await api.saveDraft(tab.path, content, cursor);
+      } catch (e) {
+        toast(errorMessage(e));
+      }
+      // As after a draft: replacing the whole buffer re-detects the line endings from the text
+      // that arrived, and this file's own choice has to go back over it.
+      void applyLineEnding(tab.path, tab.original, tab.fileSettings);
+      toast(t("ver.restored"));
+      return true;
+    },
+    [applyLineEnding, toast, waitForModel]
+  );
+
+  /**
    * The half of an open that only makes sense once the text is in hand: comparing the draft
    * against it, reading this file's own view overrides, and letting a document show its own
    * pictures.
@@ -674,6 +722,23 @@ export function useEditorTabs({
       return h.monaco.editor.getModel(h.monaco.Uri.parse(modelUri(tab.path)))?.getValue();
     },
     [editorRef]
+  );
+
+  /**
+   * The text a tab holds right now, for a caller that has its id rather than the editor.
+   *
+   * The same three rungs the comparison uses: the live model, the text a restored tab was seeded
+   * with, and the content it was opened with. Skipping a rung would hand back nothing for a tab
+   * whose model has not been mounted yet, and recording that as a version would say the file went
+   * blank.
+   */
+  const tabText = useCallback(
+    (id: number): string | null => {
+      const tab = tabsRef.current.find((t) => t.id === id);
+      if (!tab || !isFileTab(tab)) return null;
+      return liveContent(tab) ?? tab.initialValue ?? tab.original;
+    },
+    [liveContent]
   );
 
   /**
@@ -1376,6 +1441,11 @@ export function useEditorTabs({
         );
         setTimeout(() => oldModel?.dispose(), 0);
         onFileOpened?.(dirname(saved.path));
+        // Recorded after the write. A file that has just been named has no earlier state to stand
+        // on, so the text that went to disk is its first version rather than a second row.
+        if (!tab.encrypted) {
+          await versionsRef.current?.recordSave(saved.path, content, null);
+        }
         if (!opts?.quiet) toast(t("menu.saved", { name: basename(saved.path) }));
         return true;
       }
@@ -1400,6 +1470,23 @@ export function useEditorTabs({
             : t
         )
       );
+      // A save the timer ran is not a version: nothing was asked for, and a history written by a
+      // clock would fill the timeline with half-typed lines. The recorder is only reached for a
+      // save somebody actually asked for.
+      //
+      // An encrypted file is left out of versioning entirely. A version is the text as it was, kept
+      // in the app's data folder, and storing that in the clear beside a document the user took the
+      // trouble to encrypt undoes the encryption — drafts are sealed with the file's own key for
+      // exactly this reason, and a version history has no key at write time to seal itself with.
+      if (!opts?.quiet && !tab.encrypted) {
+        // From the tab as it was before this save: `tab.original` is the text the file held when
+        // it was opened, and `setTabs` above has just replaced it. Getting the baseline after that
+        // would record the new text twice and leave no row for the file as it was found.
+        await versionsRef.current?.recordSave(tab.path, content, {
+          content: tab.original,
+          mtimeMs: tab.mtime,
+        });
+      }
       // A save writes the file back into existence, so a prompt saying it is gone would be
       // answering a question that stopped being true — and keeping it would then park a
       // second copy of text that already has a home.
@@ -2208,6 +2295,8 @@ export function useEditorTabs({
     answerStale,
     openPath,
     openCompare,
+    /** The text a tab holds now, for a caller that only has its id. */
+    tabText,
     swapCompare,
     openUntitled,
     openSettings,
@@ -2223,6 +2312,8 @@ export function useEditorTabs({
     onCursorChange,
     setFileSettings,
     resolveRestore,
+    /** Put a version's text into the editor, unsaved. */
+    restoreVersion,
     resolveAllRestores,
     snapshotTabs,
     restoreTabs,

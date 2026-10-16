@@ -8,6 +8,7 @@ mod file_settings;
 mod group;
 mod rename;
 mod unlock;
+mod versioning;
 mod window;
 
 use tauri::Manager;
@@ -69,6 +70,13 @@ pub fn run() {
       commands::get_settings,
       commands::save_settings,
       commands::get_store_dirs,
+      versioning::versioning_state,
+      versioning::set_version_override,
+      versioning::add_version,
+      versioning::get_versions,
+      versioning::get_version_content,
+      versioning::list_versions,
+      versioning::clear_versions,
       commands::get_groups,
       commands::save_groups,
       commands::transfer_tabs,

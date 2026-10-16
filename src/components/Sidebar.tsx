@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { formatWhen, t } from "../lib/i18n";
 import {
   IconChevron,
   IconCompare,
@@ -13,13 +14,14 @@ import {
   IconPaste,
   IconPencil,
   IconReload,
+  IconRestore,
   IconTarget,
   IconTrash,
   IconTreeChevron,
+  IconVersions,
 } from "./icons";
 import FileIcon from "./FileIcon";
 import DeleteEntryDialog from "./DeleteEntryDialog";
-import { t } from "../lib/i18n";
 import {
   api,
   copyText,
@@ -28,9 +30,11 @@ import {
   type FolderHistoryEntry,
   type FsEntry,
   type HistoryEntry,
+  type VersionEntry,
+  type VersionSummary,
 } from "../lib/tauri";
-import { isUnder } from "../lib/path";
-import { pathKey } from "../lib/types";
+import { basename, isUnder, isUntitled } from "../lib/path";
+import { pathKey, type SidebarView } from "../lib/types";
 
 /** A tree node an action is aimed at. `name` keeps the folder's trailing separator. */
 interface NodeTarget {
@@ -549,14 +553,18 @@ interface Props extends Omit<
    * The panel's chrome — tabs, buttons, tooltips — keeps its own sizes.
    */
   fontSize: number;
-  view: "explorer" | "history";
+  view: SidebarView;
   rootDir: string | null;
   history: HistoryEntry[];
+  /** Every file the store holds versions of, newest activity first. */
+  versionList: VersionSummary[];
+  /** The active file's timeline, newest first. Empty when it has no versions. */
+  activeVersions: VersionEntry[];
   /** Expand folders when a directory is opened; off means every folder starts folded. */
   expandFolders: boolean;
   /** How many levels to expand when `expandFolders` is on. */
   expandDepth: number;
-  onSetView: (view: "explorer" | "history") => void;
+  onSetView: (view: SidebarView) => void;
   onPickFolder: () => void;
   onRemoveHistory: (path: string) => void;
   /** Folders this group's Explorer has been pointed at, newest first. */
@@ -567,6 +575,10 @@ interface Props extends Omit<
   onReveal: (path: string) => void;
   /** Points the Explorer at a folder, the same action as the tab menu's. */
   onSetRoot: (dir: string) => void;
+  /** Open one version beside what the editor holds now. */
+  onCompareVersion: (path: string, oid: string) => void;
+  /** Put a version's text into the editor, marked unsaved. */
+  onRestoreVersion: (path: string, oid: string) => void;
   /**
    * Creates a file, a folder or an encrypted file in `dir`; resolves false when the name was
    * refused, which leaves the input open with the text picked out. An encrypted one also
@@ -594,6 +606,8 @@ export default function Sidebar(props: Props) {
     view,
     rootDir,
     history,
+    versionList,
+    activeVersions,
     activePath,
     onOpenPath,
     onCompare,
@@ -605,7 +619,18 @@ export default function Sidebar(props: Props) {
     onRemoveFolder,
     onReveal,
     onSetRoot,
+    onCompareVersion,
+    onRestoreVersion,
   } = props;
+  /**
+   * The files with history that are not the one on screen. Compared by `pathKey` rather than by
+   * string, because the store spells paths the way the filesystem does and a tab may have been
+   * opened with a different case or separator.
+   */
+  const others = useMemo(() => {
+    const active = activePath ? pathKey(activePath) : "";
+    return versionList.filter((item) => pathKey(item.path) !== active);
+  }, [activePath, versionList]);
   const [entries, setEntries] = useState<FsEntry[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [menu, setMenu] = useState<MenuTarget | null>(null);
@@ -857,6 +882,12 @@ export default function Sidebar(props: Props) {
         >
           {t("side.history")}
         </button>
+        <button
+          className={`side-tab${view === "versions" ? " active" : ""}`}
+          onClick={() => onSetView("versions")}
+        >
+          {t("side.versions")}
+        </button>
       </div>
 
       <div
@@ -1066,6 +1097,64 @@ export default function Sidebar(props: Props) {
               </button>
             </div>
           ))
+        )}
+      </div>
+
+      {/* Versions: the active file's timeline opened, everything else folded to one line. The
+          list of other files comes from the store's own folders, so it costs no history walk to
+          show — which is why it says when a file was last recorded rather than how many times. */}
+      <div className={`side-view${view === "versions" ? " active" : ""}`}>
+        {activePath && !isUntitled(activePath) ? (
+          <div className="ver-current">
+            <div className="ver-head" title={activePath}>
+              <IconVersions size={13} />
+              <span className="ver-head-name">{basename(activePath)}</span>
+            </div>
+            {activeVersions.length === 0 ? (
+              <div className="empty">{t("ver.noneForThis")}</div>
+            ) : (
+              activeVersions.map((v) => (
+                <div key={v.oid} className="ver-item" title={v.ts}>
+                  <span className="vi-when">{formatWhen(v.ts)}</span>
+                  {v.message && <span className="vi-note">{v.message}</span>}
+                  <span className="vi-actions">
+                    <button
+                      className="vi-btn"
+                      title={t("ver.compare")}
+                      onClick={() => onCompareVersion(activePath, v.oid)}
+                    >
+                      <IconCompare size={13} />
+                    </button>
+                    <button
+                      className="vi-btn"
+                      title={t("ver.restore")}
+                      onClick={() => onRestoreVersion(activePath, v.oid)}
+                    >
+                      <IconRestore size={13} />
+                    </button>
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+        ) : (
+          <div className="empty">{t("ver.noFile")}</div>
+        )}
+        {others.length > 0 && (
+          <>
+            <div className="ver-section">{t("ver.otherFiles")}</div>
+            {others.map((item) => (
+              <div
+                key={item.path}
+                className="hist-item"
+                title={item.path}
+                onClick={() => onOpenPath(item.path)}
+              >
+                <span className="hi-name">{item.name}</span>
+                <span className="hi-path">{formatWhen(item.latestTs)}</span>
+              </div>
+            ))}
+          </>
         )}
       </div>
 

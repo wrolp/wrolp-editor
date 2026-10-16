@@ -49,8 +49,10 @@ export default function DiffView({
    */
   const base = useMemo(
     () =>
-      `inmemory://compare/${encodeURIComponent(sideKey(pair.left.kind, pair.left.path))}~${encodeURIComponent(sideKey(pair.right.kind, pair.right.path))}`,
-    [pair.left.kind, pair.left.path, pair.right.kind, pair.right.path]
+      `inmemory://compare/${encodeURIComponent(
+        sideKey(pair.left.kind, pair.left.path, pair.left.oid)
+      )}~${encodeURIComponent(sideKey(pair.right.kind, pair.right.path, pair.right.oid))}`,
+    [pair.left.kind, pair.left.path, pair.left.oid, pair.right.kind, pair.right.path, pair.right.oid]
   );
 
   /**

@@ -11,6 +11,7 @@ use crate::draft;
 use crate::file_settings;
 use crate::group::GroupStore;
 use crate::unlock::{self, UnlockStore};
+use crate::versioning;
 use serde::Serialize;
 use std::path::Path;
 use tauri::{AppHandle, Manager};
@@ -154,6 +155,9 @@ pub fn rename_path(app: AppHandle, path: String, name: String) -> Result<Renamed
 fn rekey_state(app: &AppHandle, old: &str, new: &str) -> Result<(), String> {
   draft::rekey_prefix(app, old, new)?;
   file_settings::rekey_prefix(app, old, new)?;
+  // Each version history stands for one path, recorded in the repository's own metadata, so a
+  // rename walks the store instead of reading a single commit.
+  versioning::rekey_prefix(&versioning::base_dir(app)?, old, new)?;
   rekey_groups(app, old, new)?;
   rekey_history(app, old, new)?;
   rekey_unlock(app, old, new);

@@ -69,6 +69,23 @@ export function IconCompare({ size = 14 }: IconProps) {
   );
 }
 
+/**
+ * A file's versions: the points one save left behind on a rail, newest at the top. Deliberately
+ * not a clock — that shape already means "recently opened" in the sidebar next to it.
+ */
+export function IconVersions({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <line x1="6" y1="5" x2="6" y2="20" />
+      <circle cx="6" cy="6" r="1.9" />
+      <circle cx="6" cy="13" r="1.9" />
+      <line x1="10" y1="6" x2="19" y2="6" />
+      <line x1="10" y1="13" x2="17" y2="13" />
+      <line x1="10" y1="19.5" x2="19" y2="19.5" />
+    </svg>
+  );
+}
+
 /** Window controls, drawn at 16px inside a 46×40 button: anything smaller reads as a
     smudge next to the 13px labels elsewhere in the bar. The stroke is deliberately heavy
     — at this size a hairline reads as a rendering glitch rather than a shape. */

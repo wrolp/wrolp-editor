@@ -22,6 +22,7 @@ import ReloadConfirmDialog from "./components/ReloadConfirmDialog";
 import DeletedFileDialog from "./components/DeletedFileDialog";
 import StaleChangeDialog from "./components/StaleChangeDialog";
 import ConflictCompareModal from "./components/ConflictCompareModal";
+import VersionDiffModal from "./components/VersionDiffModal";
 import PasswordDialog from "./components/PasswordDialog";
 import {
   IconClose,
@@ -37,12 +38,14 @@ import {
   IconReload,
   IconSettings,
   IconSidebar,
+  IconVersions,
 } from "./components/icons";
 import { useDraft } from "./hooks/useDraft";
 import { useEditorTabs } from "./hooks/useEditorTabs";
 import { useGroups } from "./hooks/useGroups";
+import { useVersions } from "./hooks/useVersions";
 import { useWindowFrame } from "./hooks/useWindowFrame";
-import { setLang, t } from "./lib/i18n";
+import { formatWhen, setLang, t } from "./lib/i18n";
 import {
   basename,
   dirname,
@@ -63,10 +66,12 @@ import {
   lineEndingFor,
   pathKey,
   sideKey,
+  type ComparePair,
   type CompareRef,
   type DiffStats,
   type EditStats,
   type EditorHandle,
+  type SidebarView,
   type Tab,
 } from "./lib/types";
 import {
@@ -82,6 +87,9 @@ import {
   type HistoryEntry,
   type MenuTarget,
   type Settings,
+  type VersionEntry,
+  type VersionState,
+  type VersionSummary,
 } from "./lib/tauri";
 
 const DEFAULT_SETTINGS: Settings = {
@@ -137,6 +145,11 @@ const DEFAULT_SETTINGS: Settings = {
   // enough to read and edit without being asked again, short enough that walking away from
   // the machine does not leave the key sitting in memory indefinitely.
   encryptIdleMinutes: 10,
+  // Recording a version writes on every save and is never cleaned up on its own, so this starts
+  // off. The per-file switch and "创建版本" are available either way.
+  versioningEnabled: false,
+  versioningShowLimit: 30,
+  versioningMaxFileSize: 524288,
 }
 
 /**
@@ -243,7 +256,7 @@ export default function App() {
   }, [theme]);
   const [sidebarVisible, setSidebarVisible] = useState(true);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SETTINGS.sidebarWidth);
-  const [sidebarView, setSidebarView] = useState<"explorer" | "history">("explorer");
+  const [sidebarView, setSidebarView] = useState<SidebarView>("explorer");
   const [rootDir, setRootDir] = useState<string | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   /** Folders the Explorer has been pointed at, newest first. */
@@ -293,6 +306,7 @@ export default function App() {
   const fileOpened = useRef<(dir: string) => void>(() => {});
   const onFileOpened = useCallback((dir: string) => fileOpened.current(dir), []);
 
+  const versions = useVersions({ toast });
   const tabs = useEditorTabs({
     toast,
     draft,
@@ -306,6 +320,7 @@ export default function App() {
       insertFinalNewline: settings.insertFinalNewline,
     },
     autoSave: { enabled: settings.autoSave, intervalSec: settings.autoSaveInterval },
+    versions: versions.recorder,
   });
   const groups = useGroups({ onError: toast });
   // The window goes back where it was before anything else measures it.
@@ -316,6 +331,20 @@ export default function App() {
   const refreshHistory = useCallback(() => {
     api.getHistory().then(setHistory).catch((e) => toast(errorMessage(e)));
   }, [toast]);
+
+  /** Every file the store holds history for, re-read whenever a version is recorded or dropped. */
+  const [versionList, setVersionList] = useState<VersionSummary[]>([]);
+  const refreshVersions = useCallback(() => {
+    versions
+      .listAll()
+      .then(setVersionList)
+      // Empty rather than an error: this list is a convenience, and a sidebar that shouts about a
+      // store it could not read is worse than one that waits for the next save.
+      .catch(() => setVersionList([]));
+  }, [versions.listAll]);
+
+  /** What the version rules say about the tab the menu is on, read while the menu is open. */
+  const [menuVersions, setMenuVersions] = useState<VersionState | null>(null);
 
   /**
    * Which group the folder menu belongs to, or `""` while no group is on screen.
@@ -380,7 +409,13 @@ export default function App() {
       setLang(loadedSettings.language);
       setSettings(loadedSettings);
       setSidebarVisible(loadedSettings.sidebarVisible);
-      setSidebarView(loadedSettings.sidebarView === "history" ? "history" : "explorer");
+      setSidebarView(
+        loadedSettings.sidebarView === "history"
+          ? "history"
+          : loadedSettings.sidebarView === "versions"
+            ? "versions"
+            : "explorer"
+      );
       setSidebarWidth(loadedSettings.sidebarWidth);
       // The Explorer folder is global view state; a group only remembers tabs.
       setRootDir(loadedSettings.sidebarRoot || null);
@@ -1132,7 +1167,7 @@ export default function App() {
   );
 
   const changeView = useCallback(
-    (view: "explorer" | "history") => {
+    (view: SidebarView) => {
       setSidebarView(view);
       setSidebarVisible(true);
       saveSettings({ sidebarView: view });
@@ -1278,6 +1313,142 @@ export default function App() {
   const lockedTab = tabs.fileTab && isLockedBlank(tabs.fileTab) ? tabs.fileTab : null;
   /** Only a real file tab has a path for the path actions (reveal, copy, per-file settings). */
   const menuTabIsFile = !!menuTab && isFileTab(menuTab);
+  /**
+   * The rules the two versioning menu items have to describe, read when the menu opens. Asked
+   * rather than remembered because the answer depends on two stores the user may have just
+   * changed from Settings.
+   */
+  useEffect(() => {
+    const path =
+      tabMenu && menuTabIsFile && menuTabPath && !isUntitled(menuTabPath) ? menuTabPath : "";
+    if (!path) {
+      setMenuVersions(null);
+      return;
+    }
+    let alive = true;
+    versions
+      .stateOf(path)
+      .then((state) => {
+        if (alive) setMenuVersions(state);
+      })
+      .catch(() => {
+        if (alive) setMenuVersions(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [menuTabIsFile, menuTabPath, tabMenu, versions.stateOf]);
+
+  /**
+   * The active file's timeline. Re-read when it becomes the file on screen, when it is saved
+   * again — `original` only changes once text has gone to disk — and when the view is opened.
+   */
+  const [activeVersions, setActiveVersions] = useState<VersionEntry[]>([]);
+  const activeVersionPath =
+    editorTab && isFileTab(editorTab) && !isUntitled(editorTab.path) ? editorTab.path : null;
+  /** A number that moves on every successful save, which is when the store has new rows. */
+  const savedRev = editorTab?.original;
+  useEffect(() => {
+    if (!activeVersionPath) {
+      setActiveVersions([]);
+      return;
+    }
+    let alive = true;
+    versions
+      .versionsOf(activeVersionPath)
+      .then((list) => {
+        if (alive) setActiveVersions(list);
+      })
+      .catch(() => {
+        if (alive) setActiveVersions([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [activeVersionPath, savedRev, sidebarView, versions.versionsOf]);
+
+  useEffect(() => {
+    // Opening the view and finishing a save are the two moments the list can be out of date.
+    // Nothing here depends on the render it belongs to: a whole hook object as a dependency
+    // re-fires these effects on every render, and the state they set renders again — an idle
+    // window calling the backend as fast as it can.
+    if (!booted) return;
+    refreshVersions();
+  }, [booted, savedRev, sidebarView, refreshVersions]);
+
+  /** One version open beside what the editor holds. */
+  const [versionDiff, setVersionDiff] = useState<
+    { path: string; oid: string; label: string; pair: ComparePair } | null
+  >(null);
+
+  const openVersionDiff = useCallback(
+    async (path: string, oid: string) => {
+      if (!editorTab) return;
+      // The buffer, not the file: the question a version answers is "what have I changed since
+      // this", and the text on screen is the answer's other half.
+      const current = tabs.tabText(editorTab.id);
+      if (current === null) {
+        toast(t("ver.noBuffer"));
+        return;
+      }
+      try {
+        const text = await versions.contentOf(path, oid);
+        const entry = activeVersions.find((v) => v.oid === oid);
+        const label = entry ? formatWhen(entry.ts) : oid.slice(0, 8);
+        setVersionDiff({
+          path,
+          oid,
+          label,
+          pair: {
+            left: {
+              path,
+              name: `${editorTab.name} · ${label}`,
+              content: text,
+              language: editorTab.language,
+              kind: "version",
+              oid,
+            },
+            right: {
+              path,
+              name: t("ver.current"),
+              content: current,
+              language: editorTab.language,
+              kind: "buffer",
+            },
+          },
+        });
+      } catch (e) {
+        toast(errorMessage(e));
+      }
+    },
+    [activeVersions, editorTab, tabs, toast, versions]
+  );
+
+  /**
+   * Put the version back into the editor and close the comparison. Read again rather than taken
+   * from the pair, because the pair is a snapshot of a moment ago and the text is one call away.
+   */
+  const restoreFromDiff = useCallback(async () => {
+    if (!versionDiff) return;
+    const { path, oid } = versionDiff;
+    setVersionDiff(null);
+    try {
+      await tabs.restoreVersion(path, await versions.contentOf(path, oid));
+    } catch (e) {
+      toast(errorMessage(e));
+    }
+  }, [tabs, toast, versionDiff, versions]);
+
+  const restoreFromList = useCallback(
+    async (path: string, oid: string) => {
+      try {
+        await tabs.restoreVersion(path, await versions.contentOf(path, oid));
+      } catch (e) {
+        toast(errorMessage(e));
+      }
+    },
+    [tabs, toast, versions]
+  );
   const menuMinimapOn = menuTab?.fileSettings.minimap ?? settings.minimap;
   const wordWrap = editorTab?.fileSettings.wordWrap ?? settings.wordWrap;
   const stickyScroll = editorTab?.fileSettings.stickyScroll ?? settings.stickyScroll;
@@ -1475,6 +1646,8 @@ const defaultModeFor = useCallback(
           expandFolders={settings.expandFolders}
           expandDepth={settings.expandDepth}
           history={history}
+          versionList={versionList}
+          activeVersions={activeVersions}
           folderHistory={folderHistory}
           activePath={editorTab?.path ?? null}
           onSetView={changeView}
@@ -1487,6 +1660,8 @@ const defaultModeFor = useCallback(
           }
           onOpenPath={tabs.openPath}
           onCompare={(path) => void startCompare({ kind: "disk", path })}
+          onCompareVersion={(path, oid) => void openVersionDiff(path, oid)}
+          onRestoreVersion={(path, oid) => void restoreFromList(path, oid)}
           onRename={(target, name) => renameEntry(target.path, name)}
           onRemoveHistory={(path) =>
             api
@@ -1648,6 +1823,7 @@ const defaultModeFor = useCallback(
               onSaveSettings={saveSettings}
               onSetMenu={setMenu}
               onToast={toast}
+              onVersionsChanged={refreshVersions}
             />
           )}
         </div>
@@ -1806,6 +1982,54 @@ const defaultModeFor = useCallback(
                   {t("cmp.menu")}
                 </div>
               )}
+              {/* Versioning is offered for the same files the encryption items cover: a picture
+                  has no text to keep a history of, and a tab that was never decrypted holds the
+                  empty stand-in for a document nobody has read — recording that as a version
+                  would write a blank row over the real history. An encrypted file is left out even
+                  once unlocked: a version is that text in the clear, in the app's own folder, next
+                  to a document the user chose to encrypt. */}
+              {menuTabIsFile &&
+                !isUntitled(menuTabPath) &&
+                !isBitmapImage(menuTabPath) &&
+                !isLockedBlank(menuTab) &&
+                !menuTab?.encrypted && (
+                  <>
+                    <div
+                      className="ctx-item"
+                      onClick={() => {
+                        const text = tabs.tabText(tabMenu.tabId);
+                        if (text !== null) {
+                          void versions.createVersion(menuTabPath, text).then(() => refreshVersions());
+                        }
+                        setTabMenu(null);
+                      }}
+                    >
+                      <span className="ctx-icon">
+                        <IconVersions size={14} />
+                      </span>
+                      {t("ver.create")}
+                    </div>
+                    <div
+                      className="ctx-item"
+                      onClick={() => {
+                        void versions
+                          .setOverride(menuTabPath, menuVersions?.tracking ? "off" : "on")
+                          .then((state) => {
+                            setMenuVersions(state);
+                            refreshVersions();
+                            toast(t(state.tracking ? "ver.trackingOn" : "ver.trackingOff"));
+                          })
+                          .catch((e) => toast(errorMessage(e)));
+                        setTabMenu(null);
+                      }}
+                    >
+                      <span className="ctx-icon">
+                        <IconVersions size={14} />
+                      </span>
+                      {t(menuVersions?.tracking ? "ver.disable" : "ver.enable")}
+                    </div>
+                  </>
+                )}
               {/* Encryption sits with the file actions rather than the view toggles: each of
                   these rewrites the file on disk. A tab that was never decrypted is left out —
                   its buffer is the empty stand-in for a document nobody has read, so writing
@@ -2075,6 +2299,26 @@ const defaultModeFor = useCallback(
             void tabs.saveTab(conflictTab.id, { overwrite: true });
           }}
           onClose={() => tabs.hideConflict()}
+        />
+      )}
+
+      {/* One version against what is on screen. Its own popup rather than a comparison tab: the
+          question a version answers is about this file as it is being edited, and a tab would
+          leave a second copy of the text sitting open after the answer. */}
+      {versionDiff && (
+        <VersionDiffModal
+          pair={versionDiff.pair}
+          name={editorTab?.name ?? versionDiff.label}
+          versionLabel={versionDiff.label}
+          fontSize={settings.fontSize}
+          renderWhitespace={renderWhitespaceMode}
+          wordWrap={wordWrap}
+          tabSize={tabSize}
+          insertSpaces={insertSpaces}
+          detectIndentation={detectIndentation}
+          scrollBeyondLastLine={settings.scrollBeyondLastLine}
+          onRestore={() => void restoreFromDiff()}
+          onClose={() => setVersionDiff(null)}
         />
       )}
 

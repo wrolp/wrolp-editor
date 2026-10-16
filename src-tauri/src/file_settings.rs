@@ -18,6 +18,9 @@ const FILE: &str = "file-settings.json";
 /// grow without limit.
 const MAX_FILES: usize = 200;
 const WHITESPACE: [&str; 5] = ["none", "boundary", "selection", "all", "trailing"];
+/// The two overrides a file can put on versioning. Anything else, `None` included, follows the
+/// global default — the third state is the absence of an override, which is why it has no value.
+const VERSIONING: [&str; 2] = ["on", "off"];
 
 /// The overrides for one file. `None` means "follow the global default".
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -47,6 +50,11 @@ pub struct FileSettings {
   /// original" value to choose: absence of an override already says it.
   #[serde(skip_serializing_if = "Option::is_none")]
   pub line_ending: Option<String>,
+  /// Whether this file's saves get recorded as versions, over the global default. `on` and `off`
+  /// are the two overrides; `None` follows `Settings.versioningEnabled`. Kept here rather than in
+  /// a store of its own so a rename re-keys it with everything else about the file.
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub versioning: Option<String>,
 }
 
 impl FileSettings {
@@ -61,6 +69,7 @@ impl FileSettings {
       && self.detect_indentation.is_none()
       && self.encoding.is_none()
       && self.line_ending.is_none()
+      && self.versioning.is_none()
   }
 
   /// Drop values the editor would not accept. A stale or hand-edited file must not be
@@ -80,6 +89,7 @@ impl FileSettings {
       detect_indentation: self.detect_indentation,
       encoding: self.encoding.filter(|v| encoding::is_known(v)),
       line_ending: self.line_ending.filter(|v| encoding::is_line_ending(v)),
+      versioning: self.versioning.filter(|v| VERSIONING.contains(&v.as_str())),
     }
   }
 }
@@ -168,6 +178,37 @@ pub fn clear(app: &AppHandle, path: &str) -> Result<(), String> {
   save(app, path, FileSettings::default()).map(|_| ())
 }
 
+/// Set or clear one file's versioning override without touching its other overrides.
+///
+/// The tab menu writes this on its own. Routing it through `save` would mean the frontend holding
+/// a copy of every other per-file value, and one stale copy there would quietly reset settings the
+/// user did just set.
+pub fn set_versioning(app: &AppHandle, path: &str, mode: Option<&str>) -> Result<(), String> {
+  let mut store = load_store(app)?;
+  let key = crate::draft::normalize_path(path);
+  if key.is_empty() {
+    return Err("path_empty".into());
+  }
+  let mut settings = store.items.get(&key).cloned().unwrap_or_default();
+  // Anything that is not one of the two overrides clears the entry: a hand-written value in this
+  // store follows the global default rather than guessing which way the user meant it.
+  settings.versioning = mode.filter(|v| VERSIONING.contains(v)).map(str::to_string);
+  if settings.is_empty() {
+    store.items.remove(&key);
+  } else {
+    store.items.insert(key, settings);
+  }
+  let store = store.filled();
+  write_store(app, &store)
+}
+
+/// This file's versioning override, `None` meaning follow the global default.
+pub fn versioning_for(app: &AppHandle, path: &str) -> Option<String> {
+  load_store(app)
+    .ok()
+    .and_then(|store| store.get(path).versioning)
+}
+
 /// Re-home the overrides of `old` and of everything inside it after a rename moved them.
 ///
 /// The keys are normalized paths, so a folder rename carries the overrides of its whole
@@ -216,6 +257,13 @@ pub fn file_settings_view(app: AppHandle, path: String) -> Result<FileSettingsVi
     detect_indentation: Some(settings.detect_indentation),
     encoding: Some(settings.encoding),
     line_ending: Some(settings.line_ending),
+    // What "follow the default" means for this file right now, so the panel can show the state
+    // the file lands in rather than an empty choice.
+    versioning: Some(if settings.versioning_enabled {
+      "on".to_string()
+    } else {
+      "off".to_string()
+    }),
   };
   Ok(FileSettingsView {
     overrides: load_store(&app)?.get(&path),
@@ -302,6 +350,13 @@ mod tests {
           ..Default::default()
         },
       ),
+      (
+        "versioning",
+        FileSettings {
+          versioning: Some("on".into()),
+          ..Default::default()
+        },
+      ),
     ] {
       assert!(!settings.is_empty(), "{field} missing from is_empty");
       let s = store(&[("c:\\a.txt", settings)]).filled();
@@ -354,6 +409,7 @@ mod tests {
         detect_indentation: Some(false),
         encoding: Some("klingon".into()),
         line_ending: Some("martian".into()),
+        versioning: Some("sometimes".into()),
       },
     )])
     .filled();
@@ -361,6 +417,7 @@ mod tests {
     assert_eq!(got.render_whitespace, None);
     assert_eq!(got.encoding, None);
     assert_eq!(got.line_ending, None);
+    assert_eq!(got.versioning, None);
     assert_eq!(got.word_wrap, Some(true));
     assert_eq!(got.sticky_scroll, Some(false));
     assert_eq!(got.minimap, Some(true));
@@ -389,6 +446,43 @@ mod tests {
     // Case is what a hand-written value varies in, and the save path reads the value case
     // insensitively, so there is nothing to correct here and no reason to lose the entry.
     assert_eq!(s.get("C:\\b.txt").line_ending.as_deref(), Some("LF"));
+  }
+
+  #[test]
+  fn a_versioning_override_keeps_only_the_two_states() {
+    let s = store(&[
+      (
+        "C:\\on.txt",
+        FileSettings {
+          versioning: Some("on".into()),
+          ..Default::default()
+        },
+      ),
+      (
+        "C:\\off.txt",
+        FileSettings {
+          versioning: Some("off".into()),
+          ..Default::default()
+        },
+      ),
+      (
+        "C:\\maybe.txt",
+        FileSettings {
+          versioning: Some("sometimes".into()),
+          ..Default::default()
+        },
+      ),
+    ])
+    .filled();
+    assert_eq!(s.get("C:\\on.txt").versioning.as_deref(), Some("on"));
+    assert_eq!(s.get("C:\\off.txt").versioning.as_deref(), Some("off"));
+    // A value the store does not know is not a third state: it is a mistake, and the safe reading
+    // of a mistake is to follow the default.
+    assert_eq!(s.get("C:\\maybe.txt").versioning, None);
+    assert!(
+      s.items.get("c:\\maybe.txt").is_none(),
+      "entry dropped as empty"
+    );
   }
 
   #[test]

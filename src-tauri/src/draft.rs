@@ -145,6 +145,18 @@ fn lexically_normalize(path: &Path) -> PathBuf {
 /// filesystem is case-insensitive. Falls back to lexical absolutization when the
 /// file does not exist yet (e.g. a "Save as" destination).
 pub fn normalize_path(raw: &str) -> String {
+  normalize_to(raw, cfg!(windows))
+}
+
+/// The same normalization with the case kept, for a path that is shown to a person rather
+/// than compared to another path. Identity always goes through [`normalize_path`], so two
+/// spellings of one file stay one entry; the case-preserving form is what lets a stored
+/// name read like the file it names.
+pub(crate) fn normalize_path_preserved(raw: &str) -> String {
+  normalize_to(raw, false)
+}
+
+fn normalize_to(raw: &str, lowercase: bool) -> String {
   let trimmed = raw.trim().trim_matches('"').trim_matches('\'');
   if trimmed.is_empty() {
     return String::new();
@@ -162,8 +174,13 @@ pub fn normalize_path(raw: &str) -> String {
     Err(_) => lexically_normalize(&absolutized),
   };
   let text = strip_verbatim(&resolved.to_string_lossy());
-  if cfg!(windows) {
-    text.replace('/', "\\").to_lowercase()
+  let text = if cfg!(windows) {
+    text.replace('/', "\\")
+  } else {
+    text
+  };
+  if lowercase {
+    text.to_lowercase()
   } else {
     text
   }
@@ -177,15 +194,16 @@ fn digest(normalized: &str) -> String {
 }
 
 /// The digest that identifies a path: the tail of every draft file's name, the key of the
-/// per-file overrides, and the credential-manager account a remembered password is stored
-/// under. One derivation, so a path means the same thing in all three.
+/// per-file overrides, the credential-manager account a remembered password is stored
+/// under, and the name of a shadow repository. One derivation, so a path means the same
+/// thing in all four.
 ///
 /// The override store and the credential account carry nothing but this digest, because both
 /// are places a name goes where the file it names is not wanted. A draft file is the one
 /// exception: it leads with the file's own name, which is already stored in plain text inside
 /// the draft and inside the sealed envelope's path, so putting it in the file name tells a
 /// person browsing the folder something they could already read.
-pub(crate) fn draft_key(raw: &str) -> String {
+pub(crate) fn path_key(raw: &str) -> String {
   let normalized = normalize_path(raw);
   if normalized.is_empty() {
     return String::new();
@@ -199,8 +217,9 @@ pub(crate) fn draft_key(raw: &str) -> String {
 const LABEL_MAX: usize = 48;
 
 /// The readable half of a draft file's name: the last component of the path, with what no
-/// filesystem takes removed and the length capped.
-fn label_of(normalized: &str) -> String {
+/// filesystem takes removed and the length capped. A shadow repository directory is named the
+/// same way, so both folders can be browsed by a person.
+pub(crate) fn label_of(normalized: &str) -> String {
   let name = normalized.rsplit(['/', '\\']).next().unwrap_or_default();
   // A control character would make the name unusable in a shell, and none of these survive as
   // a Windows file name. A reserved name like `CON` cannot come out of this either: those are
@@ -257,7 +276,7 @@ fn draft_file(app: &AppHandle, raw: &str) -> Result<PathBuf, String> {
 /// The name every draft carried before the file's own name went into it: the bare digest. Still
 /// read, and retired as it is read, because an upgrade must not look like lost edits.
 fn legacy_draft_file(app: &AppHandle, raw: &str) -> Result<PathBuf, String> {
-  let key = draft_key(raw);
+  let key = path_key(raw);
   if key.is_empty() {
     return Err("path_unresolvable".into());
   }
@@ -503,8 +522,8 @@ mod tests {
 
   #[test]
   fn key_is_stable_across_separators_and_case() {
-    let a = draft_key(r"C:\Users\x\a.txt");
-    let b = draft_key("c:/users/X/A.TXT");
+    let a = path_key(r"C:\Users\x\a.txt");
+    let b = path_key("c:/users/X/A.TXT");
     assert_eq!(a, b);
     assert_eq!(a.len(), 64);
   }
@@ -512,8 +531,8 @@ mod tests {
   #[test]
   fn key_resolves_dot_segments() {
     assert_eq!(
-      draft_key(r"C:\Users\x\a.txt"),
-      draft_key(r"C:\Users\x\sub\..\a.txt")
+      path_key(r"C:\Users\x\a.txt"),
+      path_key(r"C:\Users\x\sub\..\a.txt")
     );
   }
 
@@ -528,7 +547,7 @@ mod tests {
 
   #[test]
   fn empty_path_yields_empty_key() {
-    assert_eq!(draft_key("   "), "");
+    assert_eq!(path_key("   "), "");
   }
 
   /// A folder of bare digests is a folder of anonymous files. The name of the document whose
@@ -541,7 +560,7 @@ mod tests {
     assert_eq!(stem.len(), "report.pdf-".len() + 64);
     assert_eq!(
       stem["report.pdf-".len()..],
-      draft_key(r"C:\Notes\work\report.pdf")
+      path_key(r"C:\Notes\work\report.pdf")
     );
     // Every spelling of one path is one draft file, so the readable half cannot disagree with
     // the digest about which file this is.
@@ -569,10 +588,10 @@ mod tests {
   #[test]
   fn the_old_name_is_still_derivable_from_the_path() {
     let raw = r"C:\Notes\work\report.pdf";
-    let key = draft_key(raw);
+    let key = path_key(raw);
     assert_eq!(key.len(), 64);
     assert!(draft_stem(raw).expect("stem").ends_with(&key));
-    assert_eq!(draft_key("   "), String::new());
+    assert_eq!(path_key("   "), String::new());
     assert_eq!(draft_stem("   "), None);
   }
 

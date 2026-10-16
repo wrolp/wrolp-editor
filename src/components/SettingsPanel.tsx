@@ -7,7 +7,7 @@ import SettingCheck from "./SettingCheck";
 import SettingField from "./SettingField";
 import { api, errorMessage, openPath, type MenuTarget, type Settings, type StoreDirs } from "../lib/tauri";
 
-type Category = "context" | "general" | "encryption" | "about";
+type Category = "context" | "general" | "versions" | "encryption" | "about";
 
 interface Props {
   settings: Settings;
@@ -17,11 +17,14 @@ interface Props {
   onSetMenu: (installed: boolean) => void;
   /** Says what a change here did, which for the credential store is the only report there is. */
   onToast: (message: string) => void;
+  /** Called after the version store is emptied so the sidebar stops listing files that have none. */
+  onVersionsChanged?: () => void;
 }
 
 const NAV: { cat: Category; key: string }[] = [
   { cat: "general", key: "settings.catGeneral" },
   { cat: "context", key: "settings.catContext" },
+  { cat: "versions", key: "ver.category" },
   { cat: "encryption", key: "enc.category" },
   { cat: "about", key: "settings.catAbout" },
 ];
@@ -60,6 +63,7 @@ export default function SettingsPanel({
   onSaveSettings,
   onSetMenu,
   onToast,
+  onVersionsChanged,
 }: Props) {
   // The first entry in NAV, so opening Settings lands on it rather than on the second one.
   const [category, setCategory] = useState<Category>("general");
@@ -67,6 +71,11 @@ export default function SettingsPanel({
   /** The two storage folders, or null while the backend has not said where they are. */
   const [dirs, setDirs] = useState<StoreDirs | null>(null);
   const [dirsError, setDirsError] = useState<string | null>(null);
+  /**
+   * Whether the button that empties the version store is armed. Two clicks because what it
+   * deletes cannot be got back: the history is the only copy of those earlier texts.
+   */
+  const [versionsArmed, setVersionsArmed] = useState(false);
   /** How many passwords the credential store is holding, or null when it would not say. */
   const [remembered, setRemembered] = useState<number | null>(null);
   const [rememberedError, setRememberedError] = useState<string | null>(null);
@@ -149,6 +158,33 @@ export default function SettingsPanel({
         setRememberedError(errorMessage(e));
       });
   };
+
+  /**
+   * Empty the version store. The first click only arms the button; the second one deletes.
+   *
+   * Arming is dropped after a few seconds rather than left set: a button that stays armed until
+   * something else is clicked is one misclick away from the thing the confirmation exists to stop.
+   */
+  const clearVersions = () => {
+    if (!versionsArmed) {
+      setVersionsArmed(true);
+      return;
+    }
+    setVersionsArmed(false);
+    api
+      .clearVersions()
+      .then(() => {
+        onVersionsChanged?.();
+        onToast(t("ver.cleared"));
+      })
+      .catch((e) => onToast(errorMessage(e)));
+  };
+
+  useEffect(() => {
+    if (!versionsArmed) return;
+    const off = window.setTimeout(() => setVersionsArmed(false), 8000);
+    return () => window.clearTimeout(off);
+  }, [versionsArmed]);
 
   return (
     <div className="settings-panel" style={{ display: "flex" }}>
@@ -527,6 +563,59 @@ export default function SettingsPanel({
           </div>
         )}
 
+        {category === "versions" && (
+          <div className="settings-cat">
+            <h2>{t("ver.category")}</h2>
+            <div className="setting-group">
+              <SettingCheck
+                label={t("ver.defaultEnabled")}
+                checked={settings.versioningEnabled}
+                onChange={(v) => onSaveSettings({ versioningEnabled: v })}
+              />
+              <p className="muted">{t("ver.defaultEnabledDesc")}</p>
+              {/* No `min`/`max` on either field: the browser answers an out-of-range keystroke
+                  with its own message in its own language, and this app has already translated
+                  everything else. The number is clamped here and always written back, so the
+                  field shows what is stored rather than what was typed. */}
+              <SettingField label={t("ver.showLimit")}>
+                <input
+                  type="number"
+                  step={1}
+                  value={settings.versioningShowLimit}
+                  onChange={(e) => {
+                    const n = Math.trunc(Number(e.target.value));
+                    if (Number.isNaN(n)) return;
+                    onSaveSettings({ versioningShowLimit: Math.min(Math.max(n, 1), 500) });
+                  }}
+                />
+              </SettingField>
+              <p className="muted">{t("ver.showLimitDesc")}</p>
+              <SettingField label={t("ver.maxFileSize")}>
+                <input
+                  className="num-wide"
+                  type="number"
+                  step={1024}
+                  value={settings.versioningMaxFileSize}
+                  onChange={(e) => {
+                    const n = Math.trunc(Number(e.target.value));
+                    if (Number.isNaN(n)) return;
+                    onSaveSettings({
+                      versioningMaxFileSize: Math.min(Math.max(n, 1024), 33554432),
+                    });
+                  }}
+                />
+              </SettingField>
+              <p className="muted">{t("ver.maxFileSizeDesc")}</p>
+              <SettingField label={t("ver.clear")}>
+                <button className="btn small" onClick={clearVersions}>
+                  {t(versionsArmed ? "ver.clearAgain" : "ver.clearNow")}
+                </button>
+              </SettingField>
+              <p className="muted">{t("ver.clearDesc")}</p>
+            </div>
+          </div>
+        )}
+
         {category === "about" && (
           <div className="settings-cat">
             <h2>{t("settings.aboutHeading")}</h2>
@@ -557,6 +646,21 @@ export default function SettingsPanel({
                 </button>
               </SettingField>
               <p className="muted store-path">{dirs?.drafts ?? ""}</p>
+              {/* The version store is offered only once it exists. It is created by the first
+                  recorded save rather than at startup, so an absent folder is the honest answer
+                  to "where are my versions" — and a button that opens nothing would not be. */}
+              <SettingField label={t("ver.dir")}>
+                <button
+                  className="btn small"
+                  disabled={!dirs?.versionsPresent}
+                  onClick={() => openFolder(dirs?.versions)}
+                >
+                  {t("settings.openFolder")}
+                </button>
+              </SettingField>
+              <p className="muted store-path">
+                {dirs?.versionsPresent ? dirs?.versions : t("ver.dirAbsent")}
+              </p>
               {dirsError && <p className="setting-warn">{dirsError}</p>}
             </div>
           </div>

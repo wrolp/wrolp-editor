@@ -160,6 +160,19 @@ export interface Settings {
    * written, so the frontend has to carry it back or a save would reset it to the default.
    */
   encryptIdleMinutes: number;
+  /**
+   * Record a version of a file each time it is saved by hand. Off by default: versioning writes on
+   * every save and does not clean up afterwards, so it is a thing to switch on rather than to find
+   * switched on.
+   */
+  versioningEnabled: boolean;
+  /**
+   * How many versions of one file the list reads. Not a retention limit — history is never trimmed
+   * from the middle, so this only bounds how far it is walked.
+   */
+  versioningShowLimit: number;
+  /** Files bigger than this are left out of versioning, in bytes. 0 is read as the default. */
+  versioningMaxFileSize: number;
 }
 
 /**
@@ -171,6 +184,52 @@ export interface StoreDirs {
   state: string;
   /** One file per document with unsaved edits. */
   drafts: string;
+  /** One shadow repository per versioned file. Only there once something has been recorded. */
+  versions: string;
+  /** Whether `versions` exists to be opened. */
+  versionsPresent: boolean;
+}
+
+/** One recorded version of a file: a point in its history, without its text. */
+export interface VersionEntry {
+  /** Opaque id every later call needs — read it, never show it. */
+  oid: string;
+  /** ISO-8601 UTC. */
+  ts: string;
+  /** What the user called this version, in the language it was written in. */
+  message: string | null;
+}
+
+/** A file that carries history, as the store reports it. */
+export interface VersionSummary {
+  path: string;
+  name: string;
+  /** ISO-8601 UTC of the newest version. */
+  latestTs: string;
+}
+
+/** What recording a version did. */
+export type AppendOutcome =
+  | { status: "created"; oid: string }
+  | { status: "skipped" };
+
+/** The versioning rules as they stand for one file. */
+export interface VersionState {
+  /** Whether this file's saves are recorded. */
+  tracking: boolean;
+  /** `on` / `off`, or null while the file follows the global default. */
+  override: string | null;
+}
+
+/**
+ * The content a file had before the editor changed it, sent with the save that replaced it.
+ * The store cannot have it — by the time a version is recorded, the file holds the new text.
+ */
+export interface VersionBaseline {
+  content: string;
+  message: string | null;
+  /** When the file last changed on disk, in epoch seconds, read before the save overwrote it. */
+  at: number | null;
 }
 
 /** One restored tab: either a file (path + cursor) or scratch text (untitled + content). */
@@ -260,6 +319,11 @@ export interface FileSettings {
    * which is why the global value is never shown as this one's fallback.
    */
   lineEnding: string | null;
+  /**
+   * Record this file's saves as versions: `on`, `off`, or null to follow the global default.
+   * Unlike `lineEnding` the fallback is the setting, so the panel shows what following means.
+   */
+  versioning: string | null;
 }
 
 export const EMPTY_FILE_SETTINGS: FileSettings = {
@@ -272,6 +336,7 @@ export const EMPTY_FILE_SETTINGS: FileSettings = {
   detectIndentation: null,
   encoding: null,
   lineEnding: null,
+  versioning: null,
 };
 
 export interface FileSettingsView {
@@ -424,6 +489,27 @@ export const api = {
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (settings: Settings) => invoke<Settings>("save_settings", { settings }),
   getStoreDirs: () => invoke<StoreDirs>("get_store_dirs"),
+  /** Which rule this file is under: the override it carries and what that resolves to. */
+  versioningState: (path: string) => invoke<VersionState>("versioning_state", { path }),
+  /** `null` lets the file follow the global default again. */
+  setVersionOverride: (path: string, mode: string | null) =>
+    invoke<VersionState>("set_version_override", { path, mode }),
+  /**
+   * Record a save. `baseline` is the text the file had before this edit, which only the editor
+   * still holds, and the backend writes it first when the file has no history yet.
+   */
+  addVersion: (
+    path: string,
+    content: string,
+    message: string | null,
+    baseline: VersionBaseline | null,
+  ) => invoke<AppendOutcome>("add_version", { path, content, message, baseline }),
+  getVersions: (path: string) => invoke<VersionEntry[]>("get_versions", { path }),
+  /** One version's text, read when it is about to be shown or restored. */
+  getVersionContent: (path: string, oid: string) =>
+    invoke<string>("get_version_content", { path, oid }),
+  listVersions: () => invoke<VersionSummary[]>("list_versions"),
+  clearVersions: () => invoke<void>("clear_versions"),
   getGroups: () => invoke<GroupStore>("get_groups"),
   saveGroups: (store: GroupStore) => invoke<GroupStore>("save_groups", { store }),
   transferTabs: (store: GroupStore, transfer: TabTransfer) =>

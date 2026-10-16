@@ -83,12 +83,19 @@ export interface CompareSide {
   name: string;
   content: string;
   language: string;
-  kind: "buffer" | "disk";
+  /**
+   * Where the text came from. A version is a third answer rather than a variety of `disk`: its
+   * content is a snapshot the file no longer holds, and two versions of one file have to land on
+   * two different diff models.
+   */
+  kind: "buffer" | "disk" | "version";
+  /** The version this side was read from, present when `kind` is `version`. */
+  oid?: string;
 }
 
 /** Identity of one side of a comparison, in the same shape for a side or a source. */
-export function sideKey(kind: "buffer" | "disk", path: string): string {
-  return `${kind}:${pathKey(path)}`;
+export function sideKey(kind: CompareSide["kind"], path: string, oid?: string): string {
+  return `${kind}:${pathKey(path)}${oid ? `:${oid}` : ""}`;
 }
 
 /**
@@ -104,6 +111,13 @@ export interface ComparePair {
   left: CompareSide;
   right: CompareSide;
 }
+
+/**
+ * What the sidebar shows. Three rather than two, and every place that used to ask
+ * `view === "history" ? … : …` has to name the third one: a pair of ternaries would file
+ * versions under explorer and say nothing about it.
+ */
+export type SidebarView = "explorer" | "history" | "versions";
 
 /**
  * A tab backed by a real file the user can edit. Settings and comparison tabs are not:

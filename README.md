@@ -18,7 +18,8 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | Drafts | Debounced ~500 ms after each edit; also flushed on tab switch, tab close and window blur |
 | Auto-save | Off by default. On, it writes back the dirty files that already exist on disk every N seconds — silently, and leaving alone an untitled buffer, a locked file, a picture, and anything the disk check already has a question about |
 | Restore | On open, disk content is compared with the draft; a differing draft is loaded back and the tab stays marked unsaved. Settings can switch this to a per-file Restore / Discard dialog |
-| Sidebar | Explorer file tree (lazy folders, refresh button) and a History list of recently opened files. Drag the divider to resize (180–640 px, double-click resets); the width is persisted. The tree's text size is a setting, 11–20 px |
+| Sidebar | Explorer file tree (lazy folders, refresh button), a History list of recently opened files, and a Versions view. Drag the divider to resize (180–640 px, double-click resets); the width is persisted. The tree's text size is a setting, 11–20 px |
+| Version history | Off by default. On, every save by hand records what the file said, and any earlier one can be compared against what is open or put back into the editor. One file's saves can be excluded, or forced in, from its tab menu. See [Version history](#version-history) |
 | Single instance | Launching a second time hands the path to the running window, adds a tab and focuses it |
 | Settings | Context-menu switch, editor font size, minimap, UI language; persisted and applied live. The context-menu page also shows the command the entry currently launches, and warns when it points at a different build or when this is a debug build |
 | Language | English by default, switchable to 中文 from a dropdown in Settings. All strings, including messages coming from the Rust side, resolve through one key table |
@@ -80,18 +81,21 @@ Only the NSIS target is configured (`bundle.targets: ["nsis"]`).
 ## Where data lives
 
 Everything is under the app config directory — `%APPDATA%\com.wrolp.editor` on Windows — and
-Settings → About prints both folders' full paths and opens either one in Explorer:
+Settings → About prints the folders' full paths and opens any one of them in Explorer:
 
 ```
 wrolp/
 ├── drafts/<name>-<sha256>.draft   one draft per file, named after the file it belongs to
 ├── kept/<name>               rescue copies of deleted files (plaintext; see "Encrypted files")
+├── shadow/<name>-<sha256>.git/   one version history per file, once versioning is on
 └── state/
     ├── history.json          recently opened files, newest first, capped at 50
     ├── settings.json         fontSize, minimap, sidebarVisible, sidebarView, sidebarWidth, sidebarFont,
     │                         language, restoreSession, draftRestore, lineEnding,
     │                         trimTrailingWhitespace, insertFinalNewline, autoSave, autoSaveInterval,
+    │                         versioningEnabled, versioningShowLimit, versioningMaxFileSize,
     │                         sidebarRoot, encryptIdleMinutes
+    ├── file-settings.json    per-file overrides: encoding, line ending, view settings, versioning
     ├── groups.json           the tab groups: name, tabs and caret positions
     └── window.json           x, y, width, height in physical pixels, plus the maximized flag
 ```
@@ -119,7 +123,9 @@ commands the frontend can call. By purpose: open/save/drafts (`open_file`, `save
 `create_file`, `create_dir`, `rename_path`, `copy_entry`, `remove_entry`, `keep_file`), groups and
 session (`get_groups`, `save_groups`, `transfer_tabs`, `get_window_state`, `save_window_state`,
 `plan_window_placement`), settings and the context menu (`get_settings`, `save_settings`,
-`get_store_dirs`, `context_menu_target`, `install_context_menu`, `uninstall_context_menu`), and encryption
+`get_store_dirs`, `context_menu_target`, `install_context_menu`, `uninstall_context_menu`), version
+history (`versioning_state`, `set_version_override`, `add_version`, `get_versions`,
+`get_version_content`, `list_versions`, `clear_versions`), and encryption
 (`unlock_file`, `lock_file`, `lock_all`, `save_file_as_encrypted`, `create_encrypted`,
 `change_password`, `remove_encryption`, `remember_password`, `forget_password`, `recall_password`,
 `remembered_password_count`, `clear_remembered_passwords`).
@@ -185,6 +191,51 @@ A read-only side-by-side diff of any two contents, in a tab of its own (titled `
 - A comparison tab is temporary: it is not part of the group store and does not come back on the next
   start. Closing a source tab leaves an open comparison alone (it holds its own snapshot) — it just cannot
   be refreshed, and re-running it then says the tab was closed.
+
+## Version history
+
+Off by default. Settings → Versions turns it on, and from then on every save you ask for — `Ctrl+S`,
+or the tab menu's *Create version* — records what the file said. The word "version" is deliberate:
+this is not a repository you branch or push, and nothing about it reaches the folder you are editing.
+
+- **What gets recorded.** A file that already exists on disk, saved by hand, under a rule that says
+  yes. The first save of a file records two rows: the text the file held when it was opened — dated
+  when the file last changed on disk, not when the editor saw it — and then what you just saved. That
+  first row is why a version can be diffed against "how this file started" rather than only against
+  an earlier save.
+- **What does not.** The automatic save writes the file but records nothing: a timer is not somebody
+  deciding to keep a version. An **encrypted** file is never versioned, unlocked or not: a version is
+  that text stored in the clear in the app's own folder, beside a document you chose to encrypt —
+  drafts are sealed with the file's key to avoid exactly that, and a version has no key at write time
+  to seal itself with. A file bigger than the configured limit is saved normally and left out, with
+  one notice per session. Pictures are never offered. And a save whose text is identical to the last
+  recorded version adds nothing, so pressing `Ctrl+S` four times leaves one row.
+- **Two switches, one rule.** Settings → Versions is the default for every file; a single file can
+  override it from its tab menu (*Record versions for this file* / *Stop recording this file*) or in
+  that file's Settings. `Create version` works whatever the switches say, and taking one turns that
+  file on — asking for a version once is a decision about that file.
+- **Comparing and restoring.** The Versions view lists the open file's history newest first; each row
+  compares against **what is in the editor now** (unsaved edits included, since the question a version
+  answers is what you changed on top of it), or puts its text back. Restoring never writes the file: it
+  fills the buffer, marks the tab unsaved, and keeps a draft so the recovered text survives a crash.
+  Close without saving and nothing has changed on disk. Restoring does not record a version.
+- **Not a cleanup.** Recorded history is never trimmed, and one version cannot be deleted on its own:
+  history is stored as a chain, and taking a link out of the middle means rewriting everything after
+  it. Settings → Versions → *Versions to list* bounds what is read, not what is kept; the only way to
+  reclaim the disk is *Clear all versions*, which asks twice. If the growth ever matters more than the
+  history, that is the switch to turn off.
+- **Where it lives.** `<app data>\wrolp\shadow\`, one folder per file, named after the file the way
+  drafts are. Each is a git repository with a single branch, and its content is your text — the same
+  privacy level as the drafts folder, and deleted with it on uninstall. Nothing is written to the
+  folders you edit, and a repository is never created for a file that was only opened.
+- **Path is the identity.** Rename a file **inside the editor** and its history follows: the folder
+  moves and the recorded name inside it stays as it was, which is what lets the timeline survive a
+  rename without rewriting it. Rename it outside — Explorer, a sync client, `git mv` — and the new
+  path finds nothing, so the list starts over. The old history is not lost, it is just no longer
+  connected. Renaming onto a name that already has history keeps that name's own timeline and leaves
+  the other one where it is; two histories are never merged.
+- **Messages keep the language they were written in.** The label on a version is stored with it, so a
+  history recorded in 中文 still says 初始版本 after you switch the interface to English.
 
 ## Encrypted files
 

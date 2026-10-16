@@ -1541,6 +1541,90 @@ body.resizing .editor-host {
   color: var(--text-strong);
 }
 
+/* Versions view. The active file's timeline is a column of rows with the actions held to the
+   right; everything else the store has history for is one line each, and opening it is the way
+   to read its own timeline. */
+.ver-current {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--border-soft);
+  margin-bottom: 4px;
+}
+.ver-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px 4px;
+  color: var(--text-dim);
+}
+.ver-head-name {
+  font-size: var(--sidebar-font, 12px);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ver-section {
+  padding: 6px 14px 2px;
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.ver-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 14px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.ver-item:hover {
+  background: var(--surface-2);
+}
+.ver-item .vi-when {
+  font-size: var(--sidebar-font, 12px);
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ver-item .vi-note {
+  /* The name the user gave a version outranks its time when there is no room for both, so it is
+     the one that shrinks first and gets read from the row's title otherwise. */
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: 11px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ver-item .vi-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+}
+.ver-item:hover .vi-actions,
+.ver-item:focus-within .vi-actions {
+  opacity: 1;
+}
+.vi-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.vi-btn:hover {
+  background: var(--border-strong);
+  color: var(--text-strong);
+}
+
 .editor-wrap {
   flex: 1 1 auto;
   min-width: 0;
@@ -1997,6 +2081,14 @@ body.resizing .editor-host {
   background: var(--bg);
   color: var(--text);
   font-size: 13px;
+}
+/* A field whose number is a byte count. Everything else in here fits six digits — a font size,
+   a width in pixels, seconds — while this one holds up to 33554432, and the box is only 72px of
+   text plus its own spinner: half the number hides off the end and you cannot see what you are
+   typing. It gets its own width rather than a shared one, because a byte count is the only case
+   in the panel where the digits run that long. */
+.setting-row input.num-wide[type="number"] {
+  width: 132px;
 }
 .select {
   min-width: 120px;
