@@ -152,6 +152,13 @@ pub struct Settings {
   pub insert_spaces: bool,
   /// Let a file's own content win over the two settings above.
   pub detect_indentation: bool,
+  /// Strike out spaces and tabs at the end of a line as the file is saved. Off by default:
+  /// markdown means something by two of them, and a file nobody asked to tidy should come back
+  /// byte for byte. The editor applies this to the buffer, so the screen shows the saved text.
+  pub trim_trailing_whitespace: bool,
+  /// Add the line break a file is missing when it is saved. Off by default for the same reason,
+  /// and the break that gets added is the one that file already uses.
+  pub insert_final_newline: bool,
   /// The line ending for a document that has none of its own: a new file, or one read with no
   /// break in it. A file that came with breaks is written back with those unless its own entry
   /// in `file-settings.json` says otherwise, so this setting never rewrites somebody's
@@ -205,6 +212,8 @@ impl Default for Settings {
       tab_size: 2,
       insert_spaces: true,
       detect_indentation: true,
+      trim_trailing_whitespace: false,
+      insert_final_newline: false,
       line_ending: "lf".into(),
       scroll_beyond_last_line: true,
       preview_layout: "text".into(),
@@ -319,6 +328,8 @@ impl Settings {
       },
       insert_spaces: self.insert_spaces,
       detect_indentation: self.detect_indentation,
+      trim_trailing_whitespace: self.trim_trailing_whitespace,
+      insert_final_newline: self.insert_final_newline,
       // Same rule as the encoding above: a value the editor cannot use is a stale or
       // hand-edited key, and the safe reading of that is the convention the app started with.
       line_ending: if crate::encoding::is_line_ending(&self.line_ending) {
@@ -1871,6 +1882,9 @@ mod tests {
     assert_eq!(s.line_ending, "lf");
     // The sidebar text of an existing install keeps the 12 px the tree was pinned at.
     assert_eq!(s.sidebar_font, 12.0);
+    // And a file it saves keeps the whitespace it was written with until somebody asks otherwise.
+    assert!(!s.trim_trailing_whitespace);
+    assert!(!s.insert_final_newline);
     assert_eq!(s.filled().sidebar_root, "");
   }
 

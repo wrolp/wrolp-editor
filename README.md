@@ -12,7 +12,7 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | --- | --- |
 | Tabs | One window, many files; per-tab dirty marker, tab list dropdown, right-click menu on a tab |
 | Editing | Monaco: syntax highlighting by extension, minimap, multi-model per file, cursor restored per tab |
-| Saving | `Ctrl+S` writes the file and clears its draft; a never-saved `Untitled-N` tab goes through Save As |
+| Saving | `Ctrl+S` writes the file and clears its draft; a never-saved `Untitled-N` tab goes through Save As. Two cleanups are optional and off by default: trimming trailing whitespace, and adding a final line break a file is missing — both are applied to the buffer first, so the screen ends up showing the bytes written |
 | Unsaved changes | Lines that differ from the file on disk are tinted — green where text was added, amber where saved text was replaced — and the marks clear on save. The workbench has this built in; the standalone editor needs the comparison, which is `src/lib/dirtyDiff.ts` |
 | Line endings | Read from the file and written back as they are. One file can be forced to LF or CRLF from that tab's File settings, and a document with no breaks yet — a new file above all — takes what Settings → General names. The status bar shows the ending a save will write. A lone CR is not offered: Monaco's model joins lines with LF or CRLF and nothing else |
 | Drafts | Debounced ~500 ms after each edit; also flushed on tab switch, tab close and window blur |
@@ -88,7 +88,8 @@ wrolp/
 └── state/
     ├── history.json          recently opened files, newest first, capped at 50
     ├── settings.json         fontSize, minimap, sidebarVisible, sidebarView, sidebarWidth, sidebarFont,
-    │                         language, restoreSession, draftRestore, lineEnding, sidebarRoot, encryptIdleMinutes
+    │                         language, restoreSession, draftRestore, lineEnding,
+    │                         trimTrailingWhitespace, insertFinalNewline, sidebarRoot, encryptIdleMinutes
     ├── groups.json           the tab groups: name, tabs and caret positions
     └── window.json           x, y, width, height in physical pixels, plus the maximized flag
 ```

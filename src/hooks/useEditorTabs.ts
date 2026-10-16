@@ -13,6 +13,8 @@ import {
   type SavedFile,
 } from "../lib/tauri";
 import { basename, dirname, isUntitled, langOf, modelUri, rekeyPath } from "../lib/path";
+import { cleanupEdits } from "../lib/saveText";
+import type { editor } from "monaco-editor";
 import { tabKey, toStoredTab } from "../lib/group";
 import {
   eolSequence,
@@ -157,6 +159,11 @@ interface Options {
    * the callbacks.
    */
   lineEndingPref?: string;
+  /**
+   * The two cleanups a save applies: trailing whitespace and a missing final line break. Read
+   * when a save runs, like the preferences above.
+   */
+  cleanupPref?: { trimTrailingWhitespace: boolean; insertFinalNewline: boolean };
 }
 
 export function useEditorTabs({
@@ -167,6 +174,7 @@ export function useEditorTabs({
   encodingPref,
   draftRestorePref,
   lineEndingPref,
+  cleanupPref,
 }: Options) {
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
@@ -196,6 +204,10 @@ export function useEditorTabs({
   draftRestoreRef.current = draftRestorePref ?? "auto";
   const lineEndingRef = useRef(lineEndingPref ?? "lf");
   lineEndingRef.current = lineEndingPref ?? "lf";
+  const cleanupRef = useRef(
+    cleanupPref ?? { trimTrailingWhitespace: false, insertFinalNewline: false }
+  );
+  cleanupRef.current = cleanupPref ?? cleanupRef.current;
   /**
    * Set while a reload rewrites a buffer. The change and cursor events that rewrite fires are
    * read by the handlers below against the tab object React has not re-rendered yet, so
@@ -1231,6 +1243,45 @@ export function useEditorTabs({
   );
 
   /**
+   * Apply the save cleanups — trailing whitespace, a missing final line break — to the buffer
+   * itself, before its text is written. The alternative, tidying only the bytes on the way out,
+   * would leave three texts to disagree: the one on screen, the one on disk, and the one the tab
+   * keeps to decide whether it is unsaved.
+   *
+   * Under `mutating`, because these are the app tidying up rather than the user typing: they
+   * must not mark the tab unsaved or schedule a draft for the text they produce. They do go
+   * through the undo stack, so one Ctrl+Z takes them back.
+   */
+  const applySaveCleanup = useCallback((model: editor.ITextModel) => {
+    const { trimTrailingWhitespace, insertFinalNewline } = cleanupRef.current;
+    if (!trimTrailingWhitespace && !insertFinalNewline) return;
+    const lines: string[] = [];
+    for (let i = 1; i <= model.getLineCount(); i++) lines.push(model.getLineContent(i));
+    const edits = cleanupEdits(lines, {
+      trimTrailingWhitespace,
+      insertFinalNewline,
+      eol: model.getEOL(),
+    });
+    if (edits.length === 0) return;
+    mutating.current = true;
+    try {
+      model.applyEdits(
+        edits.map((edit) => ({
+          range: {
+            startLineNumber: edit.startLine,
+            startColumn: edit.startColumn,
+            endLineNumber: edit.endLine,
+            endColumn: edit.endColumn,
+          },
+          text: edit.text,
+        }))
+      );
+    } finally {
+      mutating.current = false;
+    }
+  }, []);
+
+  /**
    * Write one tab back to disk. Resolves false when nothing was written, which is what a
    * declined "Save as", a picture with no buffer, a file another program has since changed,
    * and a failed write all amount to: the caller has to know, because a close that was asked
@@ -1252,11 +1303,10 @@ export function useEditorTabs({
     }
     // The editor only ever holds the active tab's text; another tab's live text is in its
     // model. Reading the wrong one would save the file the user is looking at instead.
-    const content =
+    const model =
       id === activeRef.current
-        ? h.editor.getValue()
-        : (h.monaco.editor.getModel(h.monaco.Uri.parse(modelUri(tab.path)))?.getValue() ??
-          tab.original);
+        ? h.editor.getModel()
+        : h.monaco.editor.getModel(h.monaco.Uri.parse(modelUri(tab.path)));
     // A write replaces whatever is there now, so when that is not what this tab was built on
     // the question is asked first — and asked again however many times the save is attempted:
     // unlike the periodic check, this one is an answer the user already declined once and is
@@ -1278,6 +1328,10 @@ export function useEditorTabs({
       }
     }
     try {
+      // The cleanups happen once the save is committed to happening: turning down the "changed on
+      // disk" question above should not leave the text tidied as a side effect of not saving.
+      if (model) applySaveCleanup(model);
+      const content = model ? model.getValue() : tab.original;
       if (isUntitled(tab.path)) {
         const target = await pickSaveAs(tab.name);
         if (!target) return false;
@@ -1339,7 +1393,7 @@ export function useEditorTabs({
       toast(errorMessage(e));
       return false;
     }
-  }, [askForTab, draft, editorRef, onFileOpened, toast]);
+  }, [applySaveCleanup, askForTab, draft, editorRef, onFileOpened, toast]);
 
   const saveActive = useCallback(
     () => (activeRef.current === null ? Promise.resolve(false) : saveTab(activeRef.current)),

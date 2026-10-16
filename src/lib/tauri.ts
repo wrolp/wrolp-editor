@@ -131,6 +131,10 @@ export interface Settings {
    * files into a diff nobody asked for.
    */
   lineEnding: string;
+  /** Drop spaces and tabs at the end of a line as the file is saved. Off by default. */
+  trimTrailingWhitespace: boolean;
+  /** Add the line break a file is missing when it is saved. Off by default. */
+  insertFinalNewline: boolean;
   /** Allow scrolling past the end so the last line can sit above the bottom edge. */
   scrollBeyondLastLine: boolean;
   /**

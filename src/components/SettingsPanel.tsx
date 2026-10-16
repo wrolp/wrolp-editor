@@ -430,6 +430,18 @@ export default function SettingsPanel({
                 </select>
               </SettingField>
               <p className="muted">{t("settings.lineEndingDesc")}</p>
+              <SettingCheck
+                label={t("settings.trimTrailing")}
+                checked={settings.trimTrailingWhitespace}
+                onChange={(v) => onSaveSettings({ trimTrailingWhitespace: v })}
+              />
+              <p className="muted">{t("settings.trimTrailingDesc")}</p>
+              <SettingCheck
+                label={t("settings.finalNewline")}
+                checked={settings.insertFinalNewline}
+                onChange={(v) => onSaveSettings({ insertFinalNewline: v })}
+              />
+              <p className="muted">{t("settings.finalNewlineDesc")}</p>
               <SettingField label={t("settings.theme")}>
                 <select
                   className="select"

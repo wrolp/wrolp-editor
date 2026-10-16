@@ -12,7 +12,7 @@
 | --- | --- |
 | 多标签 | 单窗口多文件；标签脏标记、已打开文件下拉列表、标签右键菜单 |
 | 编辑 | Monaco：按扩展名高亮、minimap、每个文件独立 model、切回标签还原光标 |
-| 保存 | `Ctrl+S` 写回文件并清除该草稿；未落盘过的 `Untitled-N` 走另存为 |
+| 保存 | `Ctrl+S` 写回文件并清除该草稿；未落盘过的 `Untitled-N` 走另存为。另有两项默认关闭的整理：去除行尾空格、补上缺失的行末换行——都先写回缓冲区，所以屏幕上看到的就是写进文件的字节 |
 | 未保存的修改 | 与磁盘上那份不一致的行会被染色：新增的行偏绿，改掉了原有文字的行偏黄，保存后标记消失。比对在 `src/lib/dirtyDiff.ts`：工作台自带这套，独立版 Monaco 没有 |
 | 换行符 | 读到什么就按什么写回。想强制某个文件用 LF 或 CRLF，去那个标签的「文件设置」；本来没有换行符的文档（新建文件最常见）用设置 → 常规 里选的。状态栏显示的就是保存会写入的换行符。不单独提供 CR：Monaco 的模型只会用 LF 或 CRLF 拼接行 |
 | 草稿 | 编辑后约 500ms 防抖落盘；切标签、关标签、窗口失焦时立即冲刷 |
@@ -84,7 +84,8 @@ wrolp/
 └── state/
     ├── history.json          最近打开，新的在前，最多 50 条
     ├── settings.json         fontSize、minimap、sidebarVisible、sidebarView、sidebarWidth、sidebarFont、
-    │                         language、restoreSession、draftRestore、lineEnding、sidebarRoot、encryptIdleMinutes
+    │                         language、restoreSession、draftRestore、lineEnding、
+    │                         trimTrailingWhitespace、insertFinalNewline、sidebarRoot、encryptIdleMinutes
     ├── groups.json           标签分组：名字、标签与光标位置
     └── window.json           x、y、width、height（物理像素）与是否最大化
 ```

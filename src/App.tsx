@@ -118,6 +118,10 @@ const DEFAULT_SETTINGS: Settings = {
   // LF for a document that has no line endings of its own: what the editor already used before
   // this was a setting, so nothing changes for anybody who never opens the panel.
   lineEnding: "lf",
+  // Both off: a save that tidies on its own rewrites lines the user never touched, and in markdown
+  // two trailing spaces are the line break. The file comes back byte for byte until asked.
+  trimTrailingWhitespace: false,
+  insertFinalNewline: false,
   scrollBeyondLastLine: true,
   // A document is opened to be read and written, so the editor is what a file opens to.
   // The preview is one keystroke away; a preview nobody asked for costs a pane.
@@ -293,6 +297,10 @@ export default function App() {
     encodingPref: settings.encoding,
     draftRestorePref: settings.draftRestore,
     lineEndingPref: settings.lineEnding,
+    cleanupPref: {
+      trimTrailingWhitespace: settings.trimTrailingWhitespace,
+      insertFinalNewline: settings.insertFinalNewline,
+    },
   });
   const groups = useGroups({ onError: toast });
   // The window goes back where it was before anything else measures it.
