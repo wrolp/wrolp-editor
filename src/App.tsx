@@ -90,6 +90,9 @@ const DEFAULT_SETTINGS: Settings = {
   sidebarVisible: true,
   sidebarView: "explorer",
   sidebarWidth: 240,
+  // 16 px is the size the page already inherited from the browser, so this setting starts where
+  // the app left off rather than restyling the sidebar on the first run after an update.
+  sidebarFont: 16,
   language: "en",
   restoreSession: true,
   // A draft is the only copy of typing that never reached the disk, so startup puts it back
@@ -1453,6 +1456,7 @@ const defaultModeFor = useCallback(
         <Sidebar
           visible={sidebarShown}
           width={sidebarWidth}
+          fontSize={settings.sidebarFont}
           view={sidebarView}
           rootDir={rootDir}
           expandFolders={settings.expandFolders}

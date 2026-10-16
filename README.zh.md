@@ -15,7 +15,7 @@
 | 换行符 | 读到什么就按什么写回。想强制某个文件用 LF 或 CRLF，去那个标签的「文件设置」；本来没有换行符的文档（新建文件最常见）用设置 → 常规 里选的。状态栏显示的就是保存会写入的换行符。不单独提供 CR：Monaco 的模型只会用 LF 或 CRLF 拼接行 |
 | 草稿 | 编辑后约 500ms 防抖落盘；切标签、关标签、窗口失焦时立即冲刷 |
 | 恢复 | 打开文件时把磁盘内容与草稿比对，不一致就直接把草稿装回去，标签保持未保存状态；设置里可以改成每个文件弹「恢复草稿 / 丢弃」询问 |
-| 侧边栏 | 资源管理器目录树（子目录懒加载 + 刷新按钮）与最近打开的历史列表。拖动分隔条可调宽（180–640 px，双击复位），宽度会持久化 |
+| 侧边栏 | 资源管理器目录树（子目录懒加载 + 刷新按钮）与最近打开的历史列表。拖动分隔条可调宽（180–640 px，双击复位），宽度会持久化。树的文字大小可在设置里调，11–20 px |
 | 单实例 | 再次启动时把路径交给已运行的窗口，新增标签并聚焦 |
 | 设置 | 右键菜单开关、编辑器字号、minimap、界面语言；即时生效并持久化。右键菜单页还会显示当前注册表实际启动的命令，指向别的构建或当前是 debug 构建时给出警告 |
 | 语言 | 默认英文，可在设置里下拉切换成中文。所有文案（含 Rust 侧返回的报错）都走同一张 key 表 |
@@ -81,8 +81,8 @@ wrolp/
 ├── kept/<原名>               被删文件的救援副本（明文，见「加密文件」）
 └── state/
     ├── history.json          最近打开，新的在前，最多 50 条
-    ├── settings.json         fontSize、minimap、sidebarVisible、sidebarView、sidebarWidth、language、
-    │                         restoreSession、draftRestore、lineEnding、sidebarRoot、encryptIdleMinutes
+    ├── settings.json         fontSize、minimap、sidebarVisible、sidebarView、sidebarWidth、sidebarFont、
+    │                         language、restoreSession、draftRestore、lineEnding、sidebarRoot、encryptIdleMinutes
     ├── groups.json           标签分组：名字、标签与光标位置
     └── window.json           x、y、width、height（物理像素）与是否最大化
 ```

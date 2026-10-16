@@ -110,6 +110,11 @@ pub struct Settings {
   pub sidebar_visible: bool,
   pub sidebar_view: String,
   pub sidebar_width: f64,
+  /// Text size in the sidebar: the file tree and the folder menu, which are what inherits it.
+  /// Its own setting because a file name is read, not edited, and a smaller one of those fits a
+  /// lot more of the folder on screen. Defaults to the size the page inherited before it was a
+  /// setting, so installing this build changes nothing until somebody moves the number.
+  pub sidebar_font: f64,
   /// UI language code, e.g. "en" or "zh". Unknown values are stored as-is; the frontend
   /// falls back to English, so adding a language needs no change here.
   pub language: String,
@@ -183,6 +188,7 @@ impl Default for Settings {
       sidebar_visible: true,
       sidebar_view: "explorer".into(),
       sidebar_width: 240.0,
+      sidebar_font: 16.0,
       language: "en".into(),
       restore_session: true,
       draft_restore: "auto".into(),
@@ -210,6 +216,10 @@ impl Default for Settings {
 
 const SIDEBAR_MIN_WIDTH: f64 = 180.0;
 const SIDEBAR_MAX_WIDTH: f64 = 640.0;
+/// Sidebar text sizes, in CSS pixels. The low end is the smallest a file name is still read at
+/// rather than recognised by shape; the high end is where the tree stops fitting its own column.
+const SIDEBAR_FONT_MIN: f64 = 11.0;
+const SIDEBAR_FONT_MAX: f64 = 20.0;
 /// Whitespace rendering modes Monaco understands.
 const RENDER_WHITESPACE: [&str; 5] = ["none", "boundary", "selection", "all", "trailing"];
 /// Colour schemes the frontend knows how to apply.
@@ -247,6 +257,11 @@ impl Settings {
         self
           .sidebar_width
           .clamp(SIDEBAR_MIN_WIDTH, SIDEBAR_MAX_WIDTH)
+      },
+      sidebar_font: if self.sidebar_font > 0.0 {
+        self.sidebar_font.clamp(SIDEBAR_FONT_MIN, SIDEBAR_FONT_MAX)
+      } else {
+        16.0
       },
       language: if self.language.is_empty() {
         "en".into()
@@ -1753,6 +1768,46 @@ mod tests {
   }
 
   #[test]
+  fn sidebar_font_is_clamped_to_the_readable_range() {
+    assert_eq!(
+      Settings {
+        sidebar_font: 0.0,
+        ..Default::default()
+      }
+      .filled()
+      .sidebar_font,
+      16.0
+    );
+    assert_eq!(
+      Settings {
+        sidebar_font: 6.0,
+        ..Default::default()
+      }
+      .filled()
+      .sidebar_font,
+      11.0
+    );
+    assert_eq!(
+      Settings {
+        sidebar_font: 40.0,
+        ..Default::default()
+      }
+      .filled()
+      .sidebar_font,
+      20.0
+    );
+    assert_eq!(
+      Settings {
+        sidebar_font: 13.0,
+        ..Default::default()
+      }
+      .filled()
+      .sidebar_font,
+      13.0
+    );
+  }
+
+  #[test]
   fn settings_defaults_are_applied() {
     let s = Settings {
       font_size: 0.0,
@@ -1813,6 +1868,8 @@ mod tests {
     assert_eq!(s.draft_restore, "auto");
     // And for one written before line endings could be configured at all.
     assert_eq!(s.line_ending, "lf");
+    // The sidebar text of an existing install keeps the size it had before it was a setting.
+    assert_eq!(s.sidebar_font, 16.0);
     assert_eq!(s.filled().sidebar_root, "");
   }
 

@@ -84,6 +84,8 @@ export interface Settings {
   sidebarVisible: boolean;
   sidebarView: string;
   sidebarWidth: number;
+  /** Sidebar text size in CSS pixels, 11 to 20. 16 is what the page inherited before this existed. */
+  sidebarFont: number;
   /** Language code; unknown values are stored as-is and fall back to English in the UI. */
   language: string;
   /** Reopen the tabs of the active group on startup. */

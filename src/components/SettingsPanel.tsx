@@ -253,6 +253,21 @@ export default function SettingsPanel({
                   }}
                 />
               </SettingField>
+              {/* The same shape as the editor's own size: a number field, with the range left to
+                  the backend to clamp rather than argued about here. */}
+              <SettingField label={t("settings.sidebarFont")}>
+                <input
+                  type="number"
+                  min={11}
+                  max={20}
+                  value={settings.sidebarFont}
+                  onChange={(e) => {
+                    const size = Number(e.target.value);
+                    if (!Number.isNaN(size)) onSaveSettings({ sidebarFont: size });
+                  }}
+                />
+              </SettingField>
+              <p className="muted">{t("settings.sidebarFontDesc")}</p>
               <SettingCheck
                 label={t("settings.minimap")}
                 checked={settings.minimap}

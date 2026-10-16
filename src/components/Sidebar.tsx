@@ -542,6 +542,12 @@ interface Props extends Omit<
 > {
   visible: boolean;
   width: number;
+  /**
+   * Text size in CSS pixels for everything in here that inherits — the tree rows, the folder
+   * menu, the in-place rename field. The recent-files list and the panel's own labels set their
+   * own sizes, so this moves the content without touching the chrome.
+   */
+  fontSize: number;
   view: "explorer" | "history";
   rootDir: string | null;
   history: HistoryEntry[];
@@ -583,6 +589,7 @@ export default function Sidebar(props: Props) {
   const {
     visible,
     width,
+    fontSize,
     view,
     rootDir,
     history,
@@ -829,7 +836,7 @@ export default function Sidebar(props: Props) {
   if (!visible) return null;
 
   return (
-    <div className="sidebar" style={{ width }}>
+    <div className="sidebar" style={{ width, fontSize }}>
       <div className="sidebar-head">
         <button
           className={`side-tab${view === "explorer" ? " active" : ""}`}
