@@ -1570,6 +1570,20 @@ body.resizing .editor-host {
   position: absolute;
   inset: 0;
 }
+/* Lines that differ from what the file on disk holds, marked by `Editor.tsx`. Two colours because
+   the two cases want different actions: added text can be kept as it is, changed text has lost
+   something. The plain rgba is the fallback and `color-mix` the modern spelling of the same
+   tint, so a shell without it still shows the highlight rather than nothing. */
+.dirty-added {
+  background: rgba(74, 222, 128, 0.14);
+  background: color-mix(in srgb, var(--add) 14%, transparent);
+  box-shadow: inset 2px 0 var(--add);
+}
+.dirty-modified {
+  background: rgba(217, 164, 65, 0.16);
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+  box-shadow: inset 2px 0 var(--warn);
+}
 .editor-empty {
   white-space: pre-line;
   position: absolute;
