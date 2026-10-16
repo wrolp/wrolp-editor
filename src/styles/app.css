@@ -1398,7 +1398,11 @@ body.resizing .editor-host {
   color: var(--on-accent);
 }
 
-.tree {
+/* Scoped to the sidebar on purpose: Monaco's suggest widget also has a `.tree` class on
+   its list container, and an unscoped rule here would hand the completion popup the 48px
+   bottom padding meant for this tree's tooltip -- the popup's rows then clip mid-row and
+   the padding shows as a dead band under them. */
+.sidebar .tree {
   font-size: 12px;
   /* Room for the tooltip, which opens below the row: two lines of text plus padding come
      to roughly 40px, so anything less clips the bubble for the last entry once the tree
