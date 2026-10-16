@@ -78,7 +78,7 @@ Everything is under the app config directory — `%APPDATA%\com.wrolp.editor` on
 
 ```
 wrolp/
-├── drafts/<sha256>.draft     one draft per file
+├── drafts/<name>-<sha256>.draft   one draft per file, named after the file it belongs to
 ├── kept/<name>               rescue copies of deleted files (plaintext; see "Encrypted files")
 └── state/
     ├── history.json          recently opened files, newest first, capped at 50
@@ -88,7 +88,7 @@ wrolp/
     └── window.json           x, y, width, height in physical pixels, plus the maximized flag
 ```
 
-`<sha256>` is the hash of the **normalized** path: absolute, `\\?\` verbatim prefix removed, separators unified, lowercased on Windows. A draft looks like:
+`<sha256>` is the hash of the **normalized** path: absolute, `\\?\` verbatim prefix removed, separators unified, lowercased on Windows. It, not the readable `<name>` in front of it, is what a draft is keyed by — two `notes.md` files in two folders never share one. The name is there because a folder of bare digests is a folder of anonymous files; a draft written under the older `<sha256>.draft` name is read and renamed on the first load, and cleared under both names. A draft looks like:
 
 ```json
 {

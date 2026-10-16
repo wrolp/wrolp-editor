@@ -1,5 +1,5 @@
-//! Draft storage: unsaved editor content is mapped to a standalone draft file
-//! keyed by the SHA-256 of the normalized absolute path.
+//! Draft storage: unsaved editor content is mapped to a standalone draft file named after
+//! the file it belongs to and keyed by the SHA-256 of that file's normalized absolute path.
 //!
 //! A draft of an encrypted file is sealed with that file's key before it is written, so
 //! the text never reaches the disk in the clear next to a document the user encrypted.
@@ -169,22 +169,94 @@ pub fn normalize_path(raw: &str) -> String {
   }
 }
 
-/// The digest that identifies a path across every path-keyed store: draft file names,
-/// per-file overrides, and the credential-manager account for a remembered password. One
-/// derivation, so a path means the same thing everywhere and never appears in readable
-/// form in a store the user can browse.
+fn digest(normalized: &str) -> String {
+  let mut hasher = Sha256::new();
+  hasher.update(normalized.as_bytes());
+  let value = hasher.finalize();
+  value.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// The digest that identifies a path: the tail of every draft file's name, the key of the
+/// per-file overrides, and the credential-manager account a remembered password is stored
+/// under. One derivation, so a path means the same thing in all three.
+///
+/// The override store and the credential account carry nothing but this digest, because both
+/// are places a name goes where the file it names is not wanted. A draft file is the one
+/// exception: it leads with the file's own name, which is already stored in plain text inside
+/// the draft and inside the sealed envelope's path, so putting it in the file name tells a
+/// person browsing the folder something they could already read.
 pub(crate) fn draft_key(raw: &str) -> String {
   let normalized = normalize_path(raw);
   if normalized.is_empty() {
     return String::new();
   }
-  let mut hasher = Sha256::new();
-  hasher.update(normalized.as_bytes());
-  let digest = hasher.finalize();
-  digest.iter().map(|b| format!("{b:02x}")).collect()
+  digest(&normalized)
+}
+
+/// The most of a draft file's name given to the file's own name. The digest is 64 characters
+/// on its own and the folder sits well inside the profile, so a name that runs to two hundred
+/// characters is cut rather than followed.
+const LABEL_MAX: usize = 48;
+
+/// The readable half of a draft file's name: the last component of the path, with what no
+/// filesystem takes removed and the length capped.
+fn label_of(normalized: &str) -> String {
+  let name = normalized.rsplit(['/', '\\']).next().unwrap_or_default();
+  // A control character would make the name unusable in a shell, and none of these survive as
+  // a Windows file name. A reserved name like `CON` cannot come out of this either: those are
+  // matched exactly, and every draft stem has `-` and 64 more characters behind it.
+  let cleaned: String = name
+    .chars()
+    .filter(|c| !matches!(c, '<' | '>' | ':' | '"' | '/' | '\\' | '|' | '?' | '*'))
+    .filter(|c| !c.is_control())
+    .collect();
+  // NTFS will not take a file name ending in a dot or a space.
+  let cleaned = cleaned
+    .trim_end_matches(|c| c == '.' || c == ' ')
+    .to_string();
+  if cleaned.is_empty() {
+    return "unnamed".into();
+  }
+  if cleaned.chars().count() <= LABEL_MAX {
+    return cleaned;
+  }
+  // Cut the stem and keep the extension: the extension is what tells two capped names apart at
+  // a glance, and the digest behind them already makes the name unique.
+  let path = Path::new(&cleaned);
+  let stem = path
+    .file_stem()
+    .and_then(|s| s.to_str())
+    .unwrap_or(&cleaned);
+  let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("");
+  let keep = LABEL_MAX.saturating_sub(ext.chars().count() + 1).max(1);
+  let taken: String = stem.chars().take(keep).collect();
+  if ext.is_empty() {
+    taken
+  } else {
+    format!("{taken}.{ext}")
+  }
+}
+
+/// The whole stem of a draft file's name: the file's own name, then the digest of its
+/// normalized path. The name is there to be read — a folder of bare digests says nothing about
+/// which document has edits waiting — and the digest is what it is keyed by, because two
+/// `notes.md` files in two folders must not answer to one draft.
+fn draft_stem(raw: &str) -> Option<String> {
+  let normalized = normalize_path(raw);
+  if normalized.is_empty() {
+    return None;
+  }
+  Some(format!("{}-{}", label_of(&normalized), digest(&normalized)))
 }
 
 fn draft_file(app: &AppHandle, raw: &str) -> Result<PathBuf, String> {
+  let stem = draft_stem(raw).ok_or_else(|| "path_unresolvable".to_string())?;
+  Ok(drafts_dir(app)?.join(format!("{stem}.draft")))
+}
+
+/// The name every draft carried before the file's own name went into it: the bare digest. Still
+/// read, and retired as it is read, because an upgrade must not look like lost edits.
+fn legacy_draft_file(app: &AppHandle, raw: &str) -> Result<PathBuf, String> {
   let key = draft_key(raw);
   if key.is_empty() {
     return Err("path_unresolvable".into());
@@ -192,12 +264,32 @@ fn draft_file(app: &AppHandle, raw: &str) -> Result<PathBuf, String> {
   Ok(drafts_dir(app)?.join(format!("{key}.draft")))
 }
 
+/// Read a draft, preferring the current name and falling back to the bare-digest name. It
+/// reports which file the bytes came from, so the caller can retire the old name rather than
+/// leave a second draft for the same path behind.
+fn read_draft(
+  app: &AppHandle,
+  raw: &str,
+  file: &Path,
+) -> Result<Option<(PathBuf, Vec<u8>)>, String> {
+  match std::fs::read(file) {
+    Ok(bytes) => return Ok(Some((file.to_path_buf(), bytes))),
+    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+    Err(e) => return Err(format!("draft_read:{e}")),
+  }
+  let legacy = legacy_draft_file(app, raw)?;
+  match std::fs::read(&legacy) {
+    Ok(bytes) => Ok(Some((legacy, bytes))),
+    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+    Err(e) => Err(format!("draft_read:{e}")),
+  }
+}
+
 pub fn load(app: &AppHandle, raw: &str, key: DraftKey) -> Result<Option<Draft>, String> {
   let file = draft_file(app, raw)?;
-  let bytes = match std::fs::read(&file) {
-    Ok(b) => b,
-    Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-    Err(e) => return Err(format!("draft_read:{e}")),
+  let (source, bytes) = match read_draft(app, raw, &file)? {
+    Some(found) => found,
+    None => return Ok(None),
   };
   let outcome = match parse_stored(&bytes) {
     Ok(Stored::Plain(draft)) => Ok(Some(draft)),
@@ -224,7 +316,13 @@ pub fn load(app: &AppHandle, raw: &str, key: DraftKey) -> Result<Option<Draft>, 
   };
   if outcome.is_err() {
     // A broken draft must not block opening the file; drop it.
-    let _ = std::fs::remove_file(&file);
+    let _ = std::fs::remove_file(&source);
+    return outcome;
+  }
+  if source != file {
+    // One draft per path, in one name: what was read under the old name moves up to the new.
+    // Not failing the open if the move does not work — the draft is already in hand.
+    let _ = std::fs::rename(&source, &file);
   }
   outcome
 }
@@ -304,24 +402,39 @@ pub fn save(
   let tmp = file.with_extension("tmp");
   std::fs::write(&tmp, &bytes).map_err(|e| format!("draft_write:{e}"))?;
   std::fs::rename(&tmp, &file).map_err(|e| format!("draft_replace:{e}"))?;
+  if let Ok(legacy) = legacy_draft_file(app, raw) {
+    // The new name is the draft now. Leaving the digest-only file behind would keep a second,
+    // older copy of the same draft one lookup away.
+    let _ = std::fs::remove_file(legacy);
+  }
   Ok(Some(draft))
 }
 
 pub fn clear(app: &AppHandle, raw: &str) -> Result<bool, String> {
   let file = draft_file(app, raw)?;
-  match std::fs::remove_file(&file) {
-    Ok(()) => Ok(true),
+  let removed = match std::fs::remove_file(&file) {
+    Ok(()) => true,
     // Nothing there to begin with counts as cleared.
-    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
+    Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+    Err(e) => return Err(format!("draft_delete:{e}")),
+  };
+  // Both names, because a draft written before the file's name went into it is still the draft
+  // of this path, and `load` falls back to that name whenever the current one is missing:
+  // clearing only the new one would bring the old text back on the next open.
+  let legacy = legacy_draft_file(app, raw)?;
+  match std::fs::remove_file(&legacy) {
+    Ok(()) => Ok(true),
+    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(removed),
     Err(e) => Err(format!("draft_delete:{e}")),
   }
 }
 
 /// Move the drafts of `old` and of everything inside it to the paths they now belong to.
 ///
-/// A draft file is named by the hash of the path it was written for, so a rename cannot edit
-/// it in place: it has to be re-created under the new key and the old file removed. The
-/// `path` stored inside each one is what says where it belongs, since the name is opaque.
+/// A draft file is named for the path it was written for, so a rename cannot edit it in place:
+/// it has to be re-created under the new name and the old file removed. The readable half of the
+/// name is only the last component of the old path and the digest does not run backwards, so the
+/// `path` stored inside each one is what says where it belongs.
 /// A sealed draft keeps its payload untouched and only has that path rewritten, which is
 /// why the path is not part of what the key protects.
 pub fn rekey_prefix(app: &AppHandle, old: &str, new: &str) -> Result<(), String> {
@@ -416,6 +529,51 @@ mod tests {
   #[test]
   fn empty_path_yields_empty_key() {
     assert_eq!(draft_key("   "), "");
+  }
+
+  /// A folder of bare digests is a folder of anonymous files. The name of the document whose
+  /// edits are waiting goes in front, and the digest stays behind it because two `notes.md`
+  /// files in two folders must never answer to one draft.
+  #[test]
+  fn a_draft_name_leads_with_the_file_and_ends_with_the_digest() {
+    let stem = draft_stem(r"C:\Notes\work\report.pdf").expect("stem");
+    assert!(stem.starts_with("report.pdf-"), "{stem}");
+    assert_eq!(stem.len(), "report.pdf-".len() + 64);
+    assert_eq!(
+      stem["report.pdf-".len()..],
+      draft_key(r"C:\Notes\work\report.pdf")
+    );
+    // Every spelling of one path is one draft file, so the readable half cannot disagree with
+    // the digest about which file this is.
+    assert_eq!(
+      stem,
+      draft_stem(r"c:/notes/work/../work/REPORT.PDF").expect("other stem")
+    );
+  }
+
+  #[test]
+  fn a_label_is_cleaned_capped_and_never_empty() {
+    assert_eq!(label_of(r"c:\x\co?lon:.txt"), "colon.txt");
+    assert_eq!(label_of(r"c:\x\trailing... "), "trailing");
+    assert_eq!(label_of(r"c:\x\???"), "unnamed");
+    let long = format!(r"c:\x\{}.txt", "a".repeat(120));
+    let label = label_of(&long);
+    assert!(label.chars().count() <= LABEL_MAX, "{label}");
+    assert!(label.ends_with(".txt"), "the extension outlives the cap");
+    // A reserved device name is matched exactly, and every stem has `-` and a digest behind it.
+    assert_eq!(label_of(r"c:\x\CON"), "CON");
+  }
+
+  /// The old name is still the same digest, so a draft folder written by an earlier build is
+  /// one rename away from the new shape rather than a lost set of edits.
+  #[test]
+  fn the_old_name_is_still_derivable_from_the_path() {
+    let raw = r"C:\Notes\work\report.pdf";
+    let key = draft_key(raw);
+    assert_eq!(key.len(), 64);
+    assert!(draft_stem(raw).expect("stem").ends_with(&key));
+    assert_eq!(draft_key("   "), String::new());
+    assert_eq!(draft_stem("   "), None);
   }
 
   const KEY: [u8; KEY_LEN] = [9u8; KEY_LEN];
