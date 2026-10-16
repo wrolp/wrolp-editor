@@ -2007,6 +2007,13 @@ body.resizing .editor-host {
   font-family: Consolas, "Courier New", monospace;
   color: var(--text-dim);
 }
+/* A folder path has no spaces to break on, and one that runs past its pane is a path nobody
+   can read or copy out. Monospace because the thing being shown is a filesystem location. */
+.store-path {
+  font-family: Consolas, "Courier New", monospace;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
 .setting-target {
   margin-top: 12px;
   padding: 9px 11px;
@@ -2064,6 +2071,11 @@ body.resizing .editor-host {
   color: var(--muted);
 }
 .statusbar .sb-size {
+  color: var(--muted);
+}
+/* The line ending is a fact about the file, the same as its size, so it is read in the same
+   quiet colour rather than looking like a state the file is in. */
+.statusbar .sb-eol {
   color: var(--muted);
 }
 .statusbar .sb-lock {
@@ -2233,6 +2245,9 @@ body.resizing .editor-host {
 }
 .toast.show {
   opacity: 1;
+  /* Hovering can only hold the toast up if the pointer can reach it, and a transparent toast
+     must not sit over the content and swallow clicks. */
+  pointer-events: auto;
 }
 
 /* ---------- Custom scrollbars ----------

@@ -60,12 +60,14 @@ import {
 import {
   isFileTab,
   isLockedBlank,
+  lineEndingFor,
   pathKey,
   sideKey,
   type CompareRef,
   type DiffStats,
   type EditStats,
   type EditorHandle,
+  type Tab,
 } from "./lib/types";
 import {
   api,
@@ -110,6 +112,9 @@ const DEFAULT_SETTINGS: Settings = {
   tabSize: 2,
   insertSpaces: true,
   detectIndentation: true,
+  // LF for a document that has no line endings of its own: what the editor already used before
+  // this was a setting, so nothing changes for anybody who never opens the panel.
+  lineEnding: "lf",
   scrollBeyondLastLine: true,
   // A document is opened to be read and written, so the editor is what a file opens to.
   // The preview is one keystroke away; a preview nobody asked for costs a pane.
@@ -121,6 +126,22 @@ const DEFAULT_SETTINGS: Settings = {
   // enough to read and edit without being asked again, short enough that walking away from
   // the machine does not leave the key sitting in memory indefinitely.
   encryptIdleMinutes: 10,
+}
+
+/**
+ * How a line ending is written where somebody reads it: the setting spells it `crlf` and the
+ * status bar shows `CRLF` — the same three letters every other editor uses, so nothing here is
+ * translated. Nothing to report comes out empty rather than as a guess.
+ */
+function eolLabel(value: string | null): string {
+  return value ? value.trim().toUpperCase() : "";
+}
+
+/** The line ending a save of this tab writes. Empty for a tab that is not a text file: a
+ * picture has no text to end, and Settings and comparison tabs are not files. */
+function eolShownFor(tab: Tab | null, defaultEol: string): string {
+  if (!tab || !isFileTab(tab) || tab.isBinary) return "";
+  return eolLabel(lineEndingFor(tab, defaultEol));
 }
 
 /**
@@ -165,14 +186,36 @@ function usePrefersDark(): boolean {
 /** What fills the preview pane: rendered markdown, a picture, or a live HTML page. */
 type PreviewKind = "markdown" | "image" | "html" | null;
 
+/**
+ * How long a toast stays up on its own. Long enough to read a two-line error once, without
+ * being so long that the next message arrives before the last one has gone.
+ */
+const TOAST_MS = 4000;
+
 export default function App() {
   const [toastState, setToastState] = useState({ message: "", visible: false });
   const toastTimer = useRef<number | undefined>(undefined);
-  const toast = useCallback((message: string) => {
-    setToastState({ message, visible: true });
+  /** Whether a pointer is resting on the toast, which is what stops the countdown. */
+  const toastHeld = useRef(false);
+  const hideToast = useCallback(() => setToastState((s) => ({ ...s, visible: false })), []);
+  const toast = useCallback(
+    (message: string) => {
+      setToastState({ message, visible: true });
+      window.clearTimeout(toastTimer.current);
+      // A message that lands while the pointer is still on the previous one is shown held too,
+      // so the toast never drops out from under the hand reading it.
+      if (!toastHeld.current) toastTimer.current = window.setTimeout(hideToast, TOAST_MS);
+    },
+    [hideToast]
+  );
+  const holdToast = useCallback(() => {
+    toastHeld.current = true;
     window.clearTimeout(toastTimer.current);
-    toastTimer.current = window.setTimeout(() => setToastState((s) => ({ ...s, visible: false })), 1800);
   }, []);
+  const releaseToast = useCallback(() => {
+    toastHeld.current = false;
+    hideToast();
+  }, [hideToast]);
 
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   // `system` is resolved here rather than in the backend: the OS preference can change while
@@ -246,6 +289,7 @@ export default function App() {
     onFileOpened,
     encodingPref: settings.encoding,
     draftRestorePref: settings.draftRestore,
+    lineEndingPref: settings.lineEnding,
   });
   const groups = useGroups({ onError: toast });
   // The window goes back where it was before anything else measures it.
@@ -1162,6 +1206,8 @@ export default function App() {
   const showSettings = tabs.activeTab?.isSettings === true;
   const sidebarShown = sidebarVisible && !showSettings;
   const editorTab = tabs.editorTab;
+  /** The line ending the tab on screen would be saved with; "" for one that has none to speak of. */
+  const shownEol = eolShownFor(tabs.activeTab, settings.lineEnding);
   // Per-file overrides win over the global defaults, one field at a time.
   const fileSettingsTab =
     fileSettingsPath === null
@@ -1379,8 +1425,14 @@ const defaultModeFor = useCallback(
             onRemove={groups.remove}
           />
         }
+        // The control describes the tab on screen, and the Settings page has no pane for it.
+        // While that page shows, `editorTab` is deliberately still the last file — that model is
+        // what keeps its unsaved text alive — so the buttons would offer a layout nothing takes,
+        // and the choice would be filed under the Settings page's fake path.
         previewMode={
-          editorTab && !editorTab.compare && previewKind && !lockedToPicture ? previewMode : null
+          !showSettings && editorTab && !editorTab.compare && previewKind && !lockedToPicture
+            ? previewMode
+            : null
         }
         onPreviewMode={setPreviewMode}
         onSelect={tabs.selectTab}
@@ -1589,6 +1641,7 @@ const defaultModeFor = useCallback(
         line={cursor.line}
         column={cursor.column}
         stats={stats}
+        eol={shownEol}
         diff={diffStats}
       />
 
@@ -1885,6 +1938,7 @@ const defaultModeFor = useCallback(
           path={fileSettingsTab.path}
           name={fileSettingsTab.name}
           detectedEncoding={fileSettingsTab.encoding}
+          detectedEol={eolLabel(lineEndingFor(fileSettingsTab, settings.lineEnding))}
           onSave={(p, next) => tabs.setFileSettings(p, next)}
           onClose={() => setFileSettingsPath(null)}
           onError={toast}
@@ -2052,7 +2106,12 @@ const defaultModeFor = useCallback(
         )
       )}
 
-      <Toast message={toastState.message} visible={toastState.visible} />
+      <Toast
+        message={toastState.message}
+        visible={toastState.visible}
+        onHold={holdToast}
+        onRelease={releaseToast}
+      />
     </div>
   );
 }

@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { LANGUAGES, t } from "../lib/i18n";
 import { parseExtensionList } from "../lib/path";
+import { LINE_ENDINGS } from "../lib/types";
 import SettingCheck from "./SettingCheck";
 import SettingField from "./SettingField";
-import { api, errorMessage, type MenuTarget, type Settings } from "../lib/tauri";
+import { api, errorMessage, openPath, type MenuTarget, type Settings, type StoreDirs } from "../lib/tauri";
 
 type Category = "context" | "general" | "encryption" | "about";
 
@@ -63,6 +64,9 @@ export default function SettingsPanel({
   // The first entry in NAV, so opening Settings lands on it rather than on the second one.
   const [category, setCategory] = useState<Category>("general");
   const [version, setVersion] = useState("…");
+  /** The two storage folders, or null while the backend has not said where they are. */
+  const [dirs, setDirs] = useState<StoreDirs | null>(null);
+  const [dirsError, setDirsError] = useState<string | null>(null);
   /** How many passwords the credential store is holding, or null when it would not say. */
   const [remembered, setRemembered] = useState<number | null>(null);
   const [rememberedError, setRememberedError] = useState<string | null>(null);
@@ -87,9 +91,27 @@ export default function SettingsPanel({
   };
 
   // Read the packaged version instead of hardcoding it, so About cannot drift from tauri.conf.json.
+  // The folders are read at the same moment: both are things only the running build knows, and
+  // the About page is small enough that a second call costs nothing.
   useEffect(() => {
     getVersion().then(setVersion).catch(() => setVersion("unknown"));
+    api
+      .getStoreDirs()
+      .then((found) => {
+        setDirs(found);
+        setDirsError(null);
+      })
+      .catch((e) => setDirsError(errorMessage(e)));
   }, []);
+
+  /**
+   * Hand one of those folders to the shell. Only the two paths the backend just returned are
+   * ever passed here — `opener:allow-open-path` opens a path with its registered application,
+   * which is why nothing from a document or a click is allowed to reach it.
+   */
+  const openFolder = (path?: string) => {
+    if (path) openPath(path).catch((e) => onToast(errorMessage(e)));
+  };
 
   /**
    * Ask the credential store how much it is holding.
@@ -376,6 +398,20 @@ export default function SettingsPanel({
                 </select>
               </SettingField>
               <p className="muted">{t("settings.encodingDesc")}</p>
+              <SettingField label={t("settings.lineEnding")}>
+                <select
+                  className="select"
+                  value={settings.lineEnding}
+                  onChange={(e) => onSaveSettings({ lineEnding: e.target.value })}
+                >
+                  {LINE_ENDINGS.map((option) => (
+                    <option key={option} value={option}>
+                      {t(`settings.lineEnding.${option}`)}
+                    </option>
+                  ))}
+                </select>
+              </SettingField>
+              <p className="muted">{t("settings.lineEndingDesc")}</p>
               <SettingField label={t("settings.theme")}>
                 <select
                   className="select"
@@ -447,6 +483,30 @@ export default function SettingsPanel({
               <p>{t("settings.version", { version })}</p>
               <p className="muted">{t("settings.aboutLine")}</p>
               <p className="muted">{t("settings.draftLine")}</p>
+              {/* The folders are named by the backend and opened by the shell rather than
+                  listed here: the layout is `wrolp_dir`'s to decide, and a copy of a path the
+                  app can already resolve is a path that can go stale. */}
+              <SettingField label={t("settings.stateDir")}>
+                <button
+                  className="btn small"
+                  disabled={!dirs}
+                  onClick={() => openFolder(dirs?.state)}
+                >
+                  {t("settings.openFolder")}
+                </button>
+              </SettingField>
+              <p className="muted store-path">{dirs?.state ?? ""}</p>
+              <SettingField label={t("settings.draftsDir")}>
+                <button
+                  className="btn small"
+                  disabled={!dirs}
+                  onClick={() => openFolder(dirs?.drafts)}
+                >
+                  {t("settings.openFolder")}
+                </button>
+              </SettingField>
+              <p className="muted store-path">{dirs?.drafts ?? ""}</p>
+              {dirsError && <p className="setting-warn">{dirsError}</p>}
             </div>
           </div>
         )}

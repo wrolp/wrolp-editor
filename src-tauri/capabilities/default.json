@@ -24,6 +24,14 @@
     "dialog:default",
     "opener:default",
     "opener:allow-reveal-item-in-dir",
+    {
+      "identifier": "opener:allow-open-path",
+      "description": "Only the two folders Settings → About opens for itself. `allow-open-path` grants the command, but the plugin also matches the path against this list, and an empty list lets nothing through.",
+      "allow": [
+        { "path": "$APPCONFIG/wrolp/state" },
+        { "path": "$APPCONFIG/wrolp/drafts" }
+      ]
+    },
     "clipboard-manager:allow-read-text"
   ]
 }

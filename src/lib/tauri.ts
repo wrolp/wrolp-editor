@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
-import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
+import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { t, translateError } from "./i18n";
 
 export interface OpenedFile {
@@ -122,6 +122,13 @@ export interface Settings {
   insertSpaces: boolean;
   /** Let a file's own content decide the indentation instead of the two settings above. */
   detectIndentation: boolean;
+  /**
+   * How a document with no line endings of its own is written: `lf` | `crlf`. A file that was
+   * read with breaks in it keeps them whatever this says — only the per-file override rewrites
+   * an existing file, and that is by design, because a setting must not turn a folder of CRLF
+   * files into a diff nobody asked for.
+   */
+  lineEnding: string;
   /** Allow scrolling past the end so the last line can sit above the bottom edge. */
   scrollBeyondLastLine: boolean;
   /**
@@ -143,6 +150,17 @@ export interface Settings {
    * written, so the frontend has to carry it back or a save would reset it to the default.
    */
   encryptIdleMinutes: number;
+}
+
+/**
+ * The folders the app's own files live in, resolved by the backend. The frontend is not
+ * given the layout because it would then have to be right twice.
+ */
+export interface StoreDirs {
+  /** settings.json, groups.json, history.json, window.json, file-settings.json. */
+  state: string;
+  /** One file per document with unsaved edits. */
+  drafts: string;
 }
 
 /** One restored tab: either a file (path + cursor) or scratch text (untitled + content). */
@@ -226,6 +244,12 @@ export interface FileSettings {
   insertSpaces: boolean | null;
   detectIndentation: boolean | null;
   encoding: string | null;
+  /**
+   * Write this file's line breaks as `lf` or `crlf`. Unlike every other field here, `null` does
+   * not mean "take the global setting": it means the file keeps the endings it was read with,
+   * which is why the global value is never shown as this one's fallback.
+   */
+  lineEnding: string | null;
 }
 
 export const EMPTY_FILE_SETTINGS: FileSettings = {
@@ -237,6 +261,7 @@ export const EMPTY_FILE_SETTINGS: FileSettings = {
   insertSpaces: null,
   detectIndentation: null,
   encoding: null,
+  lineEnding: null,
 };
 
 export interface FileSettingsView {
@@ -388,6 +413,7 @@ export const api = {
     invoke<FolderHistoryEntry[]>("remove_folder_history", { group, path }),
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (settings: Settings) => invoke<Settings>("save_settings", { settings }),
+  getStoreDirs: () => invoke<StoreDirs>("get_store_dirs"),
   getGroups: () => invoke<GroupStore>("get_groups"),
   saveGroups: (store: GroupStore) => invoke<GroupStore>("save_groups", { store }),
   transferTabs: (store: GroupStore, transfer: TabTransfer) =>
@@ -405,8 +431,12 @@ export const api = {
 /**
  * `openUrl` hands a URL to the OS default application. The `opener:default` capability already
  * scopes it to `http`, `https`, `mailto` and `tel`, so a document cannot name an application.
+ *
+ * `openPath` is the wider of the two — it hands a filesystem path to whatever the OS has
+ * registered for it — so it is granted separately and used for one thing only: opening the two
+ * folders `getStoreDirs` names. A path from anywhere else never reaches it.
  */
-export { invoke, listen, open, save, revealItemInDir, openUrl };
+export { invoke, listen, open, save, revealItemInDir, openUrl, openPath };
 
 const fileFilters = () => [{ name: t("dialog.allFiles"), extensions: ["*"] }];
 

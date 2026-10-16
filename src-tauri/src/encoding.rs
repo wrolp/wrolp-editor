@@ -74,6 +74,33 @@ pub fn is_known(name: &str) -> bool {
   key == AUTO || resolve(&key).is_ok()
 }
 
+/// The line endings a setting or an override may name. There is no `auto` here on purpose:
+/// "leave the file's own endings alone" is the absence of a value, not a value to pick. A lone
+/// carriage return is not offered either: Monaco's model joins its lines with LF or CRLF and
+/// nothing else, so a break the editor cannot type is a break its status bar would lie about.
+///
+/// The menus read the mirror of this list in `src/lib/types.ts`. Applying the choice to the text
+/// is the frontend's work — the buffer is where the breaks live — so what lands on disk is what
+/// was on screen.
+pub const LINE_ENDINGS: [&str; 2] = ["lf", "crlf"];
+
+/// True when `name` is one of [`LINE_ENDINGS`], accepting the spellings a hand-edited
+/// settings.json tends to carry (`CRLF`, `crlf `, `Windows`).
+pub fn is_line_ending(name: &str) -> bool {
+  LINE_ENDINGS.contains(&normalize_line_ending(name).as_str())
+}
+
+/// The stored spelling of a line ending: lowercased, trimmed, and with the two words a
+/// hand-written file uses mapped onto them.
+pub fn normalize_line_ending(name: &str) -> String {
+  let key = name.trim().to_ascii_lowercase().replace(['-', ' '], "");
+  match key.as_str() {
+    "windows" | "dos" => "crlf".into(),
+    "unix" => "lf".into(),
+    _ => key,
+  }
+}
+
 fn is_utf16(encoding: &'static Encoding) -> bool {
   encoding.name() == "UTF-16LE" || encoding.name() == "UTF-16BE"
 }
@@ -295,5 +322,21 @@ mod tests {
       decode(&[0x68, 0x00, 0x69], "utf-16le").unwrap_err(),
       "file_undecodable"
     );
+  }
+
+  #[test]
+  fn a_line_ending_is_recognized_in_the_spellings_a_hand_edited_file_uses() {
+    assert!(is_line_ending("CRLF"));
+    assert!(is_line_ending(" lf "));
+    assert!(is_line_ending("windows"));
+    assert_eq!(normalize_line_ending("Windows"), "crlf");
+    assert!(!is_line_ending("martian"));
+    // `auto` is the encoding list's word for "decide per file", and line endings have no
+    // equivalent: not choosing is what leaves a file alone.
+    assert!(!is_line_ending("auto"));
+    // A lone carriage return is the one ending on disk this app will not promise: the editor's
+    // model joins its lines with LF or CRLF and nothing else, so a break it cannot type would
+    // only ever be reported wrongly.
+    assert!(!is_line_ending("cr"));
   }
 }

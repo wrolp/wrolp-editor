@@ -42,6 +42,11 @@ pub struct FileSettings {
   /// back per tab, so a save always writes back what the file was read in.
   #[serde(skip_serializing_if = "Option::is_none")]
   pub encoding: Option<String>,
+  /// Rewrites this file's line endings to this value on save. `None` is the common case and
+  /// means the file keeps the endings it was read with, which is why there is no "keep the
+  /// original" value to choose: absence of an override already says it.
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub line_ending: Option<String>,
 }
 
 impl FileSettings {
@@ -55,6 +60,7 @@ impl FileSettings {
       && self.insert_spaces.is_none()
       && self.detect_indentation.is_none()
       && self.encoding.is_none()
+      && self.line_ending.is_none()
   }
 
   /// Drop values the editor would not accept. A stale or hand-edited file must not be
@@ -73,6 +79,7 @@ impl FileSettings {
       insert_spaces: self.insert_spaces,
       detect_indentation: self.detect_indentation,
       encoding: self.encoding.filter(|v| encoding::is_known(v)),
+      line_ending: self.line_ending.filter(|v| encoding::is_line_ending(v)),
     }
   }
 }
@@ -208,6 +215,7 @@ pub fn file_settings_view(app: AppHandle, path: String) -> Result<FileSettingsVi
     insert_spaces: Some(settings.insert_spaces),
     detect_indentation: Some(settings.detect_indentation),
     encoding: Some(settings.encoding),
+    line_ending: Some(settings.line_ending),
   };
   Ok(FileSettingsView {
     overrides: load_store(&app)?.get(&path),
@@ -287,6 +295,13 @@ mod tests {
           ..Default::default()
         },
       ),
+      (
+        "line_ending",
+        FileSettings {
+          line_ending: Some("crlf".into()),
+          ..Default::default()
+        },
+      ),
     ] {
       assert!(!settings.is_empty(), "{field} missing from is_empty");
       let s = store(&[("c:\\a.txt", settings)]).filled();
@@ -338,15 +353,42 @@ mod tests {
         insert_spaces: Some(false),
         detect_indentation: Some(false),
         encoding: Some("klingon".into()),
+        line_ending: Some("martian".into()),
       },
     )])
     .filled();
     let got = s.get("c:\\A.TXT");
     assert_eq!(got.render_whitespace, None);
     assert_eq!(got.encoding, None);
+    assert_eq!(got.line_ending, None);
     assert_eq!(got.word_wrap, Some(true));
     assert_eq!(got.sticky_scroll, Some(false));
     assert_eq!(got.minimap, Some(true));
+  }
+
+  #[test]
+  fn a_known_line_ending_override_is_kept() {
+    let s = store(&[
+      (
+        "C:\\a.txt",
+        FileSettings {
+          line_ending: Some("crlf".into()),
+          ..Default::default()
+        },
+      ),
+      (
+        "C:\\b.txt",
+        FileSettings {
+          line_ending: Some("LF".into()),
+          ..Default::default()
+        },
+      ),
+    ])
+    .filled();
+    assert_eq!(s.get("C:\\a.txt").line_ending.as_deref(), Some("crlf"));
+    // Case is what a hand-written value varies in, and the save path reads the value case
+    // insensitively, so there is nothing to correct here and no reason to lose the entry.
+    assert_eq!(s.get("C:\\b.txt").line_ending.as_deref(), Some("LF"));
   }
 
   #[test]

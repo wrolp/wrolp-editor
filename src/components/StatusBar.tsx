@@ -8,6 +8,11 @@ interface Props {
   line: number;
   column: number;
   stats: EditStats;
+  /**
+   * `LF`, `CRLF` or `CR` — what a save of this tab would write as its line ending, or empty
+   * when the tab has no text to end. Language-neutral, like the size next to it.
+   */
+  eol: string;
   /** Added/removed lines of a comparison tab; null while any other tab is showing. */
   diff: DiffStats | null;
 }
@@ -28,7 +33,7 @@ function formatBytes(bytes: number): string {
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
 }
 
-export default function StatusBar({ tab, line, column, stats, diff }: Props) {
+export default function StatusBar({ tab, line, column, stats, eol, diff }: Props) {
   // A comparison tab shows two files, so the file counters (selection, size, dirty) and
   // the single caret readout do not apply to it; it gets the diff totals instead.
   const file = tab && isFileTab(tab);
@@ -88,6 +93,9 @@ export default function StatusBar({ tab, line, column, stats, diff }: Props) {
       <span className="sb-cursor">
         {counters ? t("status.cursor", { line, column }) : ""}
       </span>
+      {/* Only the ending itself, in the three letters every editor uses; a tab that is not a
+          text file has none to show. */}
+      {eol && <span className="sb-eol">{eol}</span>}
       <span className="sb-lang">{counters ? tab.language : ""}</span>
     </div>
   );

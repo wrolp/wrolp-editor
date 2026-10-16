@@ -11,6 +11,7 @@
 | 多标签 | 单窗口多文件；标签脏标记、已打开文件下拉列表、标签右键菜单 |
 | 编辑 | Monaco：按扩展名高亮、minimap、每个文件独立 model、切回标签还原光标 |
 | 保存 | `Ctrl+S` 写回文件并清除该草稿；未落盘过的 `Untitled-N` 走另存为 |
+| 换行符 | 读到什么就按什么写回。想强制某个文件用 LF 或 CRLF，去那个标签的「文件设置」；本来没有换行符的文档（新建文件最常见）用设置 → 常规 里选的。状态栏显示的就是保存会写入的换行符。不单独提供 CR：Monaco 的模型只会用 LF 或 CRLF 拼接行 |
 | 草稿 | 编辑后约 500ms 防抖落盘；切标签、关标签、窗口失焦时立即冲刷 |
 | 恢复 | 打开文件时把磁盘内容与草稿比对，不一致就直接把草稿装回去，标签保持未保存状态；设置里可以改成每个文件弹「恢复草稿 / 丢弃」询问 |
 | 侧边栏 | 资源管理器目录树（子目录懒加载 + 刷新按钮）与最近打开的历史列表。拖动分隔条可调宽（180–640 px，双击复位），宽度会持久化 |
@@ -71,7 +72,7 @@ npm run tauri build
 
 ## 数据存放位置
 
-全部在应用配置目录下 —— Windows 上是 `%APPDATA%\com.wrolp.editor`：
+全部在应用配置目录下 —— Windows 上是 `%APPDATA%\com.wrolp.editor`；设置 → 关于 会列出这两个目录的完整路径，并能直接在资源管理器里打开：
 
 ```
 wrolp/
@@ -80,7 +81,7 @@ wrolp/
 └── state/
     ├── history.json          最近打开，新的在前，最多 50 条
     ├── settings.json         fontSize、minimap、sidebarVisible、sidebarView、sidebarWidth、language、
-    │                         restoreSession、draftRestore、sidebarRoot、encryptIdleMinutes
+    │                         restoreSession、draftRestore、lineEnding、sidebarRoot、encryptIdleMinutes
     ├── groups.json           标签分组：名字、标签与光标位置
     └── window.json           x、y、width、height（物理像素）与是否最大化
 ```
@@ -106,7 +107,7 @@ wrolp/
 目录树与文件操作（`list_dir`、`create_file`、`create_dir`、`rename_path`、`copy_entry`、`remove_entry`、
 `keep_file`），分组与会话（`get_groups`、`save_groups`、`transfer_tabs`、`get_window_state`、
 `save_window_state`、`plan_window_placement`），设置与右键菜单（`get_settings`、`save_settings`、
-`context_menu_target`、`install_context_menu`、`uninstall_context_menu`），以及加密（`unlock_file`、
+`get_store_dirs`、`context_menu_target`、`install_context_menu`、`uninstall_context_menu`），以及加密（`unlock_file`、
 `lock_file`、`lock_all`、`save_file_as_encrypted`、`create_encrypted`、`change_password`、
 `remove_encryption`、`remember_password`、`forget_password`、`recall_password`、
 `remembered_password_count`、`clear_remembered_passwords`）。

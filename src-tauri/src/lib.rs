@@ -68,6 +68,7 @@ pub fn run() {
       commands::remove_folder_history,
       commands::get_settings,
       commands::save_settings,
+      commands::get_store_dirs,
       commands::get_groups,
       commands::save_groups,
       commands::transfer_tabs,

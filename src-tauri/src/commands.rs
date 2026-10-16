@@ -146,6 +146,12 @@ pub struct Settings {
   pub insert_spaces: bool,
   /// Let a file's own content win over the two settings above.
   pub detect_indentation: bool,
+  /// The line ending for a document that has none of its own: a new file, or one read with no
+  /// break in it. A file that came with breaks is written back with those unless its own entry
+  /// in `file-settings.json` says otherwise, so this setting never rewrites somebody's
+  /// repository underneath them. One of `encoding::LINE_ENDINGS`; the editor applies the choice
+  /// to the text, so a save always writes what it showed.
+  pub line_ending: String,
   /// Allow scrolling past the end, so the last line can sit above the bottom edge.
   pub scroll_beyond_last_line: bool,
   /// How a file that has a preview opens: auto | text | split | preview. `text` is the
@@ -192,6 +198,7 @@ impl Default for Settings {
       tab_size: 2,
       insert_spaces: true,
       detect_indentation: true,
+      line_ending: "lf".into(),
       scroll_beyond_last_line: true,
       preview_layout: "text".into(),
       preview_width: "narrow".into(),
@@ -296,6 +303,13 @@ impl Settings {
       },
       insert_spaces: self.insert_spaces,
       detect_indentation: self.detect_indentation,
+      // Same rule as the encoding above: a value the editor cannot use is a stale or
+      // hand-edited key, and the safe reading of that is the convention the app started with.
+      line_ending: if crate::encoding::is_line_ending(&self.line_ending) {
+        crate::encoding::normalize_line_ending(&self.line_ending)
+      } else {
+        "lf".into()
+      },
       scroll_beyond_last_line: self.scroll_beyond_last_line,
       // Hand-edited or older settings can carry anything; an unknown layout would leave the
       // frontend with no mode to show, so fall back to the default rather than trust it.
@@ -1229,6 +1243,27 @@ pub fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, Str
   Ok(settings)
 }
 
+/// The two folders the user's own work lives in, one line each in Settings → About.
+///
+/// Asked for rather than assembled in the frontend: `wrolp_dir` is what decides where these
+/// are, and a layout spelled out twice is a layout that can be wrong twice.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoreDirs {
+  /// Settings, groups, history, window placement and the per-file overrides.
+  pub state: String,
+  /// The unsaved text of every file that has any.
+  pub drafts: String,
+}
+
+#[tauri::command]
+pub fn get_store_dirs(app: AppHandle) -> Result<StoreDirs, String> {
+  Ok(StoreDirs {
+    state: draft::store_dir(&app)?.to_string_lossy().into_owned(),
+    drafts: draft::drafts_dir(&app)?.to_string_lossy().into_owned(),
+  })
+}
+
 /// Whole-store round trip, same shape as settings. A missing file is a clean first run, not
 /// an error. Older builds kept this in `workspaces.json`: that name is migrated here, on read,
 /// so a failed parse can never be followed by a save that deletes the unreadable original.
@@ -1731,6 +1766,25 @@ mod tests {
     // A draft mode nobody offered is a hand-edited key, and the safer half of the mistake
     // is to load the draft rather than to risk a dialog that gets dismissed by reflex.
     assert_eq!(s.draft_restore, "auto");
+    // A line ending the save path cannot write falls back to the one a new buffer starts on.
+    assert_eq!(
+      Settings {
+        line_ending: "martian".into(),
+        ..Default::default()
+      }
+      .filled()
+      .line_ending,
+      "lf"
+    );
+    assert_eq!(
+      Settings {
+        line_ending: "CRLF".into(),
+        ..Default::default()
+      }
+      .filled()
+      .line_ending,
+      "crlf"
+    );
     assert_eq!(
       Settings {
         draft_restore: "ask".into(),
@@ -1757,6 +1811,8 @@ mod tests {
     assert_eq!(s.sidebar_root, "");
     // Same for a file written before the draft prompt became a choice: drafts load quietly.
     assert_eq!(s.draft_restore, "auto");
+    // And for one written before line endings could be configured at all.
+    assert_eq!(s.line_ending, "lf");
     assert_eq!(s.filled().sidebar_root, "");
   }
 

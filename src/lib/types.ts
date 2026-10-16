@@ -114,6 +114,54 @@ export function isFileTab(tab: Tab): boolean {
   return !tab.isSettings && !tab.compare;
 }
 
+/**
+ * The line ending a text came with, in the spelling the settings use: its first break. Empty
+ * when the text has no break in it at all.
+ */
+export function firstEolOf(text: string): string {
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] === "\r") return text[i + 1] === "\n" ? "crlf" : "cr";
+    if (text[i] === "\n") return "lf";
+  }
+  return "";
+}
+
+/**
+ * The two endings this app can offer. A carriage return on its own is not among them because
+ * Monaco's model joins its lines with LF or CRLF and nothing else — a choice it cannot type is
+ * a choice its status bar would have to lie about.
+ */
+export const LINE_ENDINGS = ["lf", "crlf"] as const;
+
+/**
+ * The line endings this tab is written with.
+ *
+ * One rule answers two questions — what the buffer is set to, and what the status bar says a
+ * save will do — because a chip that guesses is worse than no chip. An override wins; a file
+ * that came with breaks keeps them, which is what makes the global setting safe to change
+ * around a folder written some other way; only a file with none takes that setting. A file
+ * whose breaks are lone carriage returns becomes LF, which is what the editor already writes.
+ */
+export function lineEndingFor(
+  tab: { original: string; fileSettings: FileSettings },
+  defaultEol: string
+): string {
+  const wanted = tab.fileSettings.lineEnding ?? (firstEolOf(tab.original) || defaultEol);
+  return wanted.toLowerCase() === "crlf" ? "crlf" : "lf";
+}
+
+/**
+ * Monaco's `EndOfLineSequence` member for one of the two names, taken off the editor instance
+ * rather than imported: the loader hands the namespace over at mount and that is the only copy
+ * of those two values worth depending on.
+ */
+export function eolSequence(
+  sequences: { LF: number; CRLF: number },
+  choice: string
+): number {
+  return choice === "crlf" ? sequences.CRLF : sequences.LF;
+}
+
 /** Added and removed line counts of a comparison, as Monaco reports them. */
 export interface DiffStats {
   added: number;

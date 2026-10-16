@@ -15,6 +15,8 @@ import {
 import { basename, dirname, isUntitled, langOf, modelUri, rekeyPath } from "../lib/path";
 import { tabKey, toStoredTab } from "../lib/group";
 import {
+  eolSequence,
+  lineEndingFor,
   pathKey,
   isFileTab,
   isLockedBlank,
@@ -149,6 +151,12 @@ interface Options {
    * it never rebuilds the callbacks that read it.
    */
   draftRestorePref?: string;
+  /**
+   * The line ending for a file that has none of its own, as the global setting names it. In a
+   * ref like the two above: a save reads it when it runs, so changing the setting never rebuilds
+   * the callbacks.
+   */
+  lineEndingPref?: string;
 }
 
 export function useEditorTabs({
@@ -158,6 +166,7 @@ export function useEditorTabs({
   onFileOpened,
   encodingPref,
   draftRestorePref,
+  lineEndingPref,
 }: Options) {
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
@@ -185,6 +194,8 @@ export function useEditorTabs({
   encodingRef.current = encodingPref ?? "auto";
   const draftRestoreRef = useRef(draftRestorePref ?? "auto");
   draftRestoreRef.current = draftRestorePref ?? "auto";
+  const lineEndingRef = useRef(lineEndingPref ?? "lf");
+  lineEndingRef.current = lineEndingPref ?? "lf";
   /**
    * Set while a reload rewrites a buffer. The change and cursor events that rewrite fires are
    * read by the handlers below against the tab object React has not re-rendered yet, so
@@ -336,6 +347,33 @@ export function useEditorTabs({
   );
 
   /**
+   * Give the buffer the line endings this file is written with.
+   *
+   * A file that came with breaks already has them in its model, so this is a no-op in the common
+   * case — deliberately so: it is what lets the global setting change without rewriting a folder
+   * of files somebody else prepared. Two cases are left: a document with no breaks at all, where
+   * the choice decides what the first Enter inserts, and an override, which decides outright.
+   *
+   * Wrapped in `mutating` because Monaco reports an EOL switch as a content change, and nothing
+   * here is an edit — it must not mark the tab unsaved or draft the text for it.
+   */
+  const applyLineEnding = useCallback(
+    async (path: string, original: string, fileSettings: FileSettings) => {
+      const choice = lineEndingFor({ original, fileSettings }, lineEndingRef.current);
+      const mark = choice === "crlf" ? "\r\n" : "\n";
+      const got = await waitForModel(path);
+      if (!got || got.model.getEOL() === mark) return;
+      mutating.current = true;
+      try {
+        got.model.setEOL(eolSequence(got.h.monaco.editor.EndOfLineSequence, choice));
+      } finally {
+        mutating.current = false;
+      }
+    },
+    [waitForModel]
+  );
+
+  /**
    * Answer one draft question: put the draft back, or drop it. `restoreTabs` and `finishOpen`
    * call this for the drafts nobody was asked about, and the dialog's loops call it too, so
    * "Restore all" and a quiet load are not separate implementations of the same answer.
@@ -393,9 +431,16 @@ export function useEditorTabs({
         pendingCursors.current.add(key);
       }
       if (!quiet) toast(t("menu.draftRestored"));
+      // Setting the whole buffer re-detects its line endings from the draft's text, so the
+      // choice this file is written with has to be put back afterwards — otherwise the tab,
+      // the file and the status bar would each describe a different break.
+      const restoredInto = tabsRef.current.find((t) => t.id === req.tabId);
+      if (restoredInto) {
+        void applyLineEnding(req.path, restoredInto.original, restoredInto.fileSettings);
+      }
       return true;
     },
-    [editorRef, waitForModel, toast]
+    [applyLineEnding, editorRef, waitForModel, toast]
   );
 
   /**
@@ -419,14 +464,19 @@ export function useEditorTabs({
       }
       // Per-file overrides are needed before the first paint, not lazily: word wrap and
       // whitespace rendering are read while the model is being attached.
+      let own: FileSettings = EMPTY_FILE_SETTINGS;
       try {
         const overrides = await api.fileSettingsView(disk.path);
+        own = overrides.overrides;
         setTabs((prev) =>
           prev.map((t) => (t.id === tabId ? { ...t, fileSettings: overrides.overrides } : t))
         );
       } catch {
         // A missing override file is a normal first run; keep the global defaults.
       }
+      // The break this file will be written with, put on the buffer as it opens. A file that
+      // came with breaks keeps them; only one without takes the override or the setting.
+      void applyLineEnding(disk.path, disk.content, own);
       // A document can show its own pictures, so allow the asset protocol to read the one
       // folder it sits in. Fire-and-forget: a document without images works either way.
       void api.allowAssetDir(dirname(disk.path)).catch(() => {});
@@ -452,7 +502,7 @@ export function useEditorTabs({
         await api.clearDraft(disk.path).catch((e) => toast(errorMessage(e)));
       }
     },
-    [applyRestore, toast]
+    [applyLineEnding, applyRestore, toast]
   );
 
   /** @returns false when the file could not be read, so a session restore can count skips. */
@@ -531,11 +581,14 @@ export function useEditorTabs({
         setTabs((prev) =>
           prev.map((t) => (t.path === path ? { ...t, fileSettings: saved } : t))
         );
+        // The override is about the buffer on screen, not only the next save: without this the
+        // tab would go on typing the break it started with until it is closed and opened again.
+        void applyLineEnding(path, tabsRef.current.find((t) => t.path === path)?.original ?? "", saved);
       } catch (e) {
         toast(errorMessage(e));
       }
     },
-    [toast]
+    [applyLineEnding, toast]
   );
 
   const openUntitled = useCallback(async () => {
@@ -554,7 +607,10 @@ export function useEditorTabs({
     };
     setTabs((prev) => [...prev, tab]);
     await activate(tab.id);
-  }, [activate]);
+    // A buffer that starts empty has no line ending to call its own, which is exactly the case
+    // the setting speaks for: without this the first Enter inserts LF whatever it says.
+    void applyLineEnding(tab.path, tab.original, tab.fileSettings);
+  }, [activate, applyLineEnding]);
 
   /**
    * Move a tab to another position in the strip. Only the order changes: the active tab is
@@ -970,6 +1026,14 @@ export function useEditorTabs({
         }
       }
 
+      // A restored tab never goes through an open, so its line endings are settled here. For a
+      // file that came with breaks the model already has them and this changes nothing; what it
+      // covers is the override, and the file with no breaks at all.
+      for (const e of extras) {
+        const tab = tabsBuilt.find((t) => t.id === e.id);
+        if (tab) void applyLineEnding(tab.path, tab.original, e.overrides);
+      }
+
       // Prime the editor's model registry with every restored file so a switch shows its
       // content immediately and a draft prompt can be applied to any tab, not just the
       // active one. The active tab's model is owned by <Editor> and already exists.
@@ -994,9 +1058,9 @@ export function useEditorTabs({
 
       return { restored: tabsBuilt.length, skipped };
     },
-    // Both are stable: `toast` is a `useCallback` with no dependencies and `applyRestore`
-    // reads the editor through a ref, so this callback is not rebuilt when settings change.
-    [applyRestore, toast]
+    // Both are stable: `toast` is a `useCallback` with no dependencies and the two callbacks
+    // reached here read the editor through refs, so this is not rebuilt when settings change.
+    [applyLineEnding, applyRestore, toast]
   );
 
   /**

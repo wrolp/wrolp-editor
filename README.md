@@ -11,6 +11,7 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | Tabs | One window, many files; per-tab dirty marker, tab list dropdown, right-click menu on a tab |
 | Editing | Monaco: syntax highlighting by extension, minimap, multi-model per file, cursor restored per tab |
 | Saving | `Ctrl+S` writes the file and clears its draft; a never-saved `Untitled-N` tab goes through Save As |
+| Line endings | Read from the file and written back as they are. One file can be forced to LF or CRLF from that tab's File settings, and a document with no breaks yet — a new file above all — takes what Settings → General names. The status bar shows the ending a save will write. A lone CR is not offered: Monaco's model joins lines with LF or CRLF and nothing else |
 | Drafts | Debounced ~500 ms after each edit; also flushed on tab switch, tab close and window blur |
 | Restore | On open, disk content is compared with the draft; a differing draft is loaded back and the tab stays marked unsaved. Settings can switch this to a per-file Restore / Discard dialog |
 | Sidebar | Explorer file tree (lazy folders, refresh button) and a History list of recently opened files. Drag the divider to resize (180–640 px, double-click resets); the width is persisted |
@@ -74,7 +75,8 @@ Only the NSIS target is configured (`bundle.targets: ["nsis"]`).
 
 ## Where data lives
 
-Everything is under the app config directory — `%APPDATA%\com.wrolp.editor` on Windows:
+Everything is under the app config directory — `%APPDATA%\com.wrolp.editor` on Windows — and
+Settings → About prints both folders' full paths and opens either one in Explorer:
 
 ```
 wrolp/
@@ -83,7 +85,7 @@ wrolp/
 └── state/
     ├── history.json          recently opened files, newest first, capped at 50
     ├── settings.json         fontSize, minimap, sidebarVisible, sidebarView, sidebarWidth, language,
-    │                         restoreSession, draftRestore, sidebarRoot, encryptIdleMinutes
+    │                         restoreSession, draftRestore, lineEnding, sidebarRoot, encryptIdleMinutes
     ├── groups.json           the tab groups: name, tabs and caret positions
     └── window.json           x, y, width, height in physical pixels, plus the maximized flag
 ```
@@ -111,7 +113,7 @@ commands the frontend can call. By purpose: open/save/drafts (`open_file`, `save
 `create_file`, `create_dir`, `rename_path`, `copy_entry`, `remove_entry`, `keep_file`), groups and
 session (`get_groups`, `save_groups`, `transfer_tabs`, `get_window_state`, `save_window_state`,
 `plan_window_placement`), settings and the context menu (`get_settings`, `save_settings`,
-`context_menu_target`, `install_context_menu`, `uninstall_context_menu`), and encryption
+`get_store_dirs`, `context_menu_target`, `install_context_menu`, `uninstall_context_menu`), and encryption
 (`unlock_file`, `lock_file`, `lock_all`, `save_file_as_encrypted`, `create_encrypted`,
 `change_password`, `remove_encryption`, `remember_password`, `forget_password`, `recall_password`,
 `remembered_password_count`, `clear_remembered_passwords`).

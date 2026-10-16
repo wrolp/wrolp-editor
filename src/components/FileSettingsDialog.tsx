@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { t } from "../lib/i18n";
+import { LINE_ENDINGS } from "../lib/types";
 import { useModalDrag } from "../hooks/useModalDrag";
 import SettingCheck from "./SettingCheck";
 import { api, errorMessage, EMPTY_FILE_SETTINGS, type FileSettings, type FileSettingsView } from "../lib/tauri";
@@ -9,6 +10,8 @@ interface Props {
   name: string;
   /** The encoding the file was actually read in, shown so the override has context. */
   detectedEncoding: string;
+  /** The line ending the file was read in, which is what "no override" means here. */
+  detectedEol: string;
   onSave: (path: string, next: FileSettings) => Promise<void>;
   onClose: () => void;
   onError: (message: string) => void;
@@ -18,6 +21,7 @@ export default function FileSettingsDialog({
   path,
   name,
   detectedEncoding,
+  detectedEol,
   onSave,
   onClose,
   onError,
@@ -172,6 +176,17 @@ export default function FileSettingsDialog({
                 options={view.encodings.map(([v, k]) => [v, t(`settings.enc.${k}`)])}
                 onChange={(v) => set({ encoding: v })}
               />
+              {/* Deliberately not `view.defaults.lineEnding`: the global value only speaks for a
+                  document that has no line endings yet, and this file has. Leaving this on the
+                  first entry is what keeps the file exactly as it is. */}
+              <FollowSelect
+                label={t("settings.lineEnding")}
+                value={overrides.lineEnding}
+                inherited={detectedEol}
+                followText={t("fileSettings.keepAsIs", { eol: detectedEol })}
+                options={LINE_ENDINGS.map((v) => [v, t(`settings.lineEnding.${v}`)])}
+                onChange={(v) => set({ lineEnding: v })}
+              />
             </div>
             <p className="muted">{t("fileSettings.scopeNote")}</p>
             <div className="modal-actions">
@@ -201,12 +216,18 @@ function FollowSelect({
   inherited,
   options,
   onChange,
+  followText,
 }: {
   label: string;
   value: string | null;
   inherited: string | null;
   options: Option[];
   onChange: (value: string | null) => void;
+  /**
+   * Wording for the first entry, when "follow the default" is not what leaving it alone does.
+   * Line endings are the case: nothing is inherited, the file keeps what it was read with.
+   */
+  followText?: string;
 }) {
   return (
     <label className="setting-row">
@@ -216,7 +237,7 @@ function FollowSelect({
         value={value ?? ""}
         onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
       >
-        <option value="">{t("fileSettings.follow", { value: inherited ?? "" })}</option>
+        <option value="">{followText ?? t("fileSettings.follow", { value: inherited ?? "" })}</option>
         {options.map(([v, text]) => (
           <option key={v} value={v}>
             {text}
