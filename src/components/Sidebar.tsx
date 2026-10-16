@@ -543,9 +543,10 @@ interface Props extends Omit<
   visible: boolean;
   width: number;
   /**
-   * Text size in CSS pixels for everything in here that inherits — the tree rows, the folder
-   * menu, the in-place rename field. The recent-files list and the panel's own labels set their
-   * own sizes, so this moves the content without touching the chrome.
+   * Text size in CSS pixels for the sidebar's list content: the file tree, the recent files and
+   * the folder menu. It reaches them as the `--sidebar-font` custom property, because each of
+   * those rules sets its own size and an inherited value on this element was simply overridden.
+   * The panel's chrome — tabs, buttons, tooltips — keeps its own sizes.
    */
   fontSize: number;
   view: "explorer" | "history";
@@ -836,7 +837,13 @@ export default function Sidebar(props: Props) {
   if (!visible) return null;
 
   return (
-    <div className="sidebar" style={{ width, fontSize }}>
+    <div
+      className="sidebar"
+      // A custom property, not a `fontSize` here: three rules set their own size, and an
+      // inherited value was simply overridden by the tree's own rule, which is why a font size
+      // set at this element changed nothing on screen.
+      style={{ width, "--sidebar-font": `${fontSize}px` } as CSSProperties}
+    >
       <div className="sidebar-head">
         <button
           className={`side-tab${view === "explorer" ? " active" : ""}`}

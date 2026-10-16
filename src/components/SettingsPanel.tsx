@@ -253,17 +253,20 @@ export default function SettingsPanel({
                   }}
                 />
               </SettingField>
-              {/* The same shape as the editor's own size: a number field, with the range left to
-                  the backend to clamp rather than argued about here. */}
+              {/* The same shape as the editor's own size, but clamped before it is stored: the
+                  range belongs to the app, and a browser's own limit message arrives in the
+                  interface language of the engine rather than the one this app is showing. */}
               <SettingField label={t("settings.sidebarFont")}>
                 <input
                   type="number"
-                  min={11}
-                  max={20}
                   value={settings.sidebarFont}
                   onChange={(e) => {
                     const size = Number(e.target.value);
-                    if (!Number.isNaN(size)) onSaveSettings({ sidebarFont: size });
+                    if (Number.isNaN(size)) return;
+                    // Stored whether or not it changed: saving the clamped number is also what
+                    // puts that number back into the box, so the field never shows a size the app
+                    // is not using.
+                    onSaveSettings({ sidebarFont: Math.min(Math.max(size, 11), 20) });
                   }}
                 />
               </SettingField>

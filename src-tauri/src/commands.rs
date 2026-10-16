@@ -110,10 +110,11 @@ pub struct Settings {
   pub sidebar_visible: bool,
   pub sidebar_view: String,
   pub sidebar_width: f64,
-  /// Text size in the sidebar: the file tree and the folder menu, which are what inherits it.
-  /// Its own setting because a file name is read, not edited, and a smaller one of those fits a
-  /// lot more of the folder on screen. Defaults to the size the page inherited before it was a
-  /// setting, so installing this build changes nothing until somebody moves the number.
+  /// Text size in the sidebar's list content: the file tree, the recent files and the folder
+  /// menu, which are the rules that read `--sidebar-font`. Its own setting because a file name is
+  /// read, not edited, and a smaller one of those fits a lot more of the folder on screen.
+  /// Defaults to the 12 px the tree was pinned at before this existed, so installing the build
+  /// changes nothing until somebody moves the number.
   pub sidebar_font: f64,
   /// UI language code, e.g. "en" or "zh". Unknown values are stored as-is; the frontend
   /// falls back to English, so adding a language needs no change here.
@@ -188,7 +189,7 @@ impl Default for Settings {
       sidebar_visible: true,
       sidebar_view: "explorer".into(),
       sidebar_width: 240.0,
-      sidebar_font: 16.0,
+      sidebar_font: 12.0,
       language: "en".into(),
       restore_session: true,
       draft_restore: "auto".into(),
@@ -261,7 +262,7 @@ impl Settings {
       sidebar_font: if self.sidebar_font > 0.0 {
         self.sidebar_font.clamp(SIDEBAR_FONT_MIN, SIDEBAR_FONT_MAX)
       } else {
-        16.0
+        12.0
       },
       language: if self.language.is_empty() {
         "en".into()
@@ -1776,7 +1777,7 @@ mod tests {
       }
       .filled()
       .sidebar_font,
-      16.0
+      12.0
     );
     assert_eq!(
       Settings {
@@ -1868,8 +1869,8 @@ mod tests {
     assert_eq!(s.draft_restore, "auto");
     // And for one written before line endings could be configured at all.
     assert_eq!(s.line_ending, "lf");
-    // The sidebar text of an existing install keeps the size it had before it was a setting.
-    assert_eq!(s.sidebar_font, 16.0);
+    // The sidebar text of an existing install keeps the 12 px the tree was pinned at.
+    assert_eq!(s.sidebar_font, 12.0);
     assert_eq!(s.filled().sidebar_root, "");
   }
 

@@ -90,9 +90,9 @@ const DEFAULT_SETTINGS: Settings = {
   sidebarVisible: true,
   sidebarView: "explorer",
   sidebarWidth: 240,
-  // 16 px is the size the page already inherited from the browser, so this setting starts where
-  // the app left off rather than restyling the sidebar on the first run after an update.
-  sidebarFont: 16,
+  // 12 px is what the file tree was pinned at before this was a setting, so the sidebar looks the
+  // same on the first run of a new build and only changes when somebody asks for a different size.
+  sidebarFont: 12,
   language: "en",
   restoreSession: true,
   // A draft is the only copy of typing that never reached the disk, so startup puts it back

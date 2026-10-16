@@ -1347,6 +1347,9 @@ body.resizing .editor-host {
   gap: 8px;
 }
 .folder-item-name {
+  /* Part of the sidebar's list content, so it takes the same setting as the tree and the recent
+     files. It used to inherit the page's 16px, which is why it reads smaller than before. */
+  font-size: var(--sidebar-font, 12px);
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -1403,7 +1406,9 @@ body.resizing .editor-host {
    bottom padding meant for this tree's tooltip -- the popup's rows then clip mid-row and
    the padding shows as a dead band under them. */
 .sidebar .tree {
-  font-size: 12px;
+  /* The one size the sidebar's text setting moves. The fallback is what the tree was pinned at
+     before it was a setting, so the sidebar looks the same whether or not the variable is set. */
+  font-size: var(--sidebar-font, 12px);
   /* Room for the tooltip, which opens below the row: two lines of text plus padding come
      to roughly 40px, so anything less clips the bubble for the last entry once the tree
      is scrolled to the bottom. Doubles as visual breathing room. */
@@ -1498,7 +1503,10 @@ body.resizing .editor-host {
   background: var(--surface-2);
 }
 .hist-item .hi-name {
-  font-size: 12px;
+  /* Same variable as the tree: both are the sidebar's list content, and their old sizes already
+     agreed at 12px, so the setting moves them together. The path under the name stays a step
+     smaller, because it is the line you read second. */
+  font-size: var(--sidebar-font, 12px);
   color: var(--text);
   overflow: hidden;
   text-overflow: ellipsis;
