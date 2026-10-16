@@ -55,7 +55,7 @@ npm install
 npm run tauri dev
 ```
 
-debug 构建加载的是 Vite 在 `localhost:1420` 提供的页面。若右键菜单那条注册表指向 `target/debug/wrolp-editor.exe`，只有在 dev server 运行时右键才能打开文件，否则窗口会显示「拒绝连接」页面。日常使用请把菜单指向安装版（设置页会显示当前注册的实际命令）。
+debug 构建加载的是 Vite 在 `localhost:1520` 提供的页面。若右键菜单那条注册表指向 `target/debug/wrolp-editor.exe`，只有在 dev server 运行时右键才能打开文件，否则窗口会显示「拒绝连接」页面。日常使用请把菜单指向安装版（设置页会显示当前注册的实际命令）。
 
 ### 打安装包
 
@@ -70,7 +70,7 @@ npm run tauri build
 
 | 脚本 | 用途 |
 | --- | --- |
-| `npm run dev` | 在 1420 端口起 Vite dev server（供 `tauri dev` 使用） |
+| `npm run dev` | 在 1520 端口起 Vite dev server（供 `tauri dev` 使用） |
 | `npm run build` | 先做类型检查，再产出 `dist/` 生产包 |
 | `npm run tauri` | Tauri CLI 透传（`dev`、`build`、`icon` 等） |
 

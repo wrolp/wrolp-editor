@@ -55,7 +55,7 @@ npm install
 npm run tauri dev
 ```
 
-A debug build renders the page served by Vite at `localhost:1420`. If the context-menu entry
+A debug build renders the page served by Vite at `localhost:1520`. If the context-menu entry
 points at `target/debug/wrolp-editor.exe`, right-clicking a file only works while that dev
 server is running — otherwise the window shows a connection-refused page. Point the entry at
 the installed build for normal use (Settings → context menu shows which path is registered).
@@ -73,7 +73,7 @@ Only the NSIS target is configured (`bundle.targets: ["nsis"]`).
 
 | Script | Purpose |
 | --- | --- |
-| `npm run dev` | Vite dev server on port 1420 (used by `tauri dev`) |
+| `npm run dev` | Vite dev server on port 1520 (used by `tauri dev`) |
 | `npm run build` | `tsc --noEmit`-style type check plus production bundle into `dist/` |
 | `npm run tauri` | Tauri CLI passthrough (`dev`, `build`, `icon`, …) |
 
