@@ -12,7 +12,7 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | Editing | Monaco: syntax highlighting by extension, minimap, multi-model per file, cursor restored per tab |
 | Saving | `Ctrl+S` writes the file and clears its draft; a never-saved `Untitled-N` tab goes through Save As |
 | Drafts | Debounced ~500 ms after each edit; also flushed on tab switch, tab close and window blur |
-| Restore | On open, disk content is compared with the draft; a differing draft raises a Restore / Discard dialog |
+| Restore | On open, disk content is compared with the draft; a differing draft is loaded back and the tab stays marked unsaved. Settings can switch this to a per-file Restore / Discard dialog |
 | Sidebar | Explorer file tree (lazy folders, refresh button) and a History list of recently opened files. Drag the divider to resize (180–640 px, double-click resets); the width is persisted |
 | Single instance | Launching a second time hands the path to the running window, adds a tab and focuses it |
 | Settings | Context-menu switch, editor font size, minimap, UI language; persisted and applied live. The context-menu page also shows the command the entry currently launches, and warns when it points at a different build or when this is a debug build |
@@ -83,7 +83,7 @@ wrolp/
 └── state/
     ├── history.json          recently opened files, newest first, capped at 50
     ├── settings.json         fontSize, minimap, sidebarVisible, sidebarView, sidebarWidth, language,
-    │                         restoreSession, sidebarRoot, encryptIdleMinutes
+    │                         restoreSession, draftRestore, sidebarRoot, encryptIdleMinutes
     ├── groups.json           the tab groups: name, tabs and caret positions
     └── window.json           x, y, width, height in physical pixels, plus the maximized flag
 ```
@@ -142,7 +142,7 @@ hold files from several folders.
   scratch text per tab.
 - **Content is never duplicated.** File-backed tabs store only path + caret; unsaved text stays in
   the draft file, keyed by path. That is why a tab can be moved to another group without touching
-  its draft, and why the draft prompt follows the file there.
+  its draft, and why the draft follows the file there.
 - **Move / copy tab** (tab context menu) re-homes a tab between groups. It never renames or moves
   the file on disk — that would orphan the draft keyed to its path.
 - **Deleted files** are skipped on restore with one aggregated notice and dropped from the group.

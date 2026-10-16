@@ -38,6 +38,8 @@ const WHITESPACE_MODES = ["none", "boundary", "selection", "all", "trailing"] as
 const PREVIEW_LAYOUTS = ["text", "split", "preview", "auto"] as const;
 const PREVIEW_WIDTHS = ["narrow", "wide", "full"] as const;
 const THEMES = ["system", "dark", "light"] as const;
+/** `auto` first: it is the default, and `ask` is the opt-in for anyone who wants to see each draft before it lands. */
+const DRAFT_MODES = ["auto", "ask"] as const;
 const ENCODINGS = [
   "auto",
   "utf-8",
@@ -240,6 +242,20 @@ export default function SettingsPanel({
                 onChange={(v) => onSaveSettings({ restoreSession: v })}
               />
               <p className="muted">{t("settings.restoreSessionDesc")}</p>
+              <SettingField label={t("settings.draftRestore")}>
+                <select
+                  className="select"
+                  value={settings.draftRestore}
+                  onChange={(e) => onSaveSettings({ draftRestore: e.target.value })}
+                >
+                  {DRAFT_MODES.map((option) => (
+                    <option key={option} value={option}>
+                      {t(`settings.draftRestore.${option}`)}
+                    </option>
+                  ))}
+                </select>
+              </SettingField>
+              <p className="muted">{t("settings.draftRestoreDesc")}</p>
               <SettingCheck
                 label={t("settings.expandFolders")}
                 checked={settings.expandFolders}

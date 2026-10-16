@@ -115,6 +115,11 @@ pub struct Settings {
   pub language: String,
   /// Reopen the tabs of the active group on startup.
   pub restore_session: bool,
+  /// What a reopened session does with a draft that differs from the file on disk: `auto`
+  /// loads it without asking, `ask` raises the Restore / Discard dialog for each file.
+  /// `auto` is the default because the draft is the only copy of that typing, and a dialog
+  /// that can be dismissed by reflex throws it away.
+  pub draft_restore: String,
   /// Folder the Explorer shows. Global view state: a group is a named set of tabs, so two
   /// groups may sit on the same directory and one directory is never a group.
   pub sidebar_root: String,
@@ -174,6 +179,7 @@ impl Default for Settings {
       sidebar_width: 240.0,
       language: "en".into(),
       restore_session: true,
+      draft_restore: "auto".into(),
       sidebar_root: String::new(),
       expand_folders: false,
       expand_depth: 1,
@@ -201,6 +207,8 @@ const SIDEBAR_MAX_WIDTH: f64 = 640.0;
 const RENDER_WHITESPACE: [&str; 5] = ["none", "boundary", "selection", "all", "trailing"];
 /// Colour schemes the frontend knows how to apply.
 const THEMES: [&str; 3] = ["system", "dark", "light"];
+/// What startup does with a draft the file on disk does not have.
+const DRAFT_RESTORE: [&str; 2] = ["auto", "ask"];
 /// Preview layouts a file can open in. `auto` is the per-kind behaviour the frontend used
 /// to hardcode: markdown and SVG side by side, pictures as the picture.
 const PREVIEW_LAYOUT: [&str; 4] = ["auto", "text", "split", "preview"];
@@ -239,6 +247,11 @@ impl Settings {
         self.language
       },
       restore_session: self.restore_session,
+      draft_restore: if DRAFT_RESTORE.contains(&self.draft_restore.as_str()) {
+        self.draft_restore.clone()
+      } else {
+        "auto".into()
+      },
       sidebar_root: self.sidebar_root.trim().to_string(),
       expand_folders: self.expand_folders,
       // 0 would mean "expand nothing", which is the same as having the setting off at all.
@@ -1709,11 +1722,24 @@ mod tests {
     let s = Settings {
       font_size: 0.0,
       sidebar_view: String::new(),
+      draft_restore: "sometimes".into(),
       ..Default::default()
     }
     .filled();
     assert_eq!(s.font_size, 14.0);
     assert_eq!(s.sidebar_view, "explorer");
+    // A draft mode nobody offered is a hand-edited key, and the safer half of the mistake
+    // is to load the draft rather than to risk a dialog that gets dismissed by reflex.
+    assert_eq!(s.draft_restore, "auto");
+    assert_eq!(
+      Settings {
+        draft_restore: "ask".into(),
+        ..Default::default()
+      }
+      .filled()
+      .draft_restore,
+      "ask"
+    );
   }
 
   /// An older settings.json has no restoreSession key at all; that must not read as
@@ -1729,6 +1755,8 @@ mod tests {
     assert_eq!(s.language, "zh");
     // A settings file written before workspaces were groups has no sidebarRoot at all.
     assert_eq!(s.sidebar_root, "");
+    // Same for a file written before the draft prompt became a choice: drafts load quietly.
+    assert_eq!(s.draft_restore, "auto");
     assert_eq!(s.filled().sidebar_root, "");
   }
 

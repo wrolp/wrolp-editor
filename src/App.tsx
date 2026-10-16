@@ -90,6 +90,9 @@ const DEFAULT_SETTINGS: Settings = {
   sidebarWidth: 240,
   language: "en",
   restoreSession: true,
+  // A draft is the only copy of typing that never reached the disk, so startup puts it back
+  // and stays out of the way; `ask` is for users who want to see each one first.
+  draftRestore: "auto",
   sidebarRoot: "",
   // The Explorer opens folded: showing the whole tree on open hides how deep the folder
   // goes, and costs one directory listing per level before anything is read.
@@ -242,6 +245,7 @@ export default function App() {
     editorRef,
     onFileOpened,
     encodingPref: settings.encoding,
+    draftRestorePref: settings.draftRestore,
   });
   const groups = useGroups({ onError: toast });
   // The window goes back where it was before anything else measures it.

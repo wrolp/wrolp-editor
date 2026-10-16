@@ -143,9 +143,22 @@ interface Options {
    * callbacks that depend on it.
    */
   encodingPref?: string;
+  /**
+   * `auto` loads a reopened session's drafts straight into the tabs; `ask` queues the
+   * Restore / Discard dialog for each one. Kept in a ref like `encodingPref`, so changing
+   * it never rebuilds the callbacks that read it.
+   */
+  draftRestorePref?: string;
 }
 
-export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingPref }: Options) {
+export function useEditorTabs({
+  toast,
+  draft,
+  editorRef,
+  onFileOpened,
+  encodingPref,
+  draftRestorePref,
+}: Options) {
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [restoreQueue, setRestoreQueue] = useState<PendingRestore[]>([]);
@@ -170,6 +183,8 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
   const pendingCursors = useRef(new Set<string>());
   const encodingRef = useRef(encodingPref ?? "auto");
   encodingRef.current = encodingPref ?? "auto";
+  const draftRestoreRef = useRef(draftRestorePref ?? "auto");
+  draftRestoreRef.current = draftRestorePref ?? "auto";
   /**
    * Set while a reload rewrites a buffer. The change and cursor events that rewrite fires are
    * read by the handlers below against the tab object React has not re-rendered yet, so
@@ -301,6 +316,89 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
   }, [passwordAsk, settleAsk]);
 
   /**
+   * Wait for the Monaco model of a path to exist. Startup commits its whole tab set before
+   * the editor has built any model for it, so anything that has to write into one asks here
+   * instead of guessing how long a cold start takes — the same way the restored caret waits.
+   * Null means it never arrived, and gives the caller nothing to write into.
+   */
+  const waitForModel = useCallback(
+    async (path: string, timeoutMs = 3000) => {
+      const deadline = performance.now() + timeoutMs;
+      for (;;) {
+        const h = editorRef.current;
+        const model = h?.monaco.editor.getModel(h.monaco.Uri.parse(modelUri(path)));
+        if (h && model) return { h, model };
+        if (performance.now() >= deadline) return null;
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    },
+    [editorRef]
+  );
+
+  /**
+   * Answer one draft question: put the draft back, or drop it. `restoreTabs` and `finishOpen`
+   * call this for the drafts nobody was asked about, and the dialog's loops call it too, so
+   * "Restore all" and a quiet load are not separate implementations of the same answer.
+   * `quiet` holds back the per-file notice for a caller that reports the whole batch itself.
+   *
+   * @returns whether text actually went into an editor, which a batch caller needs in order to
+   * count what it loaded rather than what it was handed.
+   */
+  const applyRestore = useCallback(
+    async (req: PendingRestore, mode: "restore" | "discard", quiet = false): Promise<boolean> => {
+      const key = pathKey(req.path);
+
+      if (mode === "discard") {
+        try {
+          await api.clearDraft(req.path);
+          if (!quiet) toast(t("menu.draftDiscarded"));
+        } catch (e) {
+          toast(errorMessage(e));
+        }
+        return false;
+      }
+
+      // A picture is never restored into: the "buffer" here is the empty stand-in, and
+      // writing text over an image would destroy it.
+      if (tabsRef.current.find((t) => t.id === req.tabId)?.isBinary) {
+        await api.clearDraft(req.path).catch((e) => toast(errorMessage(e)));
+        return false;
+      }
+
+      // Startup answers its drafts before every tab has a model: the tabs are committed
+      // first, and the models arrive as the editor mounts and as `restoreTabs` primes the
+      // rest. A draft whose model never showed up is left on disk, still offered next time.
+      const waited = await waitForModel(req.path);
+      if (!waited) return false;
+      const { h, model } = waited;
+
+      model.setValue(req.draft.content);
+      setTabs((prev) => prev.map((t) => (t.id === req.tabId ? { ...t, dirty: true } : t)));
+      try {
+        // Re-persist immediately: an unsaved tab the user has not visited yet must survive a quit.
+        await api.saveDraft(req.path, req.draft.content, req.draft.cursor);
+      } catch (e) {
+        toast(errorMessage(e));
+      }
+      // A draft cursor belongs to the draft's content, so it overrides the group's.
+      cursors.current.set(key, req.draft.cursor);
+      if (activeRef.current === req.tabId) {
+        pendingCursors.current.delete(key);
+        const offset = Math.min(req.draft.cursor, model.getValueLength());
+        const position = model.getPositionAt(offset);
+        h.editor.setPosition(position);
+        h.editor.revealPositionInCenter(position);
+        h.editor.focus();
+      } else {
+        pendingCursors.current.add(key);
+      }
+      if (!quiet) toast(t("menu.draftRestored"));
+      return true;
+    },
+    [editorRef, waitForModel, toast]
+  );
+
+  /**
    * The half of an open that only makes sense once the text is in hand: comparing the draft
    * against it, reading this file's own view overrides, and letting a document show its own
    * pictures.
@@ -333,25 +431,28 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
       // folder it sits in. Fire-and-forget: a document without images works either way.
       void api.allowAssetDir(dirname(disk.path)).catch(() => {});
       if (draftInfo && draftInfo.content !== disk.content) {
-        setRestoreQueue((q) =>
-          q.some((item) => pathKey(item.path) === pathKey(disk.path))
-            ? q
-            : [
-                ...q,
-                {
-                  tabId,
-                  path: disk.path,
-                  name: basename(disk.path),
-                  draft: draftInfo,
-                },
-              ]
-        );
+        const req: PendingRestore = {
+          tabId,
+          path: disk.path,
+          name: basename(disk.path),
+          draft: draftInfo,
+        };
+        if (draftRestoreRef.current === "ask") {
+          setRestoreQueue((q) =>
+            q.some((item) => pathKey(item.path) === pathKey(disk.path)) ? q : [...q, req]
+          );
+        } else {
+          // The same answer the dialog gives, asked of the setting instead of the user. Not
+          // awaited: a file opened cold gets its model a frame or two after this returns, and
+          // `applyRestore` waits for it there.
+          void applyRestore(req, "restore");
+        }
       } else if (draftInfo) {
         // Draft matches what is on disk: redundant, so drop it.
         await api.clearDraft(disk.path).catch((e) => toast(errorMessage(e)));
       }
     },
-    [toast]
+    [applyRestore, toast]
   );
 
   /** @returns false when the file could not be read, so a session restore can count skips. */
@@ -849,12 +950,25 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
           await api.clearDraft(tab.path).catch(() => {});
         }
       }
-      // Merge overrides in one update, then surface any draft prompts.
+      // Merge overrides in one update, then hand the drafts to their answer: `ask` queues the
+      // dialog, `auto` runs the same `applyRestore` the dialog's "Restore all" uses, so a
+      // quiet load is not a second implementation of that answer.
       setTabs((prev) => prev.map((t) => {
         const ov = overrideMap.get(t.id);
         return ov ? { ...t, fileSettings: ov } : t;
       }));
-      if (queued.length > 0) setRestoreQueue((q) => [...q, ...queued]);
+      if (queued.length > 0) {
+        if (draftRestoreRef.current === "ask") setRestoreQueue((q) => [...q, ...queued]);
+        else {
+          // Not awaited: these models arrive as the editor mounts and as `prime` below builds
+          // the ones nobody has visited, and startup must not wait on a file nobody opened.
+          void (async () => {
+            let loaded = 0;
+            for (const req of queued) if (await applyRestore(req, "restore", true)) loaded++;
+            if (loaded > 0) toast(t("draft.autoRestored", { n: loaded }));
+          })();
+        }
+      }
 
       // Prime the editor's model registry with every restored file so a switch shows its
       // content immediately and a draft prompt can be applied to any tab, not just the
@@ -880,7 +994,9 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
 
       return { restored: tabsBuilt.length, skipped };
     },
-    []
+    // Both are stable: `toast` is a `useCallback` with no dependencies and `applyRestore`
+    // reads the editor through a ref, so this callback is not rebuilt when settings change.
+    [applyRestore, toast]
   );
 
   /**
@@ -1855,56 +1971,6 @@ export function useEditorTabs({ toast, draft, editorRef, onFileOpened, encodingP
   );
 
   const hideConflict = useCallback(() => setConflict(null), []);
-
-  /** Resolve one queued draft. Loops use it so "Restore all" is not a second implementation. */
-  const applyRestore = useCallback(
-    async (req: PendingRestore, mode: "restore" | "discard") => {
-      const h = editorRef.current;
-      const model = h?.monaco.editor.getModel(h.monaco.Uri.parse(modelUri(req.path)));
-      if (!h || !model) return;
-      const key = pathKey(req.path);
-
-      if (mode === "discard") {
-        try {
-          await api.clearDraft(req.path);
-          toast(t("menu.draftDiscarded"));
-        } catch (e) {
-          toast(errorMessage(e));
-        }
-        return;
-      }
-
-      // A picture is never restored into: the "buffer" here is the empty stand-in, and
-      // writing text over an image would destroy it.
-      if (tabsRef.current.find((t) => t.id === req.tabId)?.isBinary) {
-        await api.clearDraft(req.path).catch((e) => toast(errorMessage(e)));
-        return;
-      }
-
-      model.setValue(req.draft.content);
-      setTabs((prev) => prev.map((t) => (t.id === req.tabId ? { ...t, dirty: true } : t)));
-      try {
-        // Re-persist immediately: an unsaved tab the user has not visited yet must survive a quit.
-        await api.saveDraft(req.path, req.draft.content, req.draft.cursor);
-      } catch (e) {
-        toast(errorMessage(e));
-      }
-      // A draft cursor belongs to the draft's content, so it overrides the group's.
-      cursors.current.set(key, req.draft.cursor);
-      if (activeRef.current === req.tabId) {
-        pendingCursors.current.delete(key);
-        const offset = Math.min(req.draft.cursor, model.getValueLength());
-        const position = model.getPositionAt(offset);
-        h.editor.setPosition(position);
-        h.editor.revealPositionInCenter(position);
-        h.editor.focus();
-      } else {
-        pendingCursors.current.add(key);
-      }
-      toast(t("menu.draftRestored"));
-    },
-    [editorRef, toast]
-  );
 
   const resolveRestore = useCallback(
     async (mode: "restore" | "discard") => {

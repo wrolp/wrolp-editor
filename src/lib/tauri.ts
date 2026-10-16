@@ -88,6 +88,13 @@ export interface Settings {
   language: string;
   /** Reopen the tabs of the active group on startup. */
   restoreSession: boolean;
+  /**
+   * What a reopened session does with a draft the file on disk does not have: `auto` loads
+   * it without asking, `ask` raises the Restore / Discard dialog per file. `auto` is the
+   * default because the draft is the only copy of that typing and a dialog is one reflex
+   * away from discarding it.
+   */
+  draftRestore: string;
   /** Folder the Explorer shows. Global view state, not part of a group. */
   sidebarRoot: string;
   /** Expand folders when a directory is opened. Off by default. */
