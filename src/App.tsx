@@ -45,7 +45,7 @@ import { useEditorTabs } from "./hooks/useEditorTabs";
 import { useGroups } from "./hooks/useGroups";
 import { useVersions } from "./hooks/useVersions";
 import { useWindowFrame } from "./hooks/useWindowFrame";
-import { formatWhen, setLang, t } from "./lib/i18n";
+import { setLang, t } from "./lib/i18n";
 import {
   basename,
   dirname,
@@ -66,7 +66,6 @@ import {
   lineEndingFor,
   pathKey,
   sideKey,
-  type ComparePair,
   type CompareRef,
   type DiffStats,
   type EditStats,
@@ -1378,10 +1377,20 @@ export default function App() {
     refreshVersions();
   }, [booted, savedRev, sidebarView, refreshVersions]);
 
-  /** One version open beside what the editor holds. */
-  const [versionDiff, setVersionDiff] = useState<
-    { path: string; oid: string; label: string; pair: ComparePair } | null
-  >(null);
+  /**
+   * One comparison of this file's history, open.
+   *
+   * The buffer is snapshotted here rather than read by the popup, because a comparison answers a
+   * question about a moment and the answer must not move while it is being read. Which two sides
+   * are shown is the popup's own business from then on.
+   */
+  const [versionDiff, setVersionDiff] = useState<{
+    path: string;
+    oid: string;
+    name: string;
+    language: string;
+    currentText: string;
+  } | null>(null);
 
   const openVersionDiff = useCallback(
     async (path: string, oid: string) => {
@@ -1393,53 +1402,35 @@ export default function App() {
         toast(t("ver.noBuffer"));
         return;
       }
+      setVersionDiff({
+        path,
+        oid,
+        name: editorTab.name,
+        language: editorTab.language,
+        currentText: current,
+      });
+    },
+    [editorTab, tabs, toast]
+  );
+
+  /**
+   * Put the version back into the editor and close the comparison. Read from the store rather than
+   * from whatever the popup was showing, because the text on screen there is a snapshot of a moment
+   * ago and the history is the thing being trusted.
+   */
+  const restoreFromDiff = useCallback(
+    async (oid: string) => {
+      if (!versionDiff) return;
+      const { path } = versionDiff;
+      setVersionDiff(null);
       try {
-        const text = await versions.contentOf(path, oid);
-        const entry = activeVersions.find((v) => v.oid === oid);
-        const label = entry ? formatWhen(entry.ts) : oid.slice(0, 8);
-        setVersionDiff({
-          path,
-          oid,
-          label,
-          pair: {
-            left: {
-              path,
-              name: `${editorTab.name} · ${label}`,
-              content: text,
-              language: editorTab.language,
-              kind: "version",
-              oid,
-            },
-            right: {
-              path,
-              name: t("ver.current"),
-              content: current,
-              language: editorTab.language,
-              kind: "buffer",
-            },
-          },
-        });
+        await tabs.restoreVersion(path, await versions.contentOf(path, oid));
       } catch (e) {
         toast(errorMessage(e));
       }
     },
-    [activeVersions, editorTab, tabs, toast, versions]
+    [tabs, toast, versionDiff, versions]
   );
-
-  /**
-   * Put the version back into the editor and close the comparison. Read again rather than taken
-   * from the pair, because the pair is a snapshot of a moment ago and the text is one call away.
-   */
-  const restoreFromDiff = useCallback(async () => {
-    if (!versionDiff) return;
-    const { path, oid } = versionDiff;
-    setVersionDiff(null);
-    try {
-      await tabs.restoreVersion(path, await versions.contentOf(path, oid));
-    } catch (e) {
-      toast(errorMessage(e));
-    }
-  }, [tabs, toast, versionDiff, versions]);
 
   const restoreFromList = useCallback(
     async (path: string, oid: string) => {
@@ -2309,9 +2300,13 @@ const defaultModeFor = useCallback(
           leave a second copy of the text sitting open after the answer. */}
       {versionDiff && (
         <VersionDiffModal
-          pair={versionDiff.pair}
-          name={editorTab?.name ?? versionDiff.label}
-          versionLabel={versionDiff.label}
+          path={versionDiff.path}
+          name={versionDiff.name}
+          language={versionDiff.language}
+          versions={activeVersions}
+          currentText={versionDiff.currentText}
+          loadContent={(oid) => versions.contentOf(versionDiff.path, oid)}
+          initialOid={versionDiff.oid}
           fontSize={settings.fontSize}
           renderWhitespace={renderWhitespaceMode}
           wordWrap={wordWrap}
@@ -2319,7 +2314,7 @@ const defaultModeFor = useCallback(
           insertSpaces={insertSpaces}
           detectIndentation={detectIndentation}
           scrollBeyondLastLine={settings.scrollBeyondLastLine}
-          onRestore={() => void restoreFromDiff()}
+          onRestore={(oid) => void restoreFromDiff(oid)}
           onClose={() => setVersionDiff(null)}
         />
       )}

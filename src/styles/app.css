@@ -2261,6 +2261,9 @@ body.resizing .editor-host {
   padding: 16px 18px;
   display: flex;
   flex-direction: column;
+  /* The resize edges are placed against the dialog itself; without this they would land on the
+     overlay, which fills the window. */
+  position: relative;
 }
 .diff-modal-body {
   flex: 1 1 auto;
@@ -2293,11 +2296,125 @@ body.resizing .editor-host {
 .diff-modal-foot .sb-diff .del {
   color: var(--del);
 }
+/* The comparison's own toolbar: which two sides are shown, and how much of them. It sits above
+   the diff rather than inside its header, because the two sides' names are the diff's own labels
+   and a dropdown there would be read as part of what is being compared. */
+.diff-tools {
+  display: flex;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.diff-side {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  /* The two sides share the leftover width, so long version labels are truncated by their own
+     box instead of pushing the rest of the toolbar off screen. */
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.diff-side > span {
+  font-size: 11px;
+  color: var(--muted);
+}
+.diff-side select {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* An icon-only control still needs a name: the tooltip is for the eye, `aria-label` for the
+   reader, and both come from the same string. */
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 7px;
+}
+/* The folded state, since a pressed icon has no label to change wording. */
+.btn.icon-btn.on {
+  background: var(--accent-soft);
+  color: var(--text-strong);
+  border-color: var(--accent);
+}
+/* The window controls live at the right end of the title bar. The title is the drag handle, so
+   the buttons sit inside it rather than beside it — `useModalDrag` skips pointers that land on a
+   button, which is what keeps a click from also sliding the dialog. */
+.modal-title-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.modal-title-actions {
+  flex: 0 0 auto;
+  display: inline-flex;
+  gap: 3px;
+  margin-left: auto;
+}
+/* How much the fold dropped, per side. Said because a comparison that hides two thirds of a file
+   and shows no sign of it is a comparison that can be trusted into a wrong answer. */
+.ver-hidden {
+  color: var(--muted);
+  font-size: 11px;
+}
+.ver-hidden::before {
+  content: "·";
+  margin: 0 6px;
+}
+/* The reporting row, once its buttons have moved up: a line of numbers should not cost a line of
+   text, and the two texts are why the popup is open. */
+.diff-modal-foot.slim {
+  margin-top: 6px;
+}
+.diff-modal-foot.slim .sb-diff {
+  font-size: 11px;
+}
+/* Maximised is the same dialog with the viewport as its box: the overlay centres it, so sizing it
+   to the window is enough, and the gap keeps the title bar reachable. */
+.modal.diff-modal.maximized {
+  width: calc(100vw - 32px);
+  height: calc(100vh - 32px);
+}
+/* Three grabbable edges. 7px is wide enough to hit with a pointer without taking space the diff
+   needs, and the transparent border belongs to the handle, not to the dialog. */
+.resize-edge {
+  position: absolute;
+  z-index: 2;
+}
+.resize-edge.right {
+  top: 12px;
+  right: -3px;
+  width: 7px;
+  bottom: 12px;
+  cursor: ew-resize;
+}
+.resize-edge.bottom {
+  left: 12px;
+  bottom: -3px;
+  height: 7px;
+  right: 12px;
+  cursor: ns-resize;
+}
+.resize-edge.corner {
+  right: -2px;
+  bottom: -2px;
+  width: 16px;
+  height: 16px;
+  cursor: nwse-resize;
+}
 /* The title is the drag handle (see useModalDrag), so it has to read as one and must not
-   let a drag turn into a text selection. */
+   let a drag turn into a text selection. It is a flex row so a dialog can keep its window
+   controls at the right end of it without a second header. */
 .modal-title {
   cursor: move;
   user-select: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 .modal[data-dragging] {
   user-select: none;

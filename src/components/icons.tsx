@@ -86,6 +86,46 @@ export function IconVersions({ size = 14 }: IconProps) {
   );
 }
 
+/**
+ * Show only the changes: two runs collapsing towards the middle line, which is what the control
+ * does to a diff — the untouched stretches between the changed ones fold away.
+ */
+export function IconFold({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <line x1="4" y1="12" x2="20" y2="12" />
+      <polyline points="8 8 12 4 16 8" />
+      <polyline points="8 16 12 20 16 16" />
+    </svg>
+  );
+}
+
+/** Swap the two sides of a comparison: one line each way, arrowheads at opposite ends. */
+export function IconSwap({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <line x1="4" y1="8" x2="18" y2="8" />
+      <polyline points="15 5 18 8 15 11" />
+      <line x1="20" y1="16" x2="6" y2="16" />
+      <polyline points="9 13 6 16 9 19" />
+    </svg>
+  );
+}
+
+/**
+ * Put a version back: an arrow turning back towards where the text came from. Not `IconReload` —
+ * that one means "read this file again from the disk", which is a different direction of travel
+ * and already sits in the tab's menu.
+ */
+export function IconRevert({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <polyline points="8 6 3 11 8 16" />
+      <path d="M3 11h11a5 5 0 0 1 0 10h-4" />
+    </svg>
+  );
+}
+
 /** Window controls, drawn at 16px inside a 46×40 button: anything smaller reads as a
     smudge next to the 13px labels elsewhere in the bar. The stroke is deliberately heavy
     — at this size a hairline reads as a rendering glitch rather than a shape. */

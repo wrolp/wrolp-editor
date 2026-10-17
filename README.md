@@ -19,7 +19,7 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | Auto-save | Off by default. On, the file **on screen** is written once it has gone N seconds without an edit — typing restarts that file's countdown, so the write lands on a pause rather than mid-sentence. A tab you are not looking at neither starts a countdown nor loses one already running, and its unsaved text stays held by its draft. Untitled buffers, locked files, pictures, and anything the disk check already has a question about are left alone. Its writes record no version unless Settings → Versions says otherwise |
 | Restore | On open, disk content is compared with the draft; a differing draft is loaded back and the tab stays marked unsaved. Settings can switch this to a per-file Restore / Discard dialog |
 | Sidebar | Explorer file tree (lazy folders, refresh button), a History list of recently opened files, and a Versions view. Drag the divider to resize (180–640 px, double-click resets); the width is persisted. The tree's text size is a setting, 11–20 px |
-| Version history | Off by default. On, every save by hand records what the file said, and any earlier one can be compared against what is open or put back into the editor. One file's saves can be excluded, or forced in, from its tab menu. See [Version history](#version-history) |
+| Version history | Off by default. On, every save by hand records what the file said, and any two of them — a version against a version, or either against what is open — can be compared side by side, folded down to the changes, or put back into the editor. One file's saves can be excluded, or forced in, from its tab menu. See [Version history](#version-history) |
 | Single instance | Launching a second time hands the path to the running window, adds a tab and focuses it |
 | Settings | Context-menu switch, editor font size, minimap, UI language; persisted and applied live. The context-menu page also shows the command the entry currently launches, and warns when it points at a different build or when this is a debug build |
 | Language | English by default, switchable to 中文 from a dropdown in Settings. All strings, including messages coming from the Rust side, resolve through one key table |
@@ -216,11 +216,21 @@ this is not a repository you branch or push, and nothing about it reaches the fo
   override it from its tab menu (*Record versions for this file* / *Stop recording this file*) or in
   that file's Settings. `Create version` works whatever the switches say, and taking one turns that
   file on — asking for a version once is a decision about that file.
-- **Comparing and restoring.** The Versions view lists the open file's history newest first; each row
-  compares against **what is in the editor now** (unsaved edits included, since the question a version
-  answers is what you changed on top of it), or puts its text back. Restoring never writes the file: it
-  fills the buffer, marks the tab unsaved, and keeps a draft so the recovered text survives a crash.
-  Close without saving and nothing has changed on disk. Restoring does not record a version.
+- **Comparing and restoring.** The Versions view lists the open file's history newest first. Each row
+  opens the comparison popup, which shows any **two** sides of that history side by side: either side
+  can be a recorded version or the text in the editor, with the clicked row on the left to start.
+  Its controls are icons with the words in their tooltips — swap the two sides and *Restore* in the
+  toolbar under the dropdowns, and show only the changes / fill the window / close at the right end
+  of the title bar — because that bar is where the two texts get their width back, and a label in
+  three languages would be the widest thing in it.
+  The bar can be dragged, and the dialog resized from its right edge, bottom edge or corner; the size
+  it had is kept across maximising, and both are forgotten when it closes, because a comparison is a
+  look, not a layout. *Show only the changes* folds the view down to the hunks and a few lines around
+  them, and the thin row under the diff says how many lines
+  each side dropped, since a comparison that hides most of a file and says nothing about it can be
+  argued into a wrong answer. Restoring puts a version's text into the editor and marks the tab
+  unsaved; it never writes the file. Close without saving and nothing has changed on disk. Restoring
+  does not record a version.
 - **Not a cleanup.** Recorded history is never trimmed, and one version cannot be deleted on its own:
   history is stored as a chain, and taking a link out of the middle means rewriting everything after
   it. Settings → Versions → *Versions to list* bounds what is read, not what is kept; the only way to

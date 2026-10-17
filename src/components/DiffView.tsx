@@ -3,6 +3,7 @@ import { DiffEditor, type MonacoDiffEditor } from "@monaco-editor/react";
 import { t } from "../lib/i18n";
 import "../lib/monaco";
 import { sideKey, type ComparePair, type DiffStats } from "../lib/types";
+import type { FoldChange } from "../lib/diffFold";
 
 interface Props {
   pair: ComparePair;
@@ -15,6 +16,11 @@ interface Props {
   scrollBeyondLastLine: boolean;
   /** Added/removed line counts, recomputed whenever Monaco recomputes the diff. */
   onStats: (stats: DiffStats) => void;
+  /**
+   * The changed line ranges themselves, for a caller that wants to show only those and their
+   * surroundings. Monaco's own numbers, so nothing here is a second diff algorithm.
+   */
+  onChanges?: (changes: readonly FoldChange[]) => void;
 }
 
 /**
@@ -36,9 +42,12 @@ export default function DiffView({
   detectIndentation,
   scrollBeyondLastLine,
   onStats,
+  onChanges,
 }: Props) {
   const statsRef = useRef(onStats);
   statsRef.current = onStats;
+  const changesRef = useRef(onChanges);
+  changesRef.current = onChanges;
 
   /**
    * Derived from the pair *in order*: swapping the two sides has to yield different URIs.
@@ -63,7 +72,8 @@ export default function DiffView({
   const report = useCallback((instance: MonacoDiffEditor) => {
     let added = 0;
     let removed = 0;
-    for (const change of instance.getLineChanges() ?? []) {
+    const changes = instance.getLineChanges() ?? [];
+    for (const change of changes) {
       if (change.modifiedStartLineNumber > 0) {
         added += change.modifiedEndLineNumber - change.modifiedStartLineNumber + 1;
       }
@@ -72,6 +82,7 @@ export default function DiffView({
       }
     }
     statsRef.current({ added, removed });
+    changesRef.current?.(changes);
   }, []);
 
   // The mount handler reports for the new pair, but the previous comparison's totals must
