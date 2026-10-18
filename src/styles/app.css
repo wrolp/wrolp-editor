@@ -761,6 +761,15 @@ body {
   width: 100%;
   box-sizing: border-box;
 }
+/* The body of a version note: the same box as the line above it, holding the lines that do not
+   fit on one. It inherits the interface font rather than falling back to a textarea's monospace. */
+textarea.ver-note-body {
+  margin-top: 6px;
+  font-family: inherit;
+  line-height: 1.45;
+  resize: vertical;
+  min-height: 68px;
+}
 .modal-error,
 .grp-error {
   color: var(--danger);
@@ -2083,10 +2092,10 @@ body.resizing .editor-host {
   font-size: 13px;
 }
 /* A field whose number is a byte count. Everything else in here fits six digits — a font size,
-   a width in pixels, seconds — while this one holds up to 33554432, and the box is only 72px of
-   text plus its own spinner: half the number hides off the end and you cannot see what you are
-   typing. It gets its own width rather than a shared one, because a byte count is the only case
-   in the panel where the digits run that long. */
+   a width in pixels, seconds — while this one holds up to 33554432 when the unit is B, and the
+   box is only 72px of text plus its own spinner: half the number hides off the end and you
+   cannot see what you are typing. It gets its own width rather than a shared one, because a
+   byte count is the only case in the panel where the digits run that long. */
 .setting-row input.num-wide[type="number"] {
   width: 132px;
 }
@@ -2305,6 +2314,31 @@ body.resizing .editor-host {
   flex-wrap: wrap;
   gap: 10px;
   margin-bottom: 10px;
+}
+/* The notes written for the two versions being compared. Kept to a few lines that can scroll: the
+   pair of texts is what this popup exists for, and a note must not push it off screen. */
+.diff-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: -4px 0 8px;
+  max-height: 6.5em;
+  overflow-y: auto;
+  font-size: 12px;
+  color: var(--muted);
+}
+.diff-note {
+  display: flex;
+  gap: 8px;
+  margin: 0;
+}
+.diff-note .dn-when {
+  flex: 0 0 auto;
+  color: var(--text);
+}
+.diff-note .dn-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 .diff-side {
   display: flex;

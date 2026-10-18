@@ -40,9 +40,11 @@ interface RestoreResult {
 
 /**
  * How a save is asked for. `overwrite` answers the "the file changed on disk" question yes in
- * advance; `quiet` holds back the notice, which the automatic save has no click to attach one to.
+ * advance; `quiet` holds back the notice, which the automatic save has no click to attach one to;
+ * `note` is the word about this save that *Create version* typed, and it goes onto the version the
+ * write produces. A save that the conflict question stops takes the note down with it.
  */
-type SaveOpts = { overwrite?: boolean; quiet?: boolean };
+type SaveOpts = { overwrite?: boolean; quiet?: boolean; note?: string | null };
 
 /** A tab whose file no longer matches what it holds, waiting for the user to answer for it. */
 interface StaleAsk {
@@ -1461,7 +1463,7 @@ export function useEditorTabs({
         // Recorded after the write. A file that has just been named has no earlier state to stand
         // on, so the text that went to disk is its first version rather than a second row.
         if (!tab.encrypted) {
-          await versionsRef.current?.recordSave(saved.path, content, null, false);
+          await versionsRef.current?.recordSave(saved.path, content, null, false, opts?.note);
         }
         if (!opts?.quiet) toast(t("menu.saved", { name: basename(saved.path) }));
         return true;
@@ -1508,7 +1510,8 @@ export function useEditorTabs({
           tab.path,
           content,
           { content: tab.original, mtimeMs: tab.mtime },
-          automatic
+          automatic,
+          opts?.note
         );
       }
       // A save writes the file back into existence, so a prompt saying it is gone would be

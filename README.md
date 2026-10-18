@@ -94,6 +94,7 @@ wrolp/
     │                         language, restoreSession, draftRestore, lineEnding,
     │                         trimTrailingWhitespace, insertFinalNewline, autoSave, autoSaveInterval,
     │                         versioningEnabled, versioningShowLimit, versioningMaxFileSize, autoSaveVersions,
+    │                         askNoteOnSave,
     │                         sidebarRoot, encryptIdleMinutes
     ├── file-settings.json    per-file overrides: encoding, line ending, view settings, versioning
     ├── groups.json           the tab groups: name, tabs and caret positions
@@ -211,11 +212,27 @@ this is not a repository you branch or push, and nothing about it reaches the fo
   encrypt — drafts are sealed with the file's key to avoid exactly that, and a version has no key at
   write time to seal itself with. A file bigger than the configured limit is saved normally and left
   out, with one notice per session. Pictures are never offered. And a save whose text is identical to
-  the last recorded version adds nothing, so pressing `Ctrl+S` four times leaves one row.
+  the last recorded version adds nothing, so pressing `Ctrl+S` four times leaves one row — unless a
+  note was written for it, which is the one thing that makes a save of unchanged text worth keeping.
 - **Two switches, one rule.** Settings → Versions is the default for every file; a single file can
   override it from its tab menu (*Record versions for this file* / *Stop recording this file*) or in
   that file's Settings. `Create version` works whatever the switches say, and taking one turns that
-  file on — asking for a version once is a decision about that file.
+  file on — asking for a version once is a decision about that file. It asks for a word about the
+  version first: a line for the list, and as many lines under it as the reason needs. Both are
+  optional, both are kept with the version, and neither can be edited afterwards, because the note
+  lives inside the record it describes rather than beside it — which is why the question is asked
+  once, there, and not offered later. The body is shown when the version is opened for comparison,
+  and in the row's tooltip. Since a version is of the file as it stands on disk, asking for one while
+  the tab has unsaved text writes the text first, and the note goes on the version that save
+  produces rather than on a second row for the same thing.
+- **A save that asks first.** *Ask for a note when I save* (Settings → Versions, off) puts the same
+  box in front of a save you make by hand — `Ctrl+S`, or the mark on a tab — so the note is written
+  while the version still has no message to be added to. Leaving it empty is the ordinary answer: it
+  saves without a note. `Escape` saves nothing, which is what `Escape` means everywhere else in this
+  app. Nothing is asked when a save cannot hold a version — a picture, an encrypted file, a new
+  untitled tab, a file with nothing to write — nor by the automatic save, which has nobody at the
+  keyboard to answer. Typing a note there does the same thing *Create version* does to the switches:
+  it takes that file into history.
 - **Comparing and restoring.** The Versions view lists the open file's history newest first. Each row
   opens the comparison popup, which shows any **two** sides of that history side by side: either side
   can be a recorded version or the text in the editor, with the clicked row on the left to start.

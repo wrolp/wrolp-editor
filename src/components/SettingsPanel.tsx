@@ -56,6 +56,28 @@ const ENCODINGS = [
   "utf-16be",
 ];
 
+/**
+ * The size units the largest-file setting offers, 1024-based like the status bar's readout.
+ *
+ * The stored value is always bytes — the backend limit is a byte count and nothing else reads
+ * this setting — so a unit is only how the field is written and read back. GB is left out on
+ * purpose: the ceiling on the setting is 32 MB, and a unit that can only be chosen past it is
+ * a choice that cannot be used.
+ */
+const SIZE_UNITS = [
+  { key: "B", factor: 1 },
+  { key: "KB", factor: 1024 },
+  { key: "MB", factor: 1024 * 1024 },
+] as const;
+
+type SizeUnitKey = (typeof SIZE_UNITS)[number]["key"];
+
+/** The unit a byte count reads in most naturally: the smallest one where it is at least 1. */
+function sizeUnitOf(bytes: number): SizeUnitKey {
+  if (bytes >= 1024 * 1024) return "MB";
+  return bytes >= 1024 ? "KB" : "B";
+}
+
 export default function SettingsPanel({
   settings,
   menu,
@@ -87,6 +109,16 @@ export default function SettingsPanel({
   const joined = settings.excludedExtensions.join(", ");
   const [excludedText, setExcludedText] = useState(joined);
   useEffect(() => setExcludedText(joined), [joined]);
+
+  /**
+   * The unit the largest-file field is written in. Starts wherever the stored value reads best
+   * and belongs to the reader from then on; both controls write the same bytes back, so the
+   * field always shows what is stored rather than what was typed.
+   */
+  const [sizeUnit, setSizeUnit] = useState<SizeUnitKey>(() =>
+    sizeUnitOf(settings.versioningMaxFileSize)
+  );
+  const sizeFactor = SIZE_UNITS.find((u) => u.key === sizeUnit)?.factor ?? 1;
 
   const commitExcluded = (text: string) => {
     const list = parseExtensionList(text);
@@ -579,6 +611,12 @@ export default function SettingsPanel({
                 onChange={(v) => onSaveSettings({ autoSaveVersions: v })}
               />
               <p className="muted">{t("ver.autoSaveVersionsDesc")}</p>
+              <SettingCheck
+                label={t("ver.askNote")}
+                checked={settings.askNoteOnSave}
+                onChange={(v) => onSaveSettings({ askNoteOnSave: v })}
+              />
+              <p className="muted">{t("ver.askNoteDesc")}</p>
               {/* No `min`/`max` on either field: the browser answers an out-of-range keystroke
                   with its own message in its own language, and this app has already translated
                   everything else. The number is clamped here and always written back, so the
@@ -596,20 +634,34 @@ export default function SettingsPanel({
                 />
               </SettingField>
               <p className="muted">{t("ver.showLimitDesc")}</p>
+              {/* A number and a unit rather than a bare byte count: the default alone is an
+                  eight-digit box to type into, and the ceiling is eight digits. Both controls
+                  write bytes, so the unit only changes how the number reads. */}
               <SettingField label={t("ver.maxFileSize")}>
                 <input
                   className="num-wide"
                   type="number"
-                  step={1024}
-                  value={settings.versioningMaxFileSize}
+                  value={settings.versioningMaxFileSize / sizeFactor}
                   onChange={(e) => {
-                    const n = Math.trunc(Number(e.target.value));
+                    const n = Number(e.target.value);
                     if (Number.isNaN(n)) return;
+                    const bytes = Math.round(n * sizeFactor);
                     onSaveSettings({
-                      versioningMaxFileSize: Math.min(Math.max(n, 1024), 33554432),
+                      versioningMaxFileSize: Math.min(Math.max(bytes, 1024), 33554432),
                     });
                   }}
                 />
+                <select
+                  className="select"
+                  value={sizeUnit}
+                  onChange={(e) => setSizeUnit(e.target.value as SizeUnitKey)}
+                >
+                  {SIZE_UNITS.map((unit) => (
+                    <option key={unit.key} value={unit.key}>
+                      {unit.key}
+                    </option>
+                  ))}
+                </select>
               </SettingField>
               <p className="muted">{t("ver.maxFileSizeDesc")}</p>
               <SettingField label={t("ver.clear")}>

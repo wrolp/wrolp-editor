@@ -179,6 +179,11 @@ export interface Settings {
    * whatever the interval happened to catch. Only ever applies to a file versioning tracks.
    */
   autoSaveVersions: boolean;
+  /**
+   * Whether a save asked for by hand is stopped first, to ask what that version is for. Its own
+   * switch: a box in the way of `Ctrl+S` is only tolerable once somebody chose it.
+   */
+  askNoteOnSave: boolean;
 }
 
 /**
@@ -202,8 +207,10 @@ export interface VersionEntry {
   oid: string;
   /** ISO-8601 UTC. */
   ts: string;
-  /** What the user called this version, in the language it was written in. */
+  /** What the user called this version: one line, in the language it was written in. */
   message: string | null;
+  /** What they said under that line, if anything. Keep it out of the row; show it when opened. */
+  body: string | null;
 }
 
 /** A file that carries history, as the store reports it. */

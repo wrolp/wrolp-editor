@@ -23,6 +23,7 @@ import DeletedFileDialog from "./components/DeletedFileDialog";
 import StaleChangeDialog from "./components/StaleChangeDialog";
 import ConflictCompareModal from "./components/ConflictCompareModal";
 import VersionDiffModal from "./components/VersionDiffModal";
+import VersionNoteDialog from "./components/VersionNoteDialog";
 import PasswordDialog from "./components/PasswordDialog";
 import {
   IconClose,
@@ -150,6 +151,7 @@ const DEFAULT_SETTINGS: Settings = {
   versioningShowLimit: 30,
   versioningMaxFileSize: 524288,
   autoSaveVersions: false,
+  askNoteOnSave: false,
 }
 
 /**
@@ -1229,14 +1231,58 @@ export default function App() {
     [tabs]
   );
 
-  const { saveActive, openUntitled, openSettings } = tabs;
+  /**
+   * A version asked for on purpose, waiting for the word about it. The tab is remembered, not its
+   * text: the text either has to reach disk before it can be a version or has just reached it, and a
+   * snapshot taken when the box opened would be a second copy of something `saveTab` reads itself.
+   */
+  const [versionNote, setVersionNote] = useState<{
+    tabId: number;
+    path: string;
+    intent: "save" | "create";
+  } | null>(null);
+
+  /**
+   * A save asked for by hand — `Ctrl+S`, or the mark on a tab.
+   *
+   * With *Ask for a note when I save* on, the word about the version is asked before the write, not
+   * after it: a note lives inside the record it describes, so asking later would leave a row without
+   * one and a second row to explain the same text. Everything that cannot hold a version is saved
+   * without the question, and so is a tab with nothing to write — `Ctrl+S` on a saved file is a
+   * reflex, not a request to be interviewed.
+   */
+  const handSave = useCallback(
+    (id?: number) => {
+      const target = id ?? tabs.activeId;
+      const tab = target === null ? undefined : tabs.tabs.find((t) => t.id === target);
+      if (
+        !settings.askNoteOnSave ||
+        target === null ||
+        !tab ||
+        tab.isSettings ||
+        tab.compare ||
+        tab.isBinary ||
+        tab.encrypted ||
+        isLockedBlank(tab) ||
+        !tab.dirty ||
+        isUntitled(tab.path)
+      ) {
+        if (target !== null) void tabs.saveTab(target);
+        return;
+      }
+      setVersionNote({ tabId: target, path: tab.path, intent: "save" });
+    },
+    [settings.askNoteOnSave, tabs.activeId, tabs.saveTab, tabs.tabs]
+  );
+
+  const { openUntitled, openSettings } = tabs;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
       const key = e.key.toLowerCase();
       if (key === "s") {
         e.preventDefault();
-        void saveActive();
+        handSave();
       } else if (key === "o") {
         e.preventDefault();
         void openFiles();
@@ -1253,7 +1299,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openFiles, openUntitled, requestClose, saveActive, tabs.activeId, toggleSidebar]);
+  }, [openFiles, openUntitled, requestClose, handSave, tabs.activeId, toggleSidebar]);
 
   const showSettings = tabs.activeTab?.isSettings === true;
   const sidebarShown = sidebarVisible && !showSettings;
@@ -1617,7 +1663,7 @@ const defaultModeFor = useCallback(
         onPreviewMode={setPreviewMode}
         onSelect={tabs.selectTab}
         onClose={requestClose}
-        onSave={(id) => void tabs.saveTab(id)}
+        onSave={handSave}
         onReorder={tabs.moveTab}
         onTabContextMenu={(tabId, x, y) => setTabMenu({ tabId, x, y, panel: "root" })}
         renamingId={renamingTab}
@@ -1990,10 +2036,11 @@ const defaultModeFor = useCallback(
                     <div
                       className="ctx-item"
                       onClick={() => {
-                        const text = tabs.tabText(tabMenu.tabId);
-                        if (text !== null) {
-                          void versions.createVersion(menuTabPath, text).then(() => refreshVersions());
-                        }
+                        setVersionNote({
+                          tabId: tabMenu.tabId,
+                          path: menuTabPath,
+                          intent: "create",
+                        });
                         setTabMenu(null);
                       }}
                     >
@@ -2316,6 +2363,42 @@ const defaultModeFor = useCallback(
           scrollBeyondLastLine={settings.scrollBeyondLastLine}
           onRestore={(oid) => void restoreFromDiff(oid)}
           onClose={() => setVersionDiff(null)}
+        />
+      )}
+
+      {/* One box, two gestures: *Create version* always asks, and an ordinary hand save asks only
+          when the setting says so. The timer is never asked — a prompt nobody is at the keyboard to
+          answer would park the save behind a modal. */}
+      {versionNote && (
+        <VersionNoteDialog
+          name={basename(versionNote.path)}
+          intent={versionNote.intent}
+          onConfirm={(message) => {
+            const { tabId, path, intent } = versionNote;
+            setVersionNote(null);
+            void (async () => {
+              const dirty = tabs.tabs.some((t) => t.id === tabId && t.dirty);
+              // A version is a record of what the file held, so text that was never written goes to
+              // disk first, and the note rides on the version that write produces rather than adding
+              // a second row for the same text. A save the "changed on disk" question stops takes the
+              // note down with it: nothing was written, so there is nothing to mark.
+              if (dirty || intent === "save") {
+                // *Create version* takes the file into history whatever the switches said. A save
+                // only says so when a word was actually typed: an empty answer is the ordinary
+                // `Ctrl+S`, and it must not start recording a file nobody opted in.
+                if (intent === "create" || message) {
+                  await versions.setOverride(path, "on").catch(() => null);
+                }
+                await tabs.saveTab(tabId, { note: message });
+              } else {
+                const text = tabs.tabText(tabId);
+                if (text === null) return;
+                await versions.createVersion(path, text, message);
+              }
+              refreshVersions();
+            })();
+          }}
+          onCancel={() => setVersionNote(null)}
         />
       )}
 

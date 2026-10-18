@@ -1,13 +1,13 @@
-import { cloneElement, useId, type ReactElement } from "react";
+import { Children, cloneElement, isValidElement, useId, type ReactElement, type ReactNode } from "react";
 
 interface Props {
   label: string;
   /**
-   * The control itself, a `<select>` or an `<input>`. Cloned to add its accessible name.
-   * The prop type is what `cloneElement` will accept, so it has to be spelled out rather
-   * than left as the default `unknown`.
+   * The control or controls, each a `<select>` or an `<input>`. Cloned to add their
+   * accessible name. The prop type is what `cloneElement` will accept, so it has to be
+   * spelled out rather than left as the default `unknown`.
    */
-  children: ReactElement<{ "aria-labelledby"?: string }>;
+  children: ReactNode;
 }
 
 /**
@@ -23,12 +23,19 @@ interface Props {
  */
 export default function SettingField({ label, children }: Props) {
   const id = useId();
+  const labelId = `${id}-label`;
   return (
     <div className="setting-row">
-      <span className="setting-title" id={`${id}-label`}>
+      <span className="setting-title" id={labelId}>
         {label}
       </span>
-      {cloneElement(children, { "aria-labelledby": `${id}-label` })}
+      {Children.map(children, (child) =>
+        isValidElement(child)
+          ? cloneElement(child as ReactElement<{ "aria-labelledby"?: string }>, {
+              "aria-labelledby": labelId,
+            })
+          : child
+      )}
     </div>
   );
 }

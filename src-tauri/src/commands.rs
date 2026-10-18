@@ -207,6 +207,10 @@ pub struct Settings {
   /// ever matters for a file versioning already covers: the timer runs whether or not anybody is
   /// at the keyboard, so recording it fills the timeline with half-typed lines.
   pub auto_save_versions: bool,
+  /// Whether a save asked for by hand is stopped first, to ask what that version is for. Off by
+  /// default: a box in the way of `Ctrl+S` is only tolerable when somebody chose it, which is why
+  /// this is a separate switch rather than part of versioning itself.
+  pub ask_note_on_save: bool,
 }
 
 /// Used when settings.json is absent or a key is missing, so a first run must not
@@ -249,6 +253,7 @@ impl Default for Settings {
       versioning_show_limit: VERSIONING_DEFAULT_SHOW_LIMIT,
       versioning_max_file_size: VERSIONING_DEFAULT_MAX_FILE_SIZE,
       auto_save_versions: false,
+      ask_note_on_save: false,
     }
   }
 }
@@ -425,6 +430,7 @@ impl Settings {
           .min(VERSIONING_MAX_FILE_SIZE_CEILING)
       },
       auto_save_versions: self.auto_save_versions,
+      ask_note_on_save: self.ask_note_on_save,
     }
   }
 }
@@ -1684,6 +1690,16 @@ mod tests {
     }
     .filled();
     assert!(filled.auto_save_versions);
+    // Being asked for a word on every hand save is the most intrusive thing versioning can do, so
+    // it is its own switch and defaults off whoever has versioning on.
+    assert!(!s.ask_note_on_save);
+    let filled = Settings {
+      versioning_enabled: true,
+      ask_note_on_save: true,
+      ..Default::default()
+    }
+    .filled();
+    assert!(filled.ask_note_on_save);
   }
 
   /// The idle lock is the one setting where 0 is a choice rather than a missing value:

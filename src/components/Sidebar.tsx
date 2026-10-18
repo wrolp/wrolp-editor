@@ -1114,7 +1114,16 @@ export default function Sidebar(props: Props) {
               <div className="empty">{t("ver.noneForThis")}</div>
             ) : (
               activeVersions.map((v) => (
-                <div key={v.oid} className="ver-item" title={v.ts}>
+                <div
+                  key={v.oid}
+                  className="ver-item"
+                  // The row truncates its note, so the whole of it belongs in the tooltip: the title
+                  // it shows, the lines written under that, and the ISO instant behind the formatted
+                  // time.
+                  title={`${formatWhen(v.ts)}${v.message ? ` · ${v.message}` : ""}\n${v.ts}${
+                    v.body ? `\n\n${v.body}` : ""
+                  }`}
+                >
                   <span className="vi-when">{formatWhen(v.ts)}</span>
                   {v.message && <span className="vi-note">{v.message}</span>}
                   <span className="vi-actions">

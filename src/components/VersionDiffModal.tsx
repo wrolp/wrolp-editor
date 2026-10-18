@@ -134,6 +134,23 @@ export default function VersionDiffModal(props: Props) {
     [versions]
   );
 
+  /**
+   * What the user said about a side, if they said anything.
+   *
+   * The title and the lines under it are read back separately and shown together here: a note was
+   * written to be read while looking at this pair, and a hover tooltip on a row three clicks away is
+   * not that.
+   */
+  const noteOf = useCallback(
+    (side: string) => {
+      if (side === CURRENT) return null;
+      const entry = versions.find((v) => v.oid === side);
+      if (!entry?.message && !entry?.body) return null;
+      return [entry.message, entry.body].filter(Boolean).join("\n\n");
+    },
+    [versions]
+  );
+
   const full = useMemo(() => ({ left: textOf(left), right: textOf(right) }), [textOf, left, right]);
 
   /**
@@ -281,6 +298,20 @@ export default function VersionDiffModal(props: Props) {
             </button>
           )}
         </div>
+        {/* A note written for one of these two versions is read here rather than in a tooltip: it
+            was written to be read while looking at this pair. */}
+        {(noteOf(left) || noteOf(right)) && (
+          <div className="diff-notes">
+            {[noteOf(left), noteOf(right)].map((note, i) =>
+              note ? (
+                <p className="diff-note" key={i}>
+                  <span className="dn-when">{labelFor(i === 0 ? left : right)}</span>
+                  <span className="dn-text">{note}</span>
+                </p>
+              ) : null
+            )}
+          </div>
+        )}
         {error && <p className="modal-error">{error}</p>}
         <div className="diff-modal-body">
           <DiffView

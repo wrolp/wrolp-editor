@@ -45,6 +45,66 @@ const MODE_TYPE: i32 = 0o170000;
 /// it is the answer to "does this file have versions", which is "no".
 const MISSING: &str = "version_missing";
 
+/// How much of a note's title is kept, in characters. A version is one row in a list, and past
+/// this the text is a paragraph rather than a label — the row would spend more room than the diff
+/// it opens.
+const TITLE_MAX_CHARS: usize = 200;
+
+/// How much of the note under the title is kept. A reason for a version is allowed to be a few
+/// sentences; it is still not a document, and the whole note is carried in every commit it could
+/// be read from.
+const BODY_MAX_CHARS: usize = 2000;
+
+/// The note a commit stores, from whatever the caller typed.
+///
+/// The first line is the title and everything after it is the body, written the way git itself
+/// wants a message: title, blank line, body. Line breaks are normalised to `\n` and each half is
+/// capped on its own, so what comes back out of [`split_message`] is what went in — apart from
+/// blank lines at the ends, which carry nothing a timeline could show.
+fn stored_message(message: Option<&str>) -> Option<String> {
+  let raw = message?.replace("\r\n", "\n").replace('\r', "\n");
+  let (first, rest) = match raw.split_once('\n') {
+    Some(halves) => halves,
+    None => (raw.as_str(), ""),
+  };
+  let mut title = take(first.trim(), TITLE_MAX_CHARS);
+  let mut body = take(rest.trim(), BODY_MAX_CHARS);
+  if title.is_empty() && !body.is_empty() {
+    // The row still has to read as something, so a note without a label gives up its first line
+    // as the title — the same thing git would do with a message like that.
+    let (promoted, remainder) = match body.split_once('\n') {
+      Some(halves) => halves,
+      None => (body.as_str(), ""),
+    };
+    title = take(promoted.trim(), TITLE_MAX_CHARS);
+    body = take(remainder.trim(), BODY_MAX_CHARS);
+  }
+  if title.is_empty() && body.is_empty() {
+    return None;
+  }
+  if body.is_empty() {
+    return Some(title);
+  }
+  Some(format!("{title}\n\n{body}"))
+}
+
+/// The note a commit carries, read back as the two halves it was written from.
+fn split_message(message: &str) -> (Option<String>, Option<String>) {
+  let (title, rest) = match message.split_once("\n\n") {
+    Some(halves) => halves,
+    None => (message, ""),
+  };
+  (
+    (!title.trim().is_empty()).then(|| title.trim().to_string()),
+    (!rest.trim().is_empty()).then(|| rest.trim().to_string()),
+  )
+}
+
+/// A cap counted in characters, not bytes: a note in Chinese is three bytes a word.
+fn take(text: &str, max: usize) -> String {
+  text.chars().take(max).collect()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Meta {
   /// The file's current path, in the case the filesystem spells it. Display only.
@@ -64,8 +124,10 @@ pub struct VersionEntry {
   pub oid: String,
   /// Commit time, ISO-8601 UTC.
   pub ts: String,
-  /// What the user called this version, in the language it was written in.
+  /// What the user called this version: one line, in the language it was written in.
   pub message: Option<String>,
+  /// What the user said about it beyond that line, if they wrote any.
+  pub body: Option<String>,
 }
 
 /// A file that has at least one version, as [`list`] reports it.
@@ -339,9 +401,13 @@ pub fn commit(
   let blob = repo
     .blob(content.as_bytes())
     .map_err(|e| git_err("blob", e))?;
-  if head.and_then(|oid| entry_oid(&repo, oid, &meta.entry)) == Some(blob) {
+  let note = stored_message(message);
+  if note.is_none() && head.and_then(|oid| entry_oid(&repo, oid, &meta.entry)) == Some(blob) {
     // Same content as the last version: recording it again would fill the timeline with rows that
-    // all restore to the same text.
+    // all restore to the same text. A note is the exception, and it is the user's: writing one is
+    // asking for this moment to be marked, and "unchanged since the row before" is exactly what a
+    // marker like that says. The commit carries the same tree as its parent, which git allows and
+    // the timeline reads as any other row.
     return Ok(AppendOutcome::Skipped);
   }
   let base_tree = match head {
@@ -369,7 +435,7 @@ pub fn commit(
       Some(BRANCH),
       &author,
       &author,
-      message.unwrap_or(&none),
+      note.as_deref().unwrap_or(&none),
       &tree,
       &refs,
     )
@@ -414,14 +480,17 @@ pub fn entries(base: &Path, path: &str, limit: usize) -> Result<Vec<VersionEntry
       continue;
     }
     let commit = repo.find_commit(oid).map_err(|e| git_err("commit", e))?;
+    // The whole message, not git's `summary`: that squashes the whitespace inside its first
+    // paragraph, which would rewrite text the user typed.
+    let (message, body) = commit
+      .message()
+      .map_err(|e| git_err("commit", e))
+      .map(|raw| split_message(&raw))?;
     out.push(VersionEntry {
       oid: oid.to_string(),
       ts: iso(commit.time().seconds()),
-      message: commit
-        .summary()
-        .map_err(|e| git_err("commit", e))?
-        .map(str::to_string)
-        .filter(|s| !s.is_empty()),
+      message,
+      body,
     });
     if out.len() >= limit {
       break;
@@ -763,6 +832,97 @@ mod tests {
       content_at(&base, &file, &after[1].oid).expect("oldest"),
       "one\n"
     );
+  }
+
+  #[test]
+  fn a_note_marks_the_moment_even_when_nothing_changed() {
+    let (project, base) = scratch("note");
+    let file = write_file(&project, "a.txt", "same\n");
+    commit(&base, &file, "same\n", None, None, &policy()).expect("first");
+    // A save with no note stays the refused duplicate it was.
+    assert!(matches!(
+      commit(&base, &file, "same\n", None, None, &policy()).expect("dup"),
+      AppendOutcome::Skipped
+    ));
+    // The same text, asked for with a note, is a marker: the row says what the moment was for.
+    assert!(matches!(
+      commit(
+        &base,
+        &file,
+        "same\n",
+        Some("重构前先留一个"),
+        None,
+        &policy()
+      )
+      .expect("noted"),
+      AppendOutcome::Created(_)
+    ));
+    let entries = entries(&base, &file, 10).expect("entries");
+    assert_eq!(entries.len(), 2);
+    assert_eq!(entries[0].message.as_deref(), Some("重构前先留一个"));
+    // It holds the same text as the row under it, which is exactly what it is telling us.
+    assert_eq!(
+      content_at(&base, &file, &entries[0].oid).expect("noted text"),
+      content_at(&base, &file, &entries[1].oid).expect("previous text")
+    );
+    // Whitespace on its own is not a note; it would leave a row that reads as blank.
+    assert!(matches!(
+      commit(&base, &file, "same\n", Some("   \n  "), None, &policy()).expect("blank note"),
+      AppendOutcome::Skipped
+    ));
+  }
+
+  /// A note keeps the lines written under its title, and each half is capped on its own: what the
+  /// timeline shows has to be what the writer typed, not git's view of a commit message.
+  #[test]
+  fn a_note_keeps_its_lines_and_caps_each_half() {
+    let (project, base) = scratch("note-shape");
+    let file = write_file(&project, "a.txt", "one\n");
+    commit(
+      &base,
+      &file,
+      "one\n",
+      Some("  改了标题\r\n第一段\r\n第二段\r\n\r\n"),
+      None,
+      &policy(),
+    )
+    .expect("noted");
+    let rows = entries(&base, &file, 10).expect("entries");
+    assert_eq!(rows[0].message.as_deref(), Some("改了标题"));
+    assert_eq!(rows[0].body.as_deref(), Some("第一段\n第二段"));
+    // Each half keeps to its own budget, so a long reason cannot push the title out of the row.
+    let long = format!("{}\n{}", "很".repeat(300), "字".repeat(3000));
+    commit(&base, &file, "two\n", Some(&long), None, &policy()).expect("long note");
+    let capped = &entries(&base, &file, 10).expect("entries")[0];
+    assert_eq!(
+      capped.message.clone().expect("a title").chars().count(),
+      TITLE_MAX_CHARS,
+      "a row is one line, not a document"
+    );
+    assert_eq!(
+      capped.body.clone().expect("a body").chars().count(),
+      BODY_MAX_CHARS
+    );
+  }
+
+  /// A note with no title gives up its first line as one: a row that reads as blank would hide the
+  /// reason the writer did bother to leave a note.
+  #[test]
+  fn a_note_without_a_title_uses_its_first_line() {
+    let (project, base) = scratch("note-titleless");
+    let file = write_file(&project, "a.txt", "one\n");
+    commit(
+      &base,
+      &file,
+      "one\n",
+      Some("\n  只有正文\n还有第二段\n"),
+      None,
+      &policy(),
+    )
+    .expect("noted");
+    let rows = entries(&base, &file, 10).expect("entries");
+    assert_eq!(rows[0].message.as_deref(), Some("只有正文"));
+    assert_eq!(rows[0].body.as_deref(), Some("还有第二段"));
   }
 
   #[test]

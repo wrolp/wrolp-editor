@@ -27,12 +27,15 @@ export interface VersionRecorder {
   /**
    * @param automatic whether the write came from the timer rather than from a person. The backend
    * decides what that means; this only reports it, so the switch has one answer in one place.
+   * @param message the note the person typed with this save, if they typed one. Only a save asked
+   * for on purpose can carry one; the timer has nobody at the keyboard to answer for it.
    */
   recordSave(
     path: string,
     content: string,
     baseline: BaselineInput | null,
-    automatic: boolean
+    automatic: boolean,
+    message?: string | null
   ): Promise<void>;
 }
 
@@ -83,7 +86,8 @@ export function useVersions({ toast }: Options) {
       path: string,
       content: string,
       baseline: BaselineInput | null,
-      automatic: boolean
+      automatic: boolean,
+      message?: string | null
     ) => {
       const first: VersionBaseline | null =
         baseline && !versioned.current.has(path)
@@ -97,7 +101,7 @@ export function useVersions({ toast }: Options) {
             }
           : null;
       try {
-        const outcome = await api.addVersion(path, content, null, first, automatic);
+        const outcome = await api.addVersion(path, content, message ?? null, first, automatic);
         if (outcome.status === "created") versioned.current.add(path);
       } catch (e) {
         reportFailure(e, path);
@@ -109,14 +113,18 @@ export function useVersions({ toast }: Options) {
   const recorder = useMemo<VersionRecorder>(() => ({ recordSave }), [recordSave]);
 
   /**
-   * Record a version on purpose. Works whatever the settings say, and takes the file into
-   * tracking to do it: a user who asks for a version of a file has said they want its history.
+   * Record a version on purpose. Works whatever the settings say, and takes the file into tracking
+   * to do it: a user who asks for a version of a file has said they want its history.
+   *
+   * A `message` is kept with the version and cannot be changed later — it lives inside the record
+   * it describes — so it is worth typing here, where there is a box for it, and nowhere else. With
+   * one, a save whose text has not changed still gets its row: that is the marker being asked for.
    */
   const createVersion = useCallback(
-    async (path: string, content: string): Promise<boolean> => {
+    async (path: string, content: string, message: string | null): Promise<boolean> => {
       try {
         await api.setVersionOverride(path, "on");
-        const outcome = await api.addVersion(path, content, null, null, false);
+        const outcome = await api.addVersion(path, content, message, null, false);
         if (outcome.status === "skipped") {
           // The file already ends at exactly this text, so there is nothing new to keep. Said out
           // loud rather than letting the menu look like it did nothing.
@@ -124,7 +132,7 @@ export function useVersions({ toast }: Options) {
           return false;
         }
         versioned.current.add(path);
-        toast(t("ver.created"));
+        toast(message ? t("ver.createdWithNote") : t("ver.created"));
         return true;
       } catch (e) {
         reportFailure(e, path);
