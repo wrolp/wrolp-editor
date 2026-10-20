@@ -91,7 +91,7 @@
 
   <!-- Tile border, with the field left transparent -->
   <g clip-path="url(#tileClip)">
-    <rect x="7" y="7" width="1010" height="1010" rx="181" fill="none" stroke="#7C80E4" stroke-opacity="0.55" stroke-width="14"/>
+    <rect x="12" y="12" width="1000" height="1000" rx="176" fill="none" stroke="#6568E8" stroke-opacity="0.85" stroke-width="24"/>
   </g>
 
   <!-- The mark, scaled up about the canvas centre -->
