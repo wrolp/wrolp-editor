@@ -184,6 +184,10 @@ export interface Settings {
    * switch: a box in the way of `Ctrl+S` is only tolerable once somebody chose it.
    */
   askNoteOnSave: boolean;
+  /** Where configuration snapshots are written; empty means `wrolp/backups`. */
+  backupDir: string;
+  /** How many snapshots are kept. Older ones are removed when a new one is written. */
+  backupRetain: number;
 }
 
 /**
@@ -199,6 +203,29 @@ export interface StoreDirs {
   versions: string;
   /** Whether `versions` exists to be opened. */
   versionsPresent: boolean;
+}
+
+/** One configuration snapshot, as the backend found it on disk. */
+export interface BackupInfo {
+  path: string;
+  file: string;
+  /** ISO-8601 with the local offset it was written at. */
+  createdAt: string;
+  /** `auto`, `manual` or `pre-restore`. */
+  kind: string;
+  bytes: number;
+  /** What restoring it would bring back, read from the snapshot rather than the live state. */
+  groups: number;
+  tabs: number;
+  files: number;
+}
+
+export interface BackupList {
+  /** The folder in use, after resolving an empty setting to the default. */
+  dir: string;
+  dirExists: boolean;
+  /** Newest first. Damaged files are left out rather than offered for restore. */
+  backups: BackupInfo[];
 }
 
 /** One recorded version of a file: a point in its history, without its text. */
@@ -502,6 +529,18 @@ export const api = {
   getSettings: () => invoke<Settings>("get_settings"),
   saveSettings: (settings: Settings) => invoke<Settings>("save_settings", { settings }),
   getStoreDirs: () => invoke<StoreDirs>("get_store_dirs"),
+  createConfigBackup: () => invoke<BackupInfo>("create_config_backup"),
+  listConfigBackups: () => invoke<BackupList>("list_config_backups"),
+  /** Replaces the state files with a snapshot; returns how many were written. */
+  restoreConfigBackup: (path: string) =>
+    invoke<number>("restore_config_backup", { path }),
+  /**
+   * Refresh the day's automatic snapshot. `force` is the open/close path, which replaces
+   * today's automatic one; without it the hourly check only fills in a missing day. Null
+   * means nothing was written.
+   */
+  maybeAutoBackup: (force = false) =>
+    invoke<BackupInfo | null>("maybe_auto_backup", { force }),
   /** Which rule this file is under: the override it carries and what that resolves to. */
   versioningState: (path: string) => invoke<VersionState>("versioning_state", { path }),
   /** `null` lets the file follow the global default again. */
@@ -545,8 +584,9 @@ export const api = {
  * scopes it to `http`, `https`, `mailto` and `tel`, so a document cannot name an application.
  *
  * `openPath` is the wider of the two — it hands a filesystem path to whatever the OS has
- * registered for it — so it is granted separately and used for one thing only: opening the two
- * folders `getStoreDirs` names. A path from anywhere else never reaches it.
+ * registered for it — so it is granted separately and used only for folders the backend named:
+ * the two in `getStoreDirs` and the backup folder in `BackupList`. A path from anywhere else
+ * never reaches it.
  */
 export { invoke, listen, open, save, revealItemInDir, openUrl, openPath };
 

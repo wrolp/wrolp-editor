@@ -211,6 +211,13 @@ pub struct Settings {
   /// default: a box in the way of `Ctrl+S` is only tolerable when somebody chose it, which is why
   /// this is a separate switch rather than part of versioning itself.
   pub ask_note_on_save: bool,
+  /// Where configuration backups are written. Empty means `wrolp/backups`, beside the state
+  /// folder; a path the user picked is kept as given. The folder is created when a backup is
+  /// taken or the list is read, so a choice that cannot be reached yet is still remembered.
+  pub backup_dir: String,
+  /// How many backups are kept. Older snapshots are deleted when a newer one is written, which is
+  /// also what keeps an automatic snapshot from growing the folder without bound.
+  pub backup_retain: u32,
 }
 
 /// Used when settings.json is absent or a key is missing, so a first run must not
@@ -254,6 +261,10 @@ impl Default for Settings {
       versioning_max_file_size: VERSIONING_DEFAULT_MAX_FILE_SIZE,
       auto_save_versions: false,
       ask_note_on_save: false,
+      // Empty means `wrolp/backups`, a sibling of the state folder: next to the configuration,
+      // without mixing snapshots into the files the app reads as its current state.
+      backup_dir: String::new(),
+      backup_retain: crate::backup::DEFAULT_RETAIN,
     }
   }
 }
@@ -431,6 +442,14 @@ impl Settings {
       },
       auto_save_versions: self.auto_save_versions,
       ask_note_on_save: self.ask_note_on_save,
+      backup_dir: self.backup_dir.trim().to_string(),
+      // A zero would leave no snapshot at all after the next write, and a hundred is already more
+      // history than a configuration needs.
+      backup_retain: if self.backup_retain == 0 {
+        crate::backup::DEFAULT_RETAIN
+      } else {
+        self.backup_retain.min(crate::backup::MAX_RETAIN)
+      },
     }
   }
 }
@@ -1325,13 +1344,22 @@ pub fn remove_folder_history(
   Ok(out)
 }
 
-#[tauri::command]
-pub fn get_settings(app: AppHandle) -> Result<Settings, String> {
+/// The settings every reader shares, including the commands that run before the frontend asks.
+///
+/// A settings file that cannot be parsed is still an error here: the editor must not silently
+/// start with defaults and then save them back over whatever the user had. The backup path
+/// tolerates it separately, because a broken file is exactly when a snapshot is worth taking.
+pub(crate) fn load_settings(app: &AppHandle) -> Result<Settings, String> {
   Ok(
-    read_json::<Settings>(&app, "settings.json")?
+    read_json::<Settings>(app, "settings.json")?
       .unwrap_or_default()
       .filled(),
   )
+}
+
+#[tauri::command]
+pub fn get_settings(app: AppHandle) -> Result<Settings, String> {
+  load_settings(&app)
 }
 
 #[tauri::command]
@@ -1648,6 +1676,31 @@ mod tests {
     assert_eq!(s.sidebar_view, "explorer");
     assert_eq!(s.font_size, 14.0);
     assert_eq!(s.sidebar_width, 240.0);
+  }
+
+  /// Backups go beside the state folder unless another one was chosen, and the count is bounded
+  /// so a daily snapshot cannot fill a drive. A zero is a mis-click, not a wish to keep none.
+  #[test]
+  fn backups_default_beside_the_state_and_keep_a_bounded_history() {
+    let s = Settings::default();
+    assert!(s.backup_dir.is_empty());
+    assert_eq!(s.backup_retain, crate::backup::DEFAULT_RETAIN);
+    let filled = Settings {
+      backup_dir: "   ".into(),
+      backup_retain: 0,
+      ..Default::default()
+    }
+    .filled();
+    assert_eq!(filled.backup_dir, "");
+    assert_eq!(filled.backup_retain, crate::backup::DEFAULT_RETAIN);
+    let filled = Settings {
+      backup_dir: " D:\\backups ".into(),
+      backup_retain: 9_999,
+      ..Default::default()
+    }
+    .filled();
+    assert_eq!(filled.backup_dir, "D:\\backups");
+    assert_eq!(filled.backup_retain, crate::backup::MAX_RETAIN);
   }
 
   /// Versioning writes on every hand save and does not clean up afterwards, so a first run must

@@ -25,6 +25,7 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | Language | English by default, switchable to 中文 from a dropdown in Settings. All strings, including messages coming from the Rust side, resolve through one key table |
 | Tab groups | A group is a **named set of open tabs**. The chip in the title bar switches between them inside the same window; tabs and caret positions come back on the next start |
 | Move / copy tabs | A tab can be re-homed into another group from its context menu. This changes *which group lists the tab*, never the file on disk |
+| Configuration backups | Timestamped snapshots of groups, settings, recent files and folder history, refreshed when the app opens and closes and on demand; older ones are pruned to a count you set, and any snapshot can be restored from Settings → Backups. Drafts and version history are not included |
 | Comparison | A read-only side-by-side diff of any two contents. Either side may be a file on disk or an unsaved buffer (an untitled tab included); a file against its own unsaved text has an entry of its own, and re-running a comparison refreshes its snapshot |
 | Encrypted files | A self-describing AES-256-GCM container keyed from a password. Save as encrypted, new encrypted file, change password, remove encryption; an idle lock drops the keys; remembering a password in the Windows credential store is opt-in; drafts are sealed with the same key |
 | Window | Size, position and the maximized flag come back on the next start. A window left on a monitor that is no longer connected is pulled back onto a screen you still have, and says so |
@@ -81,10 +82,12 @@ Only the NSIS target is configured (`bundle.targets: ["nsis"]`).
 ## Where data lives
 
 Everything is under the app config directory — `%APPDATA%\com.wrolp.editor` on Windows — and
-Settings → About prints the folders' full paths and opens any one of them in Explorer:
+Settings → About prints the folders' full paths and opens any one of them in Explorer; the
+Backups page does the same for its folder:
 
 ```
 wrolp/
+├── backups/wrolp-backup-<time>-<kind>.json   settings, groups, recent files and folder history
 ├── drafts/<name>-<sha256>.draft   one draft per file, named after the file it belongs to
 ├── kept/<name>               rescue copies of deleted files (plaintext; see "Encrypted files")
 ├── shadow/<name>-<sha256>.git/   one version history per file, once versioning is on
@@ -94,7 +97,7 @@ wrolp/
     │                         language, restoreSession, draftRestore, lineEnding,
     │                         trimTrailingWhitespace, insertFinalNewline, autoSave, autoSaveInterval,
     │                         versioningEnabled, versioningShowLimit, versioningMaxFileSize, autoSaveVersions,
-    │                         askNoteOnSave,
+    │                         askNoteOnSave, backupDir, backupRetain,
     │                         sidebarRoot, encryptIdleMinutes
     ├── file-settings.json    per-file overrides: encoding, line ending, view settings, versioning
     ├── groups.json           the tab groups: name, tabs and caret positions
@@ -123,8 +126,9 @@ commands the frontend can call. By purpose: open/save/drafts (`open_file`, `save
 `stat_file`, `get_draft`, `save_draft`, `clear_draft`), tree and file operations (`list_dir`,
 `create_file`, `create_dir`, `rename_path`, `copy_entry`, `remove_entry`, `keep_file`), groups and
 session (`get_groups`, `save_groups`, `transfer_tabs`, `get_window_state`, `save_window_state`,
-`plan_window_placement`), settings and the context menu (`get_settings`, `save_settings`,
-`get_store_dirs`, `context_menu_target`, `install_context_menu`, `uninstall_context_menu`), version
+`plan_window_placement`), settings, backups and the context menu (`get_settings`, `save_settings`,
+`get_store_dirs`, `create_config_backup`, `list_config_backups`, `restore_config_backup`,
+`maybe_auto_backup`, `context_menu_target`, `install_context_menu`, `uninstall_context_menu`), version
 history (`versioning_state`, `set_version_override`, `add_version`, `get_versions`,
 `get_version_content`, `list_versions`, `clear_versions`), and encryption
 (`unlock_file`, `lock_file`, `lock_all`, `save_file_as_encrypted`, `create_encrypted`,
@@ -169,6 +173,37 @@ twice inside a group. A build that still has the older `workspaces.json` and no 
 on **read**: the legacy file is parsed, written out under the new name, and only then deleted — so a
 corrupt or unreadable legacy file is never destroyed by a later save. Unknown fields in old records
 (`root`, `autoName`, `sidebarView`) are ignored, which is why the rename needed no migration step.
+
+## Configuration backups
+
+Settings → Backups keeps timestamped copies of the configuration, because losing the group store
+takes the tab session with it and there is no undo for that. The default folder is
+`%APPDATA%\com.wrolp.editor\wrolp\backups`; *Change…* picks another one and *Use the default
+folder* returns to it. The folder and the retention count are stored in `settings.json`
+(`backupDir`, `backupRetain`).
+
+- **One file per snapshot.** Each is named `wrolp-backup-<YYYYMMDD-HHMMSS-mmm>-<kind>.json`, with
+  kind `auto`, `manual` or `pre-restore`. The files are bundled into one record rather than copied
+  one by one, because a group and its folder menu are tied together by the group id: restoring one
+  without the other can leave the menu pointing at a group that is no longer there.
+- **What is inside:** `settings.json`, `groups.json`, `file-settings.json`, `history.json` and
+  `folder-history.json`, each kept as the exact text it had. **Drafts and version history are not
+  included** — those are user data rather than configuration, and copying them would let a snapshot
+  grow to the size of the work it protects. A snapshot is plain JSON, like the files it copies.
+- **Automatic and manual.** The day's automatic snapshot is refreshed when the app opens and when
+  it closes, so it holds the configuration as it stood at that transition. Each refresh replaces
+  the earlier automatic one from the same day, while manual snapshots stay; a window left open
+  past midnight gets one from the hourly check. *Back up now* takes a manual snapshot at any time.
+  *Snapshots to keep* (1–100, default 20) is enforced when the next snapshot is written, so
+  lowering it does not delete anything until then.
+- **Restoring.** The list is newest first and shows when each snapshot was taken, its kind, the
+  group and tab counts it holds, and its size. Picking one asks once, then flushes drafts and
+  groups, takes a `pre-restore` safety snapshot of the current state, replaces the five files and
+  reloads the window. Drafts are not part of a snapshot, so they survive the restore and the
+  reload. `window.json` is not touched, and the window stays where it is.
+- **Only this folder, only these names.** A restore is refused for a path outside the configured
+  backup folder, a file not named `wrolp-backup-*.json`, a snapshot newer than the format this
+  build knows, and a damaged bundle — the list leaves those out rather than offering them.
 
 ## File comparison
 

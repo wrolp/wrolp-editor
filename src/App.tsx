@@ -152,6 +152,10 @@ const DEFAULT_SETTINGS: Settings = {
   versioningMaxFileSize: 524288,
   autoSaveVersions: false,
   askNoteOnSave: false,
+  // Empty is `wrolp/backups`, one folder away from the state it protects. Twenty snapshots is a
+  // few weeks of daily ones.
+  backupDir: "",
+  backupRetain: 20,
 }
 
 /**
@@ -177,6 +181,12 @@ function eolShownFor(tab: Tab | null, defaultEol: string): string {
  */
 const IDLE_LOCK_CHECK_MS = 30_000;
 
+/**
+ * How often a running window asks whether a backup is due. The backend only writes one per
+ * day, so this is a cheap check; it is here so a window left open overnight still gets one.
+ */
+const BACKUP_CHECK_MS = 60 * 60 * 1000;
+
 /** The only values Monaco accepts for `renderWhitespace`. */
 const WHITESPACE_MODES = ["none", "boundary", "selection", "all", "trailing"] as const;
 
@@ -189,6 +199,8 @@ function whitespaceMode(value: string): (typeof WHITESPACE_MODES)[number] {
 
 /** Never let a save-on-close turn into a window that cannot be closed. */
 const CLOSE_FLUSH_TIMEOUT_MS = 2000;
+/** The same rule for the daily snapshot, which is worth writing but not worth holding a window. */
+const CLOSE_BACKUP_TIMEOUT_MS = 1000;
 
 /**
  * Whether the OS is asking for a dark UI. `prefers-color-scheme: light` is the query to
@@ -423,6 +435,11 @@ export default function App() {
       // The Explorer folder is global view state; a group only remembers tabs.
       setRootDir(loadedSettings.sidebarRoot || null);
 
+      // Refresh the day's snapshot with the configuration this session opens on, before
+      // anything here can change it. A failure is not worth a toast over a backup nobody
+      // asked to make right now.
+      await api.maybeAutoBackup(true).catch(() => undefined);
+
       const store = await groups.load().catch((e) => {
         toast(errorMessage(e));
         return null;
@@ -444,6 +461,16 @@ export default function App() {
     void boot();
     // Mount only: openPath reads the current tab state through refs.
   }, []);
+
+  // A window that stays open across midnight should still get that day's snapshot. This is
+  // the non-forcing check: it fills in a missing day and leaves an existing snapshot alone.
+  useEffect(() => {
+    if (!booted) return;
+    const timer = window.setInterval(() => {
+      void api.maybeAutoBackup().catch(() => undefined);
+    }, BACKUP_CHECK_MS);
+    return () => window.clearInterval(timer);
+  }, [booted]);
 
   // A second instance hands its file to this window; that listener must exist on every
   // mount, unlike the boot sequence which must only run once.
@@ -616,6 +643,23 @@ export default function App() {
     await frame.flush();
   }, [draft, frame, groups]);
 
+  /**
+   * Put a configuration snapshot back and start the window over.
+   *
+   * Everything pending is written first: a debounced group commit landing after the restore
+   * would put the replaced state straight back, and reloading would drop any draft that had
+   * not reached its file. Drafts themselves are not part of a snapshot, so they survive the
+   * restore and are offered again as usual.
+   */
+  const restoreBackup = useCallback(
+    async (path: string) => {
+      await flushEverything();
+      await api.restoreConfigBackup(path);
+      window.location.reload();
+    },
+    [flushEverything]
+  );
+
   // Flush pending drafts when the window loses focus to shrink what a kill can lose.
   useEffect(() => {
     const onBlur = () => void flushEverything();
@@ -703,6 +747,17 @@ export default function App() {
       } catch {
         // A state file that will not write must not trap the window open.
       }
+      // The flush is what makes the group store final, so the day's snapshot is refreshed
+      // after it. The cap is its own: a backup that will not finish is still no reason to
+      // leave a closing window on screen.
+      try {
+        await Promise.race([
+          api.maybeAutoBackup(true),
+          new Promise((resolve) => setTimeout(resolve, CLOSE_BACKUP_TIMEOUT_MS)),
+        ]);
+      } catch {
+        // Same rule as the flush: closing wins over a side file.
+      }
       // destroy(), not close(): close() would raise CloseRequested again, and the window
       // would sit waiting for a handler that correctly declines to interfere.
       await getCurrentWindow().destroy();
@@ -735,13 +790,18 @@ export default function App() {
       const next = { ...settings, ...patch };
       if (patch.language) setLang(patch.language);
       setSettings(next);
-      api.saveSettings(next).catch((e) => toast(errorMessage(e)));
+      // Returned so a screen that has to read the new value back — the backup folder, whose
+      // listing is resolved by the backend — can wait for the write instead of racing it.
+      const saved = api.saveSettings(next).catch((e) => {
+        toast(errorMessage(e));
+      });
       // The verb is registered per file type, so a new exclusion only takes effect once the
       // entries are rewritten — and only if the menu is on; otherwise the list is simply
       // waiting for the next install.
       if (patch.excludedExtensions && menuTarget?.installed) {
         void reapplyMenu(next.excludedExtensions);
       }
+      return saved;
     },
     [menuTarget, reapplyMenu, settings, toast]
   );
@@ -1863,6 +1923,7 @@ const defaultModeFor = useCallback(
               onSetMenu={setMenu}
               onToast={toast}
               onVersionsChanged={refreshVersions}
+              onRestoreBackup={restoreBackup}
             />
           )}
         </div>

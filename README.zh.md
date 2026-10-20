@@ -25,6 +25,7 @@
 | 语言 | 默认英文，可在设置里下拉切换成中文。所有文案（含 Rust 侧返回的报错）都走同一张 key 表 |
 | 标签分组 | 一个分组就是**一组有名字的标签**。标题栏上的小牌在同一窗口里切换分组；标签顺序与光标位置在下次启动时还原 |
 | 移动 / 复制标签 | 标签右键菜单可把标签归到另一个分组。改的是「哪个分组列着它」，磁盘上的文件不动 |
+| 配置备份 | 分组、设置、最近文件与文件夹历史的时间戳快照，应用打开和关闭时自动更新，也可手动；超过保留数会删旧的，设置 → 备份 里可任选一份恢复。不含草稿与版本历史 |
 | 文件对比 | 两个内容只读并排 diff，任一侧可以是磁盘文件或未保存的 buffer（含未命名标签）；同一个文件的未保存版本有专用入口，重跑同一次比对即刷新快照 |
 | 加密文件 | 口令派生密钥、AES-256-GCM 的自描述容器；加密另存为、新建加密文件、改口令、移除加密；空闲自动锁定；可选记住口令到 Windows 凭据管理器；草稿同钥加密 |
 | 窗口 | 大小、位置、是否最大化都在下次启动时还原。上次所在的显示器不在了，窗口会被拉回还在用的屏幕上，并说明原因 |
@@ -77,10 +78,11 @@ npm run tauri build
 
 ## 数据存放位置
 
-全部在应用配置目录下 —— Windows 上是 `%APPDATA%\com.wrolp.editor`；设置 → 关于 会列出这些目录的完整路径，并能直接在资源管理器里打开：
+全部在应用配置目录下 —— Windows 上是 `%APPDATA%\com.wrolp.editor`；设置 → 关于 会列出这些目录的完整路径，并能直接在资源管理器里打开；备份目录在「设置 → 备份」里同样可以打开：
 
 ```
 wrolp/
+├── backups/wrolp-backup-<时间>-<类型>.json   设置、分组、最近文件与文件夹历史
 ├── drafts/<文件名>-<sha256>.draft  每个文件一份草稿，用所属文件的名字命名
 ├── kept/<原名>               被删文件的救援副本（明文，见「加密文件」）
 ├── shadow/<文件名>-<sha256>.git/   每个被跟踪文件一份版本记录，开启版本后才会出现
@@ -90,7 +92,7 @@ wrolp/
     │                         language、restoreSession、draftRestore、lineEnding、
     │                         trimTrailingWhitespace、insertFinalNewline、autoSave、autoSaveInterval、
     │                         versioningEnabled、versioningShowLimit、versioningMaxFileSize、autoSaveVersions、
-    │                         askNoteOnSave、
+    │                         askNoteOnSave、backupDir、backupRetain、
     │                         sidebarRoot、encryptIdleMinutes
     ├── file-settings.json    每文件覆盖：编码、换行符、视图设置、版本记录
     ├── groups.json           标签分组：名字、标签与光标位置
@@ -117,8 +119,9 @@ wrolp/
 打开/保存/草稿（`open_file`、`save_file`、`stat_file`、`get_draft`、`save_draft`、`clear_draft`），
 目录树与文件操作（`list_dir`、`create_file`、`create_dir`、`rename_path`、`copy_entry`、`remove_entry`、
 `keep_file`），分组与会话（`get_groups`、`save_groups`、`transfer_tabs`、`get_window_state`、
-`save_window_state`、`plan_window_placement`），设置与右键菜单（`get_settings`、`save_settings`、
-`get_store_dirs`、`context_menu_target`、`install_context_menu`、`uninstall_context_menu`），版本记录
+`save_window_state`、`plan_window_placement`），设置、备份与右键菜单（`get_settings`、`save_settings`、
+`get_store_dirs`、`create_config_backup`、`list_config_backups`、`restore_config_backup`、
+`maybe_auto_backup`、`context_menu_target`、`install_context_menu`、`uninstall_context_menu`），版本记录
 （`versioning_state`、`set_version_override`、`add_version`、`get_versions`、`get_version_content`、
 `list_versions`、`clear_versions`），以及加密（`unlock_file`、
 `lock_file`、`lock_all`、`save_file_as_encrypted`、`create_encrypted`、`change_password`、
@@ -153,6 +156,28 @@ wrolp/
 同一套规范化形式，所以同一个文件在一个分组里不会出现两条。只有旧名 `workspaces.json` 而没有 `groups.json` 时，
 迁移发生在**读取时**：解析旧文件、按新名写出、然后才删掉旧的——所以旧文件损坏时不会被后续保存顺手清掉。旧记录里
 多带的 `root` / `autoName` / `sidebarView` 字段会被忽略、缺的字段取默认值，因此不需要额外迁移步骤。
+
+## 配置备份
+
+设置 → 备份 会保存配置的时间戳副本——分组记录丢了就等于标签会话丢了，而这件事没有撤销。默认目录是
+`%APPDATA%\com.wrolp.editor\wrolp\backups`；「更改…」可选别的目录，「改用默认目录」回到默认。目录与
+保留数量都存在 `settings.json`（`backupDir`、`backupRetain`）。
+
+- **一份快照一个文件。** 文件名是 `wrolp-backup-<YYYYMMDD-HHMMSS-mmm>-<类型>.json`，类型为 `auto`、
+  `manual` 或 `pre-restore`。把几个文件打进一条记录而不是逐个复制，是因为分组和它的文件夹菜单由
+  分组 id 绑在一起：只恢复其中一个，就可能让菜单指向一个已经不存在的分组。
+- **里面有什么：** `settings.json`、`groups.json`、`file-settings.json`、`history.json` 和
+  `folder-history.json`，每个都按它当时的原始文本保存。**不含草稿和版本历史**——那些是用户数据而不是
+  配置，复制它们会让快照涨到它所保护的工作那么大。快照本身和它复制的文件一样，是明文 JSON。
+- **自动与手动。** 当天的自动快照在应用打开和关闭时各刷新一次，所以它总停在那次切换时的配置。每次刷新
+  会替换当天更早的自动快照，手动快照不受影响；窗口跨夜一直开着时，由每小时的检查补上。「立即备份」随时
+  可以另存一份手动快照。「保留快照数」（1–100，默认 20）在写下一份快照时执行，所以调低数字不会立刻
+  删除旧文件。
+- **恢复。** 列表按新的在前，显示时间、类型、所含分组/标签数量和大小。选中一份会再确认一次，然后先
+  冲刷草稿与分组、为当前状态做一份 `pre-restore` 安全快照、替换那五个文件并重新加载窗口。草稿不在
+  快照里，所以它能挺过恢复和重载。恢复不碰 `window.json`，窗口停在原地。
+- **只认这个目录、这种名字。** 后端会拒绝备份目录之外的路径、名字不是 `wrolp-backup-*.json` 的文件、
+  比它认识的格式更新的快照，以及损坏的快照——列表直接不显示损坏的那些，而不是提供恢复。
 
 ## 文件对比
 

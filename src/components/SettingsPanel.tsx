@@ -1,33 +1,60 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
-import { LANGUAGES, t } from "../lib/i18n";
+import { formatWhen, LANGUAGES, t } from "../lib/i18n";
 import { parseExtensionList } from "../lib/path";
 import { LINE_ENDINGS } from "../lib/types";
 import SettingCheck from "./SettingCheck";
 import SettingField from "./SettingField";
-import { api, errorMessage, openPath, type MenuTarget, type Settings, type StoreDirs } from "../lib/tauri";
+import {
+  api,
+  errorMessage,
+  openPath,
+  pickFolder,
+  type BackupInfo,
+  type BackupList,
+  type MenuTarget,
+  type Settings,
+  type StoreDirs,
+} from "../lib/tauri";
 
-type Category = "context" | "general" | "versions" | "encryption" | "about";
+type Category = "context" | "general" | "versions" | "backups" | "encryption" | "about";
 
 interface Props {
   settings: Settings;
   menu: MenuTarget | null;
   menuBusy: boolean;
-  onSaveSettings: (patch: Partial<Settings>) => void;
+  onSaveSettings: (patch: Partial<Settings>) => void | Promise<unknown>;
   onSetMenu: (installed: boolean) => void;
   /** Says what a change here did, which for the credential store is the only report there is. */
   onToast: (message: string) => void;
   /** Called after the version store is emptied so the sidebar stops listing files that have none. */
   onVersionsChanged?: () => void;
+  /** Replaces the state with a snapshot; the app reloads when this resolves. */
+  onRestoreBackup: (path: string) => Promise<void>;
 }
 
 const NAV: { cat: Category; key: string }[] = [
   { cat: "general", key: "settings.catGeneral" },
   { cat: "context", key: "settings.catContext" },
   { cat: "versions", key: "ver.category" },
+  { cat: "backups", key: "settings.catBackups" },
   { cat: "encryption", key: "enc.category" },
   { cat: "about", key: "settings.catAbout" },
 ];
+
+/** The three kinds of snapshot, keyed by the kind the backend records. */
+const BACKUP_KIND: Record<string, string> = {
+  auto: "backup.kindAuto",
+  manual: "backup.kindManual",
+  "pre-restore": "backup.kindPreRestore",
+};
+
+/** Bytes as the About page and the status bar read them: 1024-based, at most one decimal. */
+function sizeLabel(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 /**
  * Idle limits offered, in minutes, with 0 last because it is the one that turns the lock off.
@@ -86,6 +113,7 @@ export default function SettingsPanel({
   onSetMenu,
   onToast,
   onVersionsChanged,
+  onRestoreBackup,
 }: Props) {
   // The first entry in NAV, so opening Settings lands on it rather than on the second one.
   const [category, setCategory] = useState<Category>("general");
@@ -101,6 +129,12 @@ export default function SettingsPanel({
   /** How many passwords the credential store is holding, or null when it would not say. */
   const [remembered, setRemembered] = useState<number | null>(null);
   const [rememberedError, setRememberedError] = useState<string | null>(null);
+  /** Snapshots on disk, or null when the folder could not be read. */
+  const [backups, setBackups] = useState<BackupList | null>(null);
+  const [backupError, setBackupError] = useState<string | null>(null);
+  const [backupBusy, setBackupBusy] = useState(false);
+  /** The snapshot a second, explicit click would restore. */
+  const [restoreTarget, setRestoreTarget] = useState<BackupInfo | null>(null);
   // The exclusion list is typed as free text, so what is being edited and what is stored
   // are two things: `excludedText` is the field's own state (it takes `png, JPG` and
   // `.png` alike) and is only parsed on the way out. The stored value is written back into
@@ -176,6 +210,67 @@ export default function SettingsPanel({
   useEffect(() => {
     readRemembered();
   }, []);
+
+  /** Read the snapshot list. A folder change calls this again once the setting is written. */
+  const refreshBackups = useCallback(() => {
+    api
+      .listConfigBackups()
+      .then((list) => {
+        setBackups(list);
+        setBackupError(null);
+      })
+      .catch((e) => {
+        setBackups(null);
+        setBackupError(errorMessage(e));
+      });
+  }, []);
+  useEffect(() => {
+    refreshBackups();
+  }, [refreshBackups]);
+
+  /**
+   * Change the folder and read the list only once the setting is on disk: the backend resolves
+   * the folder from that file, so asking sooner would describe the one being replaced.
+   */
+  const saveBackupDir = (dir: string) => {
+    Promise.resolve(onSaveSettings({ backupDir: dir }))
+      .then(refreshBackups)
+      .catch((e) => onToast(errorMessage(e)));
+  };
+
+  const chooseBackupDir = () => {
+    pickFolder()
+      .then((picked) => {
+        if (picked) saveBackupDir(picked);
+      })
+      .catch((e) => onToast(errorMessage(e)));
+  };
+
+  const backupNow = () => {
+    if (backupBusy) return;
+    setBackupBusy(true);
+    api
+      .createConfigBackup()
+      .then((info) => {
+        onToast(t("backup.done", { file: info.file }));
+        refreshBackups();
+      })
+      .catch((e) => onToast(errorMessage(e)))
+      .finally(() => setBackupBusy(false));
+  };
+
+  /**
+   * Restore the picked snapshot. Success reloads the window, so only a failure returns here;
+   * the confirmation stays up so the same choice can be tried again.
+   */
+  const restoreNow = () => {
+    if (!restoreTarget || backupBusy) return;
+    setBackupBusy(true);
+    onRestoreBackup(restoreTarget.path).catch((e) => {
+      setBackupBusy(false);
+      onToast(errorMessage(e));
+    });
+  };
 
   const clearRemembered = () => {
     api
@@ -545,6 +640,111 @@ export default function SettingsPanel({
                 </select>
               </SettingField>
               <p className="muted">{t("settings.persisted")}</p>
+            </div>
+          </div>
+        )}
+
+        {category === "backups" && (
+          <div className="settings-cat">
+            <h2>{t("backup.heading")}</h2>
+            <div className="setting-group">
+              <p className="muted">{t("backup.desc")}</p>
+              <SettingField label={t("backup.dir")}>
+                <button className="btn small" onClick={chooseBackupDir}>
+                  {t("backup.changeDir")}
+                </button>
+              </SettingField>
+              <p className="muted store-path">
+                {settings.backupDir || backups?.dir || ""}
+              </p>
+              {!settings.backupDir && <p className="muted">{t("backup.defaultHint")}</p>}
+              {settings.backupDir && (
+                <button className="btn small backup-reset" onClick={() => saveBackupDir("")}>
+                  {t("backup.useDefault")}
+                </button>
+              )}
+              <SettingField label={t("backup.retain")}>
+                <input
+                  type="number"
+                  step={1}
+                  value={settings.backupRetain}
+                  onChange={(e) => {
+                    const n = Math.trunc(Number(e.target.value));
+                    if (Number.isNaN(n)) return;
+                    onSaveSettings({ backupRetain: Math.min(Math.max(n, 1), 100) });
+                  }}
+                />
+              </SettingField>
+              <p className="muted">{t("backup.retainDesc")}</p>
+              <div className="backup-actions">
+                <button className="btn small" disabled={backupBusy} onClick={backupNow}>
+                  {t("backup.now")}
+                </button>
+                <button
+                  className="btn small"
+                  disabled={!backups?.dirExists}
+                  onClick={() => {
+                    if (backups) openPath(backups.dir).catch((e) => onToast(errorMessage(e)));
+                  }}
+                >
+                  {t("backup.openFolder")}
+                </button>
+              </div>
+              <p className="muted">{t("backup.autoHint")}</p>
+              {backupError && <p className="setting-warn">{backupError}</p>}
+              {backups && backups.backups.length === 0 && (
+                <p className="muted">{t("backup.empty")}</p>
+              )}
+              {backups && backups.backups.length > 0 && (
+                <div className="backup-list">
+                  {backups.backups.map((snapshot) => (
+                    <div className="backup-row" key={snapshot.path}>
+                      <span className="backup-kind">
+                        {t(BACKUP_KIND[snapshot.kind] ?? "backup.kindManual")}
+                      </span>
+                      <span className="backup-when" title={snapshot.createdAt}>
+                        {formatWhen(snapshot.createdAt)}
+                      </span>
+                      <span className="backup-summary">
+                        {t("backup.summary", { groups: snapshot.groups, tabs: snapshot.tabs })}
+                        {" · "}
+                        {sizeLabel(snapshot.bytes)}
+                      </span>
+                      <button
+                        className="btn small"
+                        disabled={backupBusy}
+                        onClick={() => setRestoreTarget(snapshot)}
+                      >
+                        {t("backup.restore")}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {restoreTarget && (
+                <div className="backup-confirm">
+                  <div className="backup-confirm-title">{t("backup.confirmTitle")}</div>
+                  <p className="muted">
+                    {t("backup.confirmBody", { when: formatWhen(restoreTarget.createdAt) })}
+                  </p>
+                  <div className="backup-actions">
+                    <button
+                      className="btn primary small"
+                      disabled={backupBusy}
+                      onClick={restoreNow}
+                    >
+                      {t("backup.confirm")}
+                    </button>
+                    <button
+                      className="btn small"
+                      disabled={backupBusy}
+                      onClick={() => setRestoreTarget(null)}
+                    >
+                      {t("backup.cancel")}
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

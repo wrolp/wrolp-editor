@@ -105,6 +105,14 @@ pub fn store_dir(app: &AppHandle) -> Result<PathBuf, String> {
   wrolp_dir(app, "state")
 }
 
+/// Where configuration snapshots live when the user has not chosen another folder.
+///
+/// A sibling of `state` rather than inside it: the live files and their history share an app
+/// data root, but not one directory, so nothing that scans one can mistake the other's files.
+pub fn backups_dir(app: &AppHandle) -> Result<PathBuf, String> {
+  wrolp_dir(app, "backups")
+}
+
 /// Where the text of a file that was deleted while it was open is parked.
 ///
 /// Not a draft: this is a whole file with the name it had, kept so it can be opened again

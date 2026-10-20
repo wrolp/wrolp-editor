@@ -2137,6 +2137,58 @@ body.resizing .editor-host {
   overflow-wrap: anywhere;
   user-select: text;
 }
+/* The snapshot list is a table of facts — kind, time, what it holds — so it reads as rows
+   rather than as another group of settings. */
+.backup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.backup-reset {
+  margin-top: 6px;
+}
+.backup-list {
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.backup-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.backup-kind {
+  flex: 0 0 auto;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--surface-hover);
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.backup-when {
+  flex: 0 0 auto;
+  color: var(--text);
+  white-space: nowrap;
+}
+.backup-summary {
+  flex: 1 1 auto;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.backup-confirm {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--accent-soft);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.backup-confirm-title {
+  font-size: 13px;
+  color: var(--text);
+}
 .setting-target {
   margin-top: 12px;
   padding: 9px 11px;

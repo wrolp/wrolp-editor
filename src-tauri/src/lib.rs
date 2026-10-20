@@ -1,3 +1,4 @@
+mod backup;
 mod commands;
 mod context_menu;
 mod crypto;
@@ -70,6 +71,10 @@ pub fn run() {
       commands::get_settings,
       commands::save_settings,
       commands::get_store_dirs,
+      backup::create_config_backup,
+      backup::list_config_backups,
+      backup::restore_config_backup,
+      backup::maybe_auto_backup,
       versioning::versioning_state,
       versioning::set_version_override,
       versioning::add_version,
