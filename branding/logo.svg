@@ -91,52 +91,55 @@
 
   <!-- Tile border, with the field left transparent -->
   <g clip-path="url(#tileClip)">
-    <rect x="1" y="1" width="1022" height="1022" rx="187" fill="none" stroke="#7C80E4" stroke-opacity="0.55" stroke-width="3"/>
+    <rect x="7" y="7" width="1010" height="1010" rx="181" fill="none" stroke="#7C80E4" stroke-opacity="0.55" stroke-width="14"/>
   </g>
 
-  <!-- W strokes -->
-  <use href="#shapeTL" fill="url(#wGrad)"/>
-  <use href="#shapeTR" fill="url(#wGrad)"/>
-  <use href="#shapeBL" fill="url(#wGrad)"/>
-  <use href="#shapeBR" fill="url(#wGrad)"/>
-  <g clip-path="url(#wClip)">
-    <rect x="110" y="223" width="860" height="247" fill="url(#wTopLight)"/>
-    <rect x="110" y="646" width="860" height="80" fill="url(#wTopLightLower)"/>
-    <rect x="110" y="700" width="860" height="147" fill="url(#wBottomShade)"/>
+  <!-- The mark, scaled up about the canvas centre -->
+  <g transform="translate(-75 -58) scale(1.1)">
+    <!-- W strokes -->
+    <use href="#shapeTL" fill="url(#wGrad)"/>
+    <use href="#shapeTR" fill="url(#wGrad)"/>
+    <use href="#shapeBL" fill="url(#wGrad)"/>
+    <use href="#shapeBR" fill="url(#wGrad)"/>
+    <g clip-path="url(#wClip)">
+      <rect x="110" y="223" width="860" height="247" fill="url(#wTopLight)"/>
+      <rect x="110" y="646" width="860" height="80" fill="url(#wTopLightLower)"/>
+      <rect x="110" y="700" width="860" height="147" fill="url(#wBottomShade)"/>
+    </g>
+
+    <!-- Crayon -->
+    <use href="#shapeCrayon" fill="url(#waxGrad)"/>
+    <g clip-path="url(#crayonClip)">
+      <rect x="110" y="449" width="830" height="159" filter="url(#waxMottle)" opacity="0.4"/>
+      <rect x="294" y="449" width="594" height="159" fill="url(#sleeveGrad)"/>
+      <rect x="294" y="449" width="594" height="159" filter="url(#paperGrain)" opacity="0.8"/>
+      <rect x="294" y="449" width="594" height="159" fill="url(#sleeveSheen)"/>
+
+      <!-- wrapper seams -->
+      <rect x="293" y="449" width="3" height="159" fill="#34357F" opacity="0.4"/>
+      <rect x="296" y="449" width="1.5" height="159" fill="#FFFFFF" opacity="0.5"/>
+      <rect x="885" y="449" width="3" height="159" fill="#34357F" opacity="0.4"/>
+      <rect x="888" y="449" width="1.5" height="159" fill="#FFFFFF" opacity="0.5"/>
+
+      <!-- printed rules -->
+      <rect x="316" y="469.5" width="552" height="3" rx="1.5" fill="#3B3A96" opacity="0.42"/>
+      <rect x="316" y="585" width="552" height="3" rx="1.5" fill="#3B3A96" opacity="0.34"/>
+
+      <!-- wrapper wordmark -->
+      <text id="wordmark" x="591" y="577.5" text-anchor="middle" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-weight="700" font-size="140" letter-spacing="0" fill="#2E2E78" opacity="0.88">WROLP</text>
+
+      <!-- cut end catching the light -->
+      <rect x="924.5" y="455" width="3" height="146" fill="#FFFFFF" opacity="0.1"/>
+
+      <!-- cylinder shading -->
+      <rect x="110" y="449" width="830" height="159" fill="url(#cylinder)"/>
+
+      <!-- wax glints -->
+      <ellipse cx="172" cy="508" rx="58" ry="16" fill="#FFFFFF" opacity="0.12" filter="url(#blurSoft)" transform="rotate(-18 172 508)"/>
+      <ellipse cx="908" cy="500" rx="20" ry="11" fill="#FFFFFF" opacity="0.12" filter="url(#blurSoft)" transform="rotate(-4 908 500)"/>
+    </g>
+
+    <!-- Tip edge definition -->
+    <path d="M294 449L142 507.5" fill="none" stroke="#FFFFFF" stroke-opacity="0.1" stroke-width="1.5" stroke-linecap="round" clip-path="url(#crayonClip)"/>
   </g>
-
-  <!-- Crayon -->
-  <use href="#shapeCrayon" fill="url(#waxGrad)"/>
-  <g clip-path="url(#crayonClip)">
-    <rect x="110" y="449" width="830" height="159" filter="url(#waxMottle)" opacity="0.4"/>
-    <rect x="294" y="449" width="594" height="159" fill="url(#sleeveGrad)"/>
-    <rect x="294" y="449" width="594" height="159" filter="url(#paperGrain)" opacity="0.8"/>
-    <rect x="294" y="449" width="594" height="159" fill="url(#sleeveSheen)"/>
-
-    <!-- wrapper seams -->
-    <rect x="293" y="449" width="3" height="159" fill="#34357F" opacity="0.4"/>
-    <rect x="296" y="449" width="1.5" height="159" fill="#FFFFFF" opacity="0.5"/>
-    <rect x="885" y="449" width="3" height="159" fill="#34357F" opacity="0.4"/>
-    <rect x="888" y="449" width="1.5" height="159" fill="#FFFFFF" opacity="0.5"/>
-
-    <!-- printed rules -->
-    <rect x="316" y="469.5" width="552" height="3" rx="1.5" fill="#3B3A96" opacity="0.42"/>
-    <rect x="316" y="585" width="552" height="3" rx="1.5" fill="#3B3A96" opacity="0.34"/>
-
-    <!-- wrapper wordmark -->
-    <text x="591" y="541" text-anchor="middle" font-family="Segoe UI, Arial, Helvetica, sans-serif" font-weight="600" font-size="28" letter-spacing="9" fill="#343383" opacity="0.48">WROLP</text>
-
-    <!-- cut end catching the light -->
-    <rect x="924.5" y="455" width="3" height="146" fill="#FFFFFF" opacity="0.1"/>
-
-    <!-- cylinder shading -->
-    <rect x="110" y="449" width="830" height="159" fill="url(#cylinder)"/>
-
-    <!-- wax glints -->
-    <ellipse cx="172" cy="508" rx="58" ry="16" fill="#FFFFFF" opacity="0.12" filter="url(#blurSoft)" transform="rotate(-18 172 508)"/>
-    <ellipse cx="908" cy="500" rx="20" ry="11" fill="#FFFFFF" opacity="0.12" filter="url(#blurSoft)" transform="rotate(-4 908 500)"/>
-  </g>
-
-  <!-- Tip edge definition -->
-  <path d="M294 449L142 507.5" fill="none" stroke="#FFFFFF" stroke-opacity="0.1" stroke-width="1.5" stroke-linecap="round" clip-path="url(#crayonClip)"/>
 </svg>
