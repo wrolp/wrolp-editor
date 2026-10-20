@@ -2044,6 +2044,12 @@ body.resizing .editor-host {
   border-radius: 10px;
   padding: 16px 18px;
 }
+.about-logo {
+  display: block;
+  width: 76px;
+  height: 76px;
+  margin-bottom: 14px;
+}
 .setting-title {
   font-size: 13px;
   color: var(--text);

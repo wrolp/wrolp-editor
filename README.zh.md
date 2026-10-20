@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="branding/logo.png" width="128" height="128" alt="WROLP 编辑器图标" />
+</p>
+
 # WROLP Editor
 
 [English](README.md) | 简体中文

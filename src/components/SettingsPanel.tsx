@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
+import logoUrl from "../../branding/logo.svg";
 import { formatWhen, LANGUAGES, t } from "../lib/i18n";
 import { parseExtensionList } from "../lib/path";
 import { LINE_ENDINGS } from "../lib/types";
@@ -878,6 +879,7 @@ export default function SettingsPanel({
           <div className="settings-cat">
             <h2>{t("settings.aboutHeading")}</h2>
             <div className="setting-group">
+              <img className="about-logo" src={logoUrl} alt={t("app.name")} />
               <p>{t("settings.version", { version })}</p>
               <p className="muted">{t("settings.aboutLine")}</p>
               <p className="muted">{t("settings.draftLine")}</p>

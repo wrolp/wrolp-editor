@@ -1,6 +1,9 @@
 node_modules
 src-tauri/target
 src-tauri/gen
+# `tauri icon` also writes mobile sets, but only the desktop icons are shipped
+src-tauri/icons/android/
+src-tauri/icons/ios/
 dist*
 task
 .tauri
