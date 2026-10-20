@@ -1897,6 +1897,7 @@ const defaultModeFor = useCallback(
               beyondEnd={settings.scrollBeyondLastLine}
               width={settings.previewWidth}
               theme={theme}
+              showToc={previewMode === "preview"}
               onOpenPath={(path) => void tabs.openPath(path)}
               onError={(message) => toast(message)}
             />

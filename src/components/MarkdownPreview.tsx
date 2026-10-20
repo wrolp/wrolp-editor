@@ -1,8 +1,10 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import monaco from "../lib/monaco";
+import { t } from "../lib/i18n";
+import { IconTreeChevron } from "./icons";
 import { api, errorMessage, openUrl } from "../lib/tauri";
 
 interface Props {
@@ -17,6 +19,11 @@ interface Props {
   width: string;
   /** Resolved scheme (dark | light) so diagrams are not drawn for the wrong background. */
   theme: string;
+  /**
+   * The outline column, asked for only by the preview-only layout. Splitting keeps the editor
+   * in the frame, so the outline would be a third column competing with it for width.
+   */
+  showToc: boolean;
   /** Opens a file the document links to, beside itself. */
   onOpenPath: (path: string) => void;
   /** Reports a link that was followed but could not be opened. */
@@ -41,6 +48,7 @@ export default function MarkdownPreview({
   beyondEnd,
   width,
   theme,
+  showToc,
   onOpenPath,
   onError,
 }: Props) {
@@ -209,6 +217,43 @@ export default function MarkdownPreview({
   );
 
   /**
+   * Collapsed for this preview only. It is a reading convenience rather than a preference
+   * worth a settings field: the list is there when a document needs it and out of the way
+   * when it does not.
+   */
+  const [tocOpen, setTocOpen] = useState(true);
+
+  /**
+   * The headings, in document order, each with its position in the same query the click
+   * handler uses.
+   *
+   * Read off the rendered HTML rather than the markdown source: a `#` inside a fence is not a
+   * heading, and a setext underline is one, so the list is only guaranteed to match what is on
+   * screen if it is taken from what is on screen.
+   */
+  const outline = useMemo(() => {
+    if (!showToc) return [];
+    const doc = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
+    const found = Array.from(doc.body.querySelectorAll("h1, h2, h3, h4, h5, h6"))
+      .map((heading, index) => ({
+        index,
+        text: (heading.textContent ?? "").trim(),
+        level: Number(heading.tagName.charAt(1)),
+      }))
+      .filter((heading) => heading.text);
+    const shallowest = found.reduce((min, heading) => Math.min(min, heading.level), 6);
+    return found.map((heading) => ({ ...heading, indent: heading.level - shallowest }));
+  }, [html, showToc]);
+
+  const jumpToHeading = (index: number) => {
+    const pane = scrollRef.current;
+    const body = bodyRef.current;
+    if (!pane || !body) return;
+    const target = body.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6")[index];
+    if (target) scrollToHeading(pane, target);
+  };
+
+  /**
    * Puts the diagram SVGs into their placeholders.
    *
    * The SVG cannot go through the markdown pass: mermaid emits a `<style>` element inside
@@ -348,10 +393,7 @@ export default function MarkdownPreview({
         if (!body) return;
         const target = findHeadingBySlug(body, anchorOf(href));
         if (!target) return;
-        // Measured from the pane's own edge rather than by `scrollIntoView`, which would also
-        // scroll any ancestor, and from the heading's box rather than its `offsetTop`, whose
-        // offset parent is whichever wrapper last happened to be positioned.
-        pane.scrollTop += target.getBoundingClientRect().top - pane.getBoundingClientRect().top - 12;
+        scrollToHeading(pane, target);
         return;
       }
       if (EXTERNAL_SCHEME.test(href)) {
@@ -476,13 +518,62 @@ export default function MarkdownPreview({
     };
   }, []);
 
-  return (
+  const pane = (
     <div className="md-preview" data-md-width={width} ref={scrollRef} onScroll={onScroll}>
       {/* Sanitized in `sanitize` below; `path` is rendered as text, never interpolated. */}
       <div className="md-body" ref={bodyRef} dangerouslySetInnerHTML={{ __html: html }} />
       {beyondEnd && <div className="md-tail" />}
     </div>
   );
+
+  // The outline is a sibling of the scroller rather than a sticky child of it: the pane's own
+  // scroll position is what tracks the editor, and a column inside it would move with that.
+  if (!showToc || outline.length === 0) return pane;
+
+  return (
+    <div className="md-with-toc">
+      <nav className={`md-toc${tocOpen ? "" : " collapsed"}`} aria-label={t("preview.toc")}>
+        <div className="md-toc-head">
+          <span className="md-toc-title">{t("preview.toc")}</span>
+          <button
+            type="button"
+            className="md-toc-toggle"
+            title={t(tocOpen ? "preview.tocCollapse" : "preview.tocExpand")}
+            aria-expanded={tocOpen}
+            onClick={() => setTocOpen((open) => !open)}
+          >
+            <span className="chev">
+              <IconTreeChevron />
+            </span>
+          </button>
+        </div>
+        <ul>
+          {outline.map((heading) => (
+            <li
+              key={heading.index}
+              style={{ "--toc-indent": heading.indent } as CSSProperties}
+            >
+              <button type="button" title={heading.text} onClick={() => jumpToHeading(heading.index)}>
+                {heading.text}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </nav>
+      {pane}
+    </div>
+  );
+}
+
+/**
+ * Puts a heading just below the top edge of the pane.
+ *
+ * Measured from the pane's own edge rather than by `scrollIntoView`, which would also scroll
+ * any ancestor, and from the heading's box rather than its `offsetTop`, whose offset parent is
+ * whichever wrapper last happened to be positioned.
+ */
+function scrollToHeading(pane: HTMLElement, target: HTMLElement) {
+  pane.scrollTop += target.getBoundingClientRect().top - pane.getBoundingClientRect().top - 12;
 }
 
 /**
