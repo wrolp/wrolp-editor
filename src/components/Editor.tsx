@@ -126,7 +126,13 @@ export default function Editor({
           endLineNumber: run.to,
           endColumn: model.getLineMaxColumn(run.to),
         },
-        options: { isWholeLine: true, className: run.added ? "dirty-added" : "dirty-modified" },
+        options: {
+          isWholeLine: true,
+          className: run.added ? "dirty-added" : "dirty-modified",
+          // The accent bar lives in the line-decorations margin, not on the tinted line itself,
+          // so it has room between it and the first character.
+          linesDecorationsClassName: run.added ? "dirty-gutter dirty-gutter-added" : "dirty-gutter dirty-gutter-modified",
+        },
       }))
     );
   }, []);

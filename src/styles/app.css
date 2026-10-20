@@ -1678,12 +1678,28 @@ body.resizing .editor-host {
 .dirty-added {
   background: rgba(74, 222, 128, 0.14);
   background: color-mix(in srgb, var(--add) 14%, transparent);
-  box-shadow: inset 2px 0 var(--add);
 }
 .dirty-modified {
   background: rgba(217, 164, 65, 0.16);
   background: color-mix(in srgb, var(--warn) 16%, transparent);
-  box-shadow: inset 2px 0 var(--warn);
+}
+/* The accent bar sits in the line-decorations margin rather than at the start of the tinted line:
+   there it reads as a gutter mark with a gap before the first character, where the old inset
+   shadow on the line background left barely a pixel between the bar and the text. */
+.dirty-gutter::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  border-radius: 1px;
+}
+.dirty-gutter-added::before {
+  background: var(--add);
+}
+.dirty-gutter-modified::before {
+  background: var(--warn);
 }
 .editor-empty {
   white-space: pre-line;
