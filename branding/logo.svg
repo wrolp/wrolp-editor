@@ -4,6 +4,11 @@
       <rect width="1024" height="1024" rx="188"/>
     </clipPath>
 
+    <linearGradient id="tilePlate" x1="0" y1="0" x2="0" y2="1024" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="1" stop-color="#F0EEFB"/>
+    </linearGradient>
+
     <linearGradient id="wGrad" x1="118" y1="223" x2="968" y2="847" gradientUnits="userSpaceOnUse">
       <stop offset="0" stop-color="#375CCB"/>
       <stop offset="0.28" stop-color="#4A61D9"/>
@@ -89,8 +94,9 @@
     </clipPath>
   </defs>
 
-  <!-- Tile border, with the field left transparent -->
+  <!-- Tile border, with a plate inside it and the corners left transparent -->
   <g clip-path="url(#tileClip)">
+    <rect width="1024" height="1024" fill="url(#tilePlate)"/>
     <rect x="12" y="12" width="1000" height="1000" rx="176" fill="none" stroke="#6568E8" stroke-opacity="0.85" stroke-width="24"/>
   </g>
 
