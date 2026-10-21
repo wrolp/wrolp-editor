@@ -85,6 +85,8 @@ npm run upload    # 创建/补传 GitHub release v<version>，上传 setup.exe
 
 构建用 `.tauri/priv.key` 签名（该文件不入库；用 `npx tauri signer generate -w .tauri/priv.key` 生成并务必备份——丢了它，已安装的版本就无法再接受更新）。`release` 会在安装包旁写出 `latest.json`，`upload` 把两者一起上传；应用从 `https://github.com/wrolp/wrolp-editor/releases/latest/download/latest.json` 读取。构建前先把三个版本号一起改好。
 
+发布说明按语言分成两份手写文件，放在仓库根目录：`RELEASE_NOTES.md`（English）和 `RELEASE_NOTES.zh.md`（简体中文）。`release` 写 `latest.json` 的 `notes`、`upload` 写 GitHub release 的正文时，会先读这两份、英文在上中文在下合并成一段；某个版本只想补一句时，用 `--notes "..."` 临时覆盖。
+
 ### 脚本
 
 | 脚本 | 用途 |

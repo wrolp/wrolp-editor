@@ -4,6 +4,9 @@
 // notes or point the file at another tag. The URL must name the asset exactly as GitHub stores
 // it (percent-encoded), because the updater requests it literally.
 //
+// The notes are the release's own, read from `RELEASE_NOTES.md` and `RELEASE_NOTES.zh.md` at the
+// repository root; `--notes` overrides both for a one-off.
+//
 // Usage:
 //   node scripts/gen-latest-json.mjs [--tag v0.0.2] [--notes "..."]
 
@@ -11,16 +14,17 @@ import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { loadReleaseNotes } from './release-notes.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const root = join(__dirname, '..')
 
 let tagOverride = ''
-let notes = ''
+let notesOverride = ''
 for (let i = 2; i < process.argv.length; i++) {
   const arg = process.argv[i]
   if (arg === '--tag') tagOverride = process.argv[++i] ?? ''
-  else if (arg === '--notes') notes = process.argv[++i] ?? ''
+  else if (arg === '--notes') notesOverride = process.argv[++i] ?? ''
   else {
     console.error(`[gen-latest] unknown argument: ${arg}`)
     process.exit(2)
@@ -56,9 +60,10 @@ if (!existsSync(installer) || !existsSync(sigPath)) {
   process.exit(1)
 }
 
+const notes = notesOverride || loadReleaseNotes() || `Release ${version}`
 const latest = {
   version,
-  notes: notes || `Release ${version}`,
+  notes,
   pub_date: new Date().toISOString(),
   platforms: {
     'windows-x86_64': {

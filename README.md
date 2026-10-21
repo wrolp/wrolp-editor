@@ -95,6 +95,12 @@ installs can no longer accept updates). `release` writes `latest.json` beside th
 `https://github.com/wrolp/wrolp-editor/releases/latest/download/latest.json`. Bump all three
 version fields before building.
 
+The release notes are two hand-written files at the repository root, one per language:
+`RELEASE_NOTES.md` (English) and `RELEASE_NOTES.zh.md` (简体中文). `release` reads them for
+`latest.json`'s `notes` and `upload` for the GitHub release body, joined as one text with the
+English above a rule and the Chinese under it; `--notes "..."` overrides both for a one-off
+about a single build.
+
 ### Scripts
 
 | Script | Purpose |

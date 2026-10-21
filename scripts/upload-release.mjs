@@ -8,6 +8,9 @@
 // carries the installer and latest.json — the updater manifest names the asset and carries its
 // signature — and nothing else; the standalone `.sig` stays local.
 //
+// The release body is the release's own notes, read from `RELEASE_NOTES.md` and
+// `RELEASE_NOTES.zh.md` at the repository root; `--notes` overrides both for a one-off.
+//
 // Prerequisites: run `npm run release` first (or `npm run publish`, which does both), and have
 // the `gh` CLI installed and authenticated with push access to the repository.
 
@@ -15,12 +18,13 @@ import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { loadReleaseNotes } from './release-notes.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const root = join(__dirname, '..')
 
 let tagOverride = ''
-let notes = ''
+let notesOverride = ''
 let repoOverride = ''
 let draft = false
 let pre = false
@@ -28,7 +32,7 @@ let dryRun = false
 for (let i = 2; i < process.argv.length; i++) {
   const arg = process.argv[i]
   if (arg === '--tag') tagOverride = process.argv[++i] ?? ''
-  else if (arg === '--notes') notes = process.argv[++i] ?? ''
+  else if (arg === '--notes') notesOverride = process.argv[++i] ?? ''
   else if (arg === '--repo') repoOverride = process.argv[++i] ?? ''
   else if (arg === '--draft') draft = true
   else if (arg === '--pre') pre = true
@@ -76,7 +80,7 @@ if (!existsSync(latestPath)) {
 
 const tag = tagOverride || `v${version}`
 const megabytes = (statSync(installer).size / 1024 / 1024).toFixed(1)
-const notesText = notes || `Release ${version}`
+const notesText = notesOverride || loadReleaseNotes() || `Release ${version}`
 
 if (dryRun) {
   console.log(`[upload] dry run: nothing will be sent.`)
