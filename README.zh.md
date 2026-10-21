@@ -72,6 +72,16 @@ npm run tauri build
 
 只配置了 NSIS 目标（`bundle.targets: ["nsis"]`）。
 
+### 发布
+
+```bash
+npm run release   # 打安装包；三个版本号不一致时直接退出
+npm run upload    # 创建/补传 GitHub release v<version>，上传 setup.exe
+# 或：npm run publish
+```
+
+`upload` 需要 `gh` CLI，并用对仓库有写权限的账号登录；仓库地址取自 `git remote get-url origin`（可用 `--repo owner/name` 覆盖），还接受 `--tag`、`--notes`、`--draft`、`--pre` 和 `--dry-run`。本应用还没有更新器，所以 release 里只有安装包，没有签名和 `latest.json`。
+
 ### 脚本
 
 | 脚本 | 用途 |
@@ -79,6 +89,9 @@ npm run tauri build
 | `npm run dev` | 在 1520 端口起 Vite dev server（供 `tauri dev` 使用） |
 | `npm run build` | 先做类型检查，再产出 `dist/` 生产包 |
 | `npm run tauri` | Tauri CLI 透传（`dev`、`build`、`icon` 等） |
+| `npm run release` | 校验版本号后打 NSIS 安装包 |
+| `npm run upload` | 把安装包上传到 GitHub release |
+| `npm run publish` | 依次执行 `release` 与 `upload` |
 
 ## 数据存放位置
 

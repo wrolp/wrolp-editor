@@ -75,6 +75,19 @@ npm run tauri build
 
 Only the NSIS target is configured (`bundle.targets: ["nsis"]`).
 
+### Publish a release
+
+```bash
+npm run release   # build the installer; exits first if the three version fields disagree
+npm run upload    # create or resume the GitHub release v<version> and upload the setup.exe
+# or: npm run publish
+```
+
+`upload` needs the `gh` CLI, authenticated with push access to the repository; the repository
+comes from `git remote get-url origin` (override with `--repo owner/name`), and the command
+accepts `--tag`, `--notes`, `--draft`, `--pre` and `--dry-run`. This app has no updater yet, so
+the release carries the installer and nothing else — no signature or `latest.json`.
+
 ### Scripts
 
 | Script | Purpose |
@@ -82,6 +95,9 @@ Only the NSIS target is configured (`bundle.targets: ["nsis"]`).
 | `npm run dev` | Vite dev server on port 1520 (used by `tauri dev`) |
 | `npm run build` | `tsc --noEmit`-style type check plus production bundle into `dist/` |
 | `npm run tauri` | Tauri CLI passthrough (`dev`, `build`, `icon`, …) |
+| `npm run release` | Version check, then build the NSIS installer |
+| `npm run upload` | Upload that installer to a GitHub release |
+| `npm run publish` | `release` followed by `upload` |
 
 ## Where data lives
 
