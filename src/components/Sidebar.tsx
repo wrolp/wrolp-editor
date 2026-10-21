@@ -592,6 +592,11 @@ interface Props extends Omit<
    */
   onPaste: (source: string, target: string) => Promise<boolean>;
   /**
+   * Pastes the files sitting on the system clipboard — the ones Explorer copied — into `dir`.
+   * Resolves false when nothing landed, which leaves the tree showing what it already has.
+   */
+  onPasteFiles: (dir: string) => Promise<boolean>;
+  /**
    * Deletes a file, or a folder and everything in it. The prompt is asked here rather than
    * in the tree, and the caller is only reached once the user has answered it.
    */
@@ -807,6 +812,18 @@ export default function Sidebar(props: Props) {
     const dir = pasteTarget(target);
     if (!clipboard || !dir) return;
     if (!(await props.onPaste(clipboard.path, dir))) return;
+    bumpFolder(dir);
+  };
+
+  /**
+   * Paste what Windows Explorer copied into a folder. There is no internal clipboard involved:
+   * the files come from the system one, and the backend names them the same way a copy inside
+   * the tree does.
+   */
+  const runPasteFiles = async (target: NodeTarget | null) => {
+    const dir = pasteTarget(target);
+    if (!dir) return;
+    if (!(await props.onPasteFiles(dir))) return;
     bumpFolder(dir);
   };
 
@@ -1257,6 +1274,21 @@ export default function Sidebar(props: Props) {
                     {t("side.menuPaste")}
                   </div>
                 )}
+                {/* Always offered: whether the system clipboard holds files is only knowable
+                    at paste time, and a row that appears and disappears with another program's
+                    clipboard would be a menu that changes under the cursor. */}
+                <div
+                  className="ctx-item"
+                  onClick={() => {
+                    void runPasteFiles({ path: "", name: "", isDir: true });
+                    setMenu(null);
+                  }}
+                >
+                  <span className="ctx-icon">
+                    <IconPaste size={14} />
+                  </span>
+                  {t("side.menuPasteFiles")}
+                </div>
               </>
             )
           ) : (
@@ -1408,6 +1440,18 @@ export default function Sidebar(props: Props) {
                   {t("side.menuPaste")}
                 </div>
               )}
+              <div
+                className="ctx-item"
+                onClick={() => {
+                  void runPasteFiles(menu);
+                  setMenu(null);
+                }}
+              >
+                <span className="ctx-icon">
+                  <IconPaste size={14} />
+                </span>
+                {t("side.menuPasteFiles")}
+              </div>
               <div className="ws-sep" />
               {/* All four put text on the clipboard, so all four carry the same shape:
                   what differs is the text, and that is what the label says. */}

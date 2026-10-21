@@ -53,6 +53,12 @@ export interface FsEntry {
   isDir: boolean;
 }
 
+/** What pasting the system clipboard produced: the copies made, and sources it could not take. */
+export interface ClipboardPaste {
+  copied: FsEntry[];
+  failed: number;
+}
+
 export interface HistoryEntry {
   path: string;
   name: string;
@@ -442,6 +448,14 @@ export const api = {
    */
   copyEntry: (source: string, target: string) =>
     invoke<FsEntry>("copy_entry", { source, target }),
+  /**
+   * Copy the files on the system clipboard (what Explorer put there) into `target`.
+   *
+   * Each one lands by the same rules as `copyEntry`. A source that cannot be taken does not
+   * stop the rest; nothing landing at all is an error carrying the first reason.
+   */
+  pasteClipboardFiles: (target: string) =>
+    invoke<ClipboardPaste>("paste_clipboard_files", { target }),
   /**
    * Delete a file, or a folder and everything in it, and stop the store pointing at it.
    *

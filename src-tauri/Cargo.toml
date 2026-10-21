@@ -31,6 +31,7 @@ getrandom = "0.2"
 zeroize = "1"
 keyring-core = "1.0.1"
 tauri-plugin-clipboard-manager = "2"
+arboard = "3.6"
 git2 = { version = "0.21.0", default-features = false, features = ["vendored-libgit2"] }
 
 [target.'cfg(windows)'.dependencies]

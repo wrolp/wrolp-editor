@@ -960,6 +960,31 @@ export default function App() {
   );
 
   /**
+   * Paste what Explorer copied into a folder.
+   *
+   * The backend takes each source by the same rules as a copy inside the tree, so nothing is
+   * overwritten; a source it could not take is counted rather than fatal. "Nothing landed" is
+   * already an error carrying the reason, which is what the toast shows.
+   */
+  const pasteFiles = useCallback(
+    async (dir: string): Promise<boolean> => {
+      const report = await api.pasteClipboardFiles(dir).catch((e) => {
+        toast(errorMessage(e));
+        return null;
+      });
+      if (!report) return false;
+      toast(
+        t(report.failed > 0 ? "side.pastedFilesSome" : "side.pastedFiles", {
+          count: report.copied.length,
+          failed: report.failed,
+        })
+      );
+      return true;
+    },
+    [toast]
+  );
+
+  /**
    * Delete a file, or a folder and everything in it. Only reached once the prompt has been
    * answered, which is the only thing standing between a stray click and a recursive delete.
    *
@@ -1814,6 +1839,7 @@ const defaultModeFor = useCallback(
           }}
           onCreate={createEntry}
           onPaste={pasteEntry}
+          onPasteFiles={pasteFiles}
           onDelete={deleteEntry}
           onError={toast}
         />

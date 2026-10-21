@@ -5525,6 +5525,7 @@ name = "wrolp-editor"
 version = "0.0.1"
 dependencies = [
  "aes-gcm",
+ "arboard",
  "argon2",
  "chrono",
  "encoding_rs",

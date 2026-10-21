@@ -16,6 +16,7 @@ use crate::commands::{
 use crate::draft;
 use crate::group::{GroupStore, GroupTab};
 use crate::rename::{check_name, under, NameError};
+use serde::Serialize;
 use std::path::{Path, PathBuf};
 use tauri::AppHandle;
 
@@ -260,6 +261,66 @@ pub fn copy_entry(source: String, target: String) -> Result<FsEntry, String> {
     },
     path,
     is_dir,
+  })
+}
+
+/// The files Windows Explorer put on the clipboard, in the order it listed them.
+///
+/// A clipboard holding text or a picture answers `ContentNotAvailable`, which is the same
+/// outcome as far as a paste is concerned: there is nothing here to copy.
+fn clipboard_files() -> Result<Vec<PathBuf>, String> {
+  let mut clipboard = arboard::Clipboard::new().map_err(|e| format!("clipboard_read:{e}"))?;
+  clipboard.get().file_list().map_err(|e| match e {
+    arboard::Error::ContentNotAvailable => "clipboard_empty".into(),
+    arboard::Error::ClipboardOccupied => "clipboard_busy".into(),
+    other => format!("clipboard_read:{other}"),
+  })
+}
+
+/// What a clipboard paste did: the copies it made, and how many sources it could not take.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipboardPaste {
+  pub copied: Vec<FsEntry>,
+  pub failed: usize,
+}
+
+/// Copy every file the system clipboard lists into `target`.
+///
+/// The copy itself is `copy_entry`, so the rules are the ones a paste inside the tree already
+/// follows: never overwrite, number a name that is taken, refuse system folders, and never
+/// copy a folder into itself. One source that cannot be taken does not stop the rest — the
+/// count comes back so the caller can say what happened — but when nothing lands, the first
+/// reason is the error, because that is the one worth showing.
+#[tauri::command]
+pub fn paste_clipboard_files(target: String) -> Result<ClipboardPaste, String> {
+  let dir = draft::normalize_path(&target);
+  if dir.is_empty() {
+    return Err("path_empty".into());
+  }
+  if !Path::new(&dir).is_dir() {
+    return Err("copy_no_target".into());
+  }
+  let sources = clipboard_files()?;
+  if sources.is_empty() {
+    return Err("clipboard_empty".into());
+  }
+  let mut copied: Vec<FsEntry> = Vec::new();
+  let mut first_error: Option<String> = None;
+  for source in &sources {
+    match copy_entry(source.to_string_lossy().into_owned(), dir.clone()) {
+      Ok(entry) => copied.push(entry),
+      Err(e) => {
+        first_error.get_or_insert(e);
+      }
+    }
+  }
+  if copied.is_empty() {
+    return Err(first_error.unwrap_or_else(|| "copy_failed".into()));
+  }
+  Ok(ClipboardPaste {
+    failed: sources.len() - copied.len(),
+    copied,
   })
 }
 

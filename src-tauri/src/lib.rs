@@ -39,6 +39,7 @@ pub fn run() {
       entry::create_file,
       entry::create_dir,
       entry::copy_entry,
+      entry::paste_clipboard_files,
       entry::keep_file,
       entry::remove_entry,
       commands::get_draft,
