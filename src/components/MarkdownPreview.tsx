@@ -1,4 +1,12 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { convertFileSrc } from "@tauri-apps/api/core";
@@ -225,6 +233,52 @@ export default function MarkdownPreview({
    * when it does not.
    */
   const [tocOpen, setTocOpen] = useState(true);
+  /** Raw heading index of the section at the top of the pane. */
+  const [activeIndex, setActiveIndex] = useState(0);
+  const tocRef = useRef<HTMLElement>(null);
+  // Read through a ref by `updateActive`, which must stay stable: taking `showToc` as a
+  // dependency would rebuild it and re-run the follow effect, resetting the scroll position
+  // every time the layout gains or loses the column.
+  const showTocRef = useRef(showToc);
+  showTocRef.current = showToc;
+
+  /**
+   * Which heading owns the top of the viewport.
+   *
+   * The edge is 16px below the pane's top rather than flush with it: `scrollToHeading` leaves
+   * 12px, so a heading that was just clicked still counts as the current one. Taking the last
+   * heading above the line, not the nearest one, keeps a section highlighted for its whole
+   * length instead of only until its first paragraph scrolls under.
+   *
+   * Measured from live rects on every scroll rather than cached offsets: diagrams are injected
+   * after the markdown pass and images finish loading later still, so any offset captured at
+   * render time would go stale without an event to recompute it.
+   */
+  const updateActive = useCallback(() => {
+    const pane = scrollRef.current;
+    const body = bodyRef.current;
+    if (!showTocRef.current || !pane || !body) return;
+    // Same filter as `outline`: a heading with no text has no row to highlight, so it must
+    // not win the position either. The raw index is kept because that is what a row stores.
+    const headings = Array.from(body.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6"))
+      .map((element, index) => ({ element, index }))
+      .filter((heading) => (heading.element.textContent ?? "").trim());
+    if (headings.length === 0) return;
+    const max = pane.scrollHeight - pane.clientHeight;
+    let index = headings[0].index;
+    if (max > 0 && pane.scrollTop >= max - 1) {
+      // With no room left to scroll, the last heading may never reach the top edge — a short
+      // closing section, or no scroll-beyond-end tail. It is still the section being read.
+      index = headings[headings.length - 1].index;
+    } else {
+      const edge = pane.getBoundingClientRect().top + 16;
+      for (let i = 0; i < headings.length; i++) {
+        if (headings[i].element.getBoundingClientRect().top <= edge) index = headings[i].index;
+        else break;
+      }
+    }
+    setActiveIndex((current) => (current === index ? current : index));
+  }, []);
 
   /**
    * The headings, in document order, each with its position in the same query the click
@@ -253,8 +307,36 @@ export default function MarkdownPreview({
     const body = bodyRef.current;
     if (!pane || !body) return;
     const target = body.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6")[index];
-    if (target) scrollToHeading(pane, target);
+    if (!target) return;
+    setActiveIndex(index);
+    scrollToHeading(pane, target);
   };
+
+  /**
+   * Keep the highlighted entry inside the column's own viewport. The outline is taller than
+   * the column for a long document, so without this the highlight exists but scrolls out of
+   * sight and the linkage is invisible.
+   *
+   * Only nudged when the row is actually outside — scrolling on every change would fight a
+   * user who is browsing the outline by hand.
+   */
+  useEffect(() => {
+    const nav = tocRef.current;
+    if (!nav || !tocOpen) return;
+    const row = nav.querySelector<HTMLElement>(`button[data-toc-index="${activeIndex}"]`);
+    if (!row) return;
+    const box = nav.getBoundingClientRect();
+    const item = row.getBoundingClientRect();
+    const margin = 6;
+    if (item.top < box.top + margin) nav.scrollTop -= box.top + margin - item.top;
+    else if (item.bottom > box.bottom - margin) nav.scrollTop += item.bottom - (box.bottom - margin);
+  }, [activeIndex, tocOpen]);
+
+  // The column can appear without the pane moving — entering the preview-only layout — so
+  // the highlight is seeded as soon as it exists rather than waiting for the next scroll.
+  useEffect(() => {
+    if (showToc) updateActive();
+  }, [showToc, updateActive]);
 
   /**
    * Puts the diagram SVGs into their placeholders.
@@ -343,17 +425,22 @@ export default function MarkdownPreview({
     const max = el.scrollHeight - el.clientHeight;
     following.current = true;
     el.scrollTop = max * scrollRatio;
+    // The assignment above may not emit a scroll event when the value did not change, and
+    // the outline still has to reflect where the pane ended up after a document edit.
+    updateActive();
     // Release on the next frame: the scroll event from this assignment lands after it.
     const raf = requestAnimationFrame(() => {
       following.current = false;
     });
     return () => cancelAnimationFrame(raf);
-  }, [scrollRatio, html]);
+  }, [scrollRatio, html, updateActive]);
 
   const onScroll = () => {
-    if (following.current) return;
     const el = scrollRef.current;
     if (!el) return;
+    // Runs even while we are the one scrolling: the outline must follow the editor as well.
+    updateActive();
+    if (following.current) return;
     const max = el.scrollHeight - el.clientHeight;
     if (max > 0) onScrollRatio(el.scrollTop / max);
   };
@@ -534,7 +621,7 @@ export default function MarkdownPreview({
   if (!showToc || outline.length === 0) return pane;
 
   const outlineColumn = (
-    <nav className={`md-toc${tocOpen ? "" : " collapsed"}`} aria-label={t("preview.toc")}>
+    <nav className={`md-toc${tocOpen ? "" : " collapsed"}`} aria-label={t("preview.toc")} ref={tocRef}>
       <div className="md-toc-head">
         <span className="md-toc-title">{t("preview.toc")}</span>
         <button
@@ -555,7 +642,14 @@ export default function MarkdownPreview({
             key={heading.index}
             style={{ "--toc-indent": heading.indent } as CSSProperties}
           >
-            <button type="button" title={heading.text} onClick={() => jumpToHeading(heading.index)}>
+            <button
+              type="button"
+              className={heading.index === activeIndex ? "active" : undefined}
+              aria-current={heading.index === activeIndex ? "location" : undefined}
+              data-toc-index={heading.index}
+              title={heading.text}
+              onClick={() => jumpToHeading(heading.index)}
+            >
               {heading.text}
             </button>
           </li>

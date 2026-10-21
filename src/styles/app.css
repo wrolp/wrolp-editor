@@ -2962,6 +2962,15 @@ body.resizing .editor-host {
   background: var(--surface-hover);
   color: var(--text);
 }
+/* A tint rather than the solid accent fill the settings nav uses: the outline sits beside
+   the article, and a saturated block there pulls the eye off the text. Same rgba/color-mix
+   pairing as the diff tints, so a browser without color-mix still gets the intended tone. */
+.md-toc ul button.active,
+.md-toc ul button.active:hover {
+  background: rgba(99, 102, 241, 0.14);
+  background: color-mix(in srgb, var(--accent-soft) 14%, transparent);
+  color: var(--text-strong);
+}
 
 /* ---------- HTML preview ----------
    The pane does not scroll: the frame inside it does, because the document has its own
