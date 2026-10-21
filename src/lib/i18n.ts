@@ -185,6 +185,11 @@ const EN: Table = {
   "settings.previewWidth": "Markdown preview width",
   "settings.previewWidthDesc":
     "How wide the rendered text sits inside the preview pane. HTML and image previews keep the width their own document asks for.",
+  "settings.tocSide": "Markdown contents side",
+  "settings.tocSideDesc":
+    "Where the outline column sits when a Markdown file is in preview-only mode. Right keeps it away from the Explorer.",
+  "settings.tocSide.left": "Left",
+  "settings.tocSide.right": "Right",
   "settings.width.narrow": "Narrow (860px)",
   "settings.width.wide": "Wide (1200px)",
   "settings.width.full": "Fill the pane",
@@ -715,6 +720,11 @@ const ZH: Table = {
   "settings.layout.preview": "只显示预览",
   "settings.previewWidth": "Markdown 预览宽度",
   "settings.previewWidthDesc": "预览面板内正文的宽度。HTML 与图片预览仍由各自的文档决定宽度。",
+  "settings.tocSide": "Markdown 目录位置",
+  "settings.tocSideDesc":
+    "Markdown 以「只显示预览」打开时，目录列显示在哪一侧。默认靠右，不与左侧边栏并排。",
+  "settings.tocSide.left": "左侧",
+  "settings.tocSide.right": "右侧",
   "settings.width.narrow": "窄（860px）",
   "settings.width.wide": "宽（1200px）",
   "settings.width.full": "占满内容区",

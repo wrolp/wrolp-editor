@@ -167,6 +167,11 @@ export interface Settings {
    */
   previewModes: Record<string, string>;
   /**
+   * Which side the markdown outline takes in preview-only mode: `left` | `right`. Right by
+   * default, so the column does not sit against the Explorer.
+   */
+  tocSide: string;
+  /**
    * Minutes an encrypted file stays unlocked without being touched. 0 means never lock
    * automatically, and is a choice rather than a missing value: the backend keeps it as
    * written, so the frontend has to carry it back or a save would reset it to the default.

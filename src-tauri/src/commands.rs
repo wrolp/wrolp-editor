@@ -192,6 +192,9 @@ pub struct Settings {
   /// choices are stored. A rename rewrites the key; an entry for a file since deleted is
   /// harmless and is simply never read.
   pub preview_modes: HashMap<String, String>,
+  /// Which side the markdown outline takes in preview-only mode: left | right. Right by
+  /// default, so the column does not sit against the Explorer.
+  pub toc_side: String,
   /// Colour scheme: system | dark | light. `system` follows the OS preference at runtime,
   /// so a machine that switches at dusk does not need the app restarted.
   pub theme: String,
@@ -261,6 +264,7 @@ impl Default for Settings {
       preview_layout: "text".into(),
       preview_width: "narrow".into(),
       preview_modes: HashMap::new(),
+      toc_side: "right".into(),
       theme: "system".into(),
       encrypt_idle_minutes: ENCRYPT_IDLE_DEFAULT_MINUTES,
       versioning_enabled: false,
@@ -302,6 +306,9 @@ const PER_FILE_PREVIEW: [&str; 3] = ["text", "split", "preview"];
 /// Widths the markdown preview body can take, as capped reading measures. The numbers
 /// themselves live in the stylesheet; this only names the three choices.
 const PREVIEW_WIDTH: [&str; 3] = ["narrow", "wide", "full"];
+/// Sides the markdown outline can take. Right by default: the Explorer is on the left, and a
+/// contents column against it would read as a second sidebar.
+const TOC_SIDES: [&str; 2] = ["left", "right"];
 /// A key left in memory for a day is not an idle lock any more, so the setting stops there.
 const ENCRYPT_IDLE_DEFAULT_MINUTES: u32 = 10;
 const ENCRYPT_IDLE_MAX_MINUTES: u32 = 1440;
@@ -434,6 +441,11 @@ impl Settings {
           }
         }
         out
+      },
+      toc_side: if TOC_SIDES.contains(&self.toc_side.as_str()) {
+        self.toc_side.clone()
+      } else {
+        "right".into()
       },
       // Same reasoning as the layout above: an unknown theme would leave the frontend with
       // no palette to apply, and an app with no palette is worse than one that ignores it.

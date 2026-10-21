@@ -2870,6 +2870,12 @@ body.resizing .editor-host {
   color: var(--text-dim);
   user-select: none;
 }
+/* On the right the divider moves to the outline's other edge. The pane never carries one
+   in this layout: in preview-only mode it sits against the window, not against an editor. */
+.md-with-toc.toc-right > .md-toc {
+  border-right: none;
+  border-left: 1px solid var(--border);
+}
 .md-toc-head {
   display: flex;
   align-items: center;
@@ -2906,6 +2912,14 @@ body.resizing .editor-host {
 }
 .md-toc.collapsed .md-toc-toggle .chev {
   transform: none;
+}
+/* Mirrored on the right: expanded points at the edge the list folds to, collapsed points
+   back into the page. */
+.md-with-toc.toc-right .md-toc-toggle .chev {
+  transform: none;
+}
+.md-with-toc.toc-right .md-toc.collapsed .md-toc-toggle .chev {
+  transform: rotate(180deg);
 }
 /* Collapsed, the column is a rail: the toggle stays where it was, and everything else goes. */
 .md-toc.collapsed {

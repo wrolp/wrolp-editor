@@ -24,6 +24,8 @@ interface Props {
    * in the frame, so the outline would be a third column competing with it for width.
    */
   showToc: boolean;
+  /** Which edge the outline column takes: `left` | `right`. */
+  tocSide: "left" | "right";
   /** Opens a file the document links to, beside itself. */
   onOpenPath: (path: string) => void;
   /** Reports a link that was followed but could not be opened. */
@@ -49,6 +51,7 @@ export default function MarkdownPreview({
   width,
   theme,
   showToc,
+  tocSide,
   onOpenPath,
   onError,
 }: Props) {
@@ -530,37 +533,42 @@ export default function MarkdownPreview({
   // scroll position is what tracks the editor, and a column inside it would move with that.
   if (!showToc || outline.length === 0) return pane;
 
-  return (
-    <div className="md-with-toc">
-      <nav className={`md-toc${tocOpen ? "" : " collapsed"}`} aria-label={t("preview.toc")}>
-        <div className="md-toc-head">
-          <span className="md-toc-title">{t("preview.toc")}</span>
-          <button
-            type="button"
-            className="md-toc-toggle"
-            title={t(tocOpen ? "preview.tocCollapse" : "preview.tocExpand")}
-            aria-expanded={tocOpen}
-            onClick={() => setTocOpen((open) => !open)}
+  const outlineColumn = (
+    <nav className={`md-toc${tocOpen ? "" : " collapsed"}`} aria-label={t("preview.toc")}>
+      <div className="md-toc-head">
+        <span className="md-toc-title">{t("preview.toc")}</span>
+        <button
+          type="button"
+          className="md-toc-toggle"
+          title={t(tocOpen ? "preview.tocCollapse" : "preview.tocExpand")}
+          aria-expanded={tocOpen}
+          onClick={() => setTocOpen((open) => !open)}
+        >
+          <span className="chev">
+            <IconTreeChevron />
+          </span>
+        </button>
+      </div>
+      <ul>
+        {outline.map((heading) => (
+          <li
+            key={heading.index}
+            style={{ "--toc-indent": heading.indent } as CSSProperties}
           >
-            <span className="chev">
-              <IconTreeChevron />
-            </span>
-          </button>
-        </div>
-        <ul>
-          {outline.map((heading) => (
-            <li
-              key={heading.index}
-              style={{ "--toc-indent": heading.indent } as CSSProperties}
-            >
-              <button type="button" title={heading.text} onClick={() => jumpToHeading(heading.index)}>
-                {heading.text}
-              </button>
-            </li>
-          ))}
-        </ul>
-      </nav>
+            <button type="button" title={heading.text} onClick={() => jumpToHeading(heading.index)}>
+              {heading.text}
+            </button>
+          </li>
+        ))}
+      </ul>
+    </nav>
+  );
+
+  return (
+    <div className={`md-with-toc${tocSide === "right" ? " toc-right" : ""}`}>
+      {tocSide === "left" ? outlineColumn : null}
       {pane}
+      {tocSide === "right" ? outlineColumn : null}
     </div>
   );
 }

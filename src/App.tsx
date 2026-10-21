@@ -143,6 +143,9 @@ const DEFAULT_SETTINGS: Settings = {
   previewWidth: "narrow",
   // Empty until a file is put in a layout by hand: every file then follows the global choice.
   previewModes: {},
+  // Right by default: the Explorer is on the left, and a contents column beside it would read
+  // as a second sidebar.
+  tocSide: "right",
   // An encrypted file is left unlocked for as long as it is being used, then locked: long
   // enough to read and edit without being asked again, short enough that walking away from
   // the machine does not leave the key sitting in memory indefinitely.
@@ -1960,6 +1963,7 @@ const defaultModeFor = useCallback(
               width={settings.previewWidth}
               theme={theme}
               showToc={previewMode === "preview"}
+              tocSide={settings.tocSide === "left" ? "left" : "right"}
               onOpenPath={(path) => void tabs.openPath(path)}
               onError={(message) => toast(message)}
             />

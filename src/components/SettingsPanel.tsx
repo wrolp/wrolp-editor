@@ -69,6 +69,8 @@ const WHITESPACE_MODES = ["none", "boundary", "selection", "all", "trailing"] as
 /** `auto` last: it is the fallback that decides by file type, not a layout of its own. */
 const PREVIEW_LAYOUTS = ["text", "split", "preview", "auto"] as const;
 const PREVIEW_WIDTHS = ["narrow", "wide", "full"] as const;
+/** Right first: it is the default, and it keeps the outline off the Explorer's edge. */
+const TOC_SIDES = ["right", "left"] as const;
 const THEMES = ["system", "dark", "light"] as const;
 /** `auto` first: it is the default, and `ask` is the opt-in for anyone who wants to see each draft before it lands. */
 const DRAFT_MODES = ["auto", "ask"] as const;
@@ -526,6 +528,20 @@ export default function SettingsPanel({
                 </select>
               </SettingField>
               <p className="muted">{t("settings.previewWidthDesc")}</p>
+              <SettingField label={t("settings.tocSide")}>
+                <select
+                  className="select"
+                  value={settings.tocSide}
+                  onChange={(e) => onSaveSettings({ tocSide: e.target.value })}
+                >
+                  {TOC_SIDES.map((side) => (
+                    <option key={side} value={side}>
+                      {t(`settings.tocSide.${side}`)}
+                    </option>
+                  ))}
+                </select>
+              </SettingField>
+              <p className="muted">{t("settings.tocSideDesc")}</p>
               <SettingCheck
                 label={t("settings.wordWrap")}
                 checked={settings.wordWrap}
