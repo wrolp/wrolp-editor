@@ -27,6 +27,7 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | Single instance | Launching a second time hands the path to the running window, adds a tab and focuses it |
 | Settings | Context-menu switch, editor font size, minimap, UI language; persisted and applied live. The context-menu page also shows the command the entry currently launches, and warns when it points at a different build or when this is a debug build |
 | Language | English by default, switchable to 中文 from a dropdown in Settings. All strings, including messages coming from the Rust side, resolve through one key table |
+| Updates | Settings → About checks the latest GitHub release on request, then downloads and hands the signed NSIS package to the passive installer, which restarts the app. Nothing checks in the background |
 | Tab groups | A group is a **named set of open tabs**. The chip in the title bar switches between them inside the same window; tabs and caret positions come back on the next start |
 | Move / copy tabs | A tab can be re-homed into another group from its context menu. This changes *which group lists the tab*, never the file on disk |
 | Configuration backups | Timestamped snapshots of groups, settings, recent files and folder history, refreshed when the app opens and closes and on demand; older ones are pruned to a count you set, and any snapshot can be restored from Settings → Backups. Drafts and version history are not included |
@@ -85,8 +86,14 @@ npm run upload    # create or resume the GitHub release v<version> and upload th
 
 `upload` needs the `gh` CLI, authenticated with push access to the repository; the repository
 comes from `git remote get-url origin` (override with `--repo owner/name`), and the command
-accepts `--tag`, `--notes`, `--draft`, `--pre` and `--dry-run`. This app has no updater yet, so
-the release carries the installer and nothing else — no signature or `latest.json`.
+accepts `--tag`, `--notes`, `--draft`, `--pre` and `--dry-run`.
+
+The build is signed with `.tauri/priv.key` (untracked; generate it with
+`npx tauri signer generate -w .tauri/priv.key` and keep it backed up — losing it means existing
+installs can no longer accept updates). `release` writes `latest.json` beside the installer and
+`upload` attaches both; the app reads it from
+`https://github.com/wrolp/wrolp-editor/releases/latest/download/latest.json`. Bump all three
+version fields before building.
 
 ### Scripts
 
@@ -95,8 +102,8 @@ the release carries the installer and nothing else — no signature or `latest.j
 | `npm run dev` | Vite dev server on port 1520 (used by `tauri dev`) |
 | `npm run build` | `tsc --noEmit`-style type check plus production bundle into `dist/` |
 | `npm run tauri` | Tauri CLI passthrough (`dev`, `build`, `icon`, …) |
-| `npm run release` | Version check, then build the NSIS installer |
-| `npm run upload` | Upload that installer to a GitHub release |
+| `npm run release` | Version check, signed build, then `latest.json` |
+| `npm run upload` | Upload the installer and `latest.json` to a GitHub release |
 | `npm run publish` | `release` followed by `upload` |
 
 ## Where data lives

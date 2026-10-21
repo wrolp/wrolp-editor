@@ -4,9 +4,9 @@
 //   node scripts/upload-release.mjs [--tag v0.0.2] [--notes "..."] [--repo owner/name]
 //                                   [--draft] [--pre] [--dry-run]
 //
-// The repository is read from `git remote get-url origin` unless --repo is given. Only the
-// setup.exe is uploaded: this app has no updater pipeline, so there is no signature or
-// latest.json to publish.
+// The repository is read from `git remote get-url origin` unless --repo is given. The release
+// carries the installer and latest.json — the updater manifest names the asset and carries its
+// signature — and nothing else; the standalone `.sig` stays local.
 //
 // Prerequisites: run `npm run release` first (or `npm run publish`, which does both), and have
 // the `gh` CLI installed and authenticated with push access to the repository.
@@ -67,6 +67,13 @@ if (!existsSync(installer)) {
   process.exit(1)
 }
 
+const latestPath = join(nsisDir, 'latest.json')
+if (!existsSync(latestPath)) {
+  console.error(`[upload] updater manifest not found: ${latestPath}`)
+  console.error('[upload] run "npm run release" first (it writes latest.json).')
+  process.exit(1)
+}
+
 const tag = tagOverride || `v${version}`
 const megabytes = (statSync(installer).size / 1024 / 1024).toFixed(1)
 const notesText = notes || `Release ${version}`
@@ -76,6 +83,7 @@ if (dryRun) {
   console.log(`[upload] repo:  ${repo}`)
   console.log(`[upload] tag:   ${tag}${draft ? ' (draft)' : ''}${pre ? ' (prerelease)' : ''}`)
   console.log(`[upload] file:  ${installer} (${megabytes} MB)`)
+  console.log(`[upload] file:  ${latestPath}`)
   console.log(`[upload] notes: ${notesText}`)
   process.exit(0)
 }
@@ -107,10 +115,16 @@ if (view.status !== 0) {
   console.log(`[upload] release ${tag} already exists — uploading/replacing its asset.`)
 }
 
-console.log(`[upload] uploading ${installer} to ${repo}@${tag} ...`)
+console.log(`[upload] uploading the installer and latest.json to ${repo}@${tag} ...`)
 const uploaded = spawnSync(
   'gh',
-  ['release', 'upload', tag, resolve(installer), '--repo', repo, '--clobber'],
+  [
+    'release', 'upload', tag,
+    resolve(installer),
+    resolve(latestPath),
+    '--repo', repo,
+    '--clobber',
+  ],
   { stdio: 'inherit' }
 )
 if (uploaded.status !== 0) {
@@ -120,3 +134,6 @@ if (uploaded.status !== 0) {
 
 console.log('[upload] done.')
 console.log(`[upload] https://github.com/${repo}/releases/tag/${tag}`)
+console.log(
+  `[upload] latest.json: https://github.com/${repo}/releases/download/${tag}/latest.json`
+)

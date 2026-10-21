@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
+import { check, type Update } from "@tauri-apps/plugin-updater";
 import logoUrl from "../../branding/logo.svg";
 import { formatWhen, LANGUAGES, t } from "../lib/i18n";
 import { parseExtensionList } from "../lib/path";
@@ -121,6 +122,16 @@ export default function SettingsPanel({
   // The first entry in NAV, so opening Settings lands on it rather than on the second one.
   const [category, setCategory] = useState<Category>("general");
   const [version, setVersion] = useState("…");
+  /**
+   * Update check state. The `Update` handle is kept because installing needs the same object
+   * the check returned; a second check while one is on screen would replace it, so the button
+   * is disabled for the duration.
+   */
+  const [updatePhase, setUpdatePhase] = useState<
+    "idle" | "checking" | "available" | "latest" | "downloading" | "installing"
+  >("idle");
+  const [update, setUpdate] = useState<Update | null>(null);
+  const [updateProgress, setUpdateProgress] = useState<{ done: number; total: number } | null>(null);
   /** The two storage folders, or null while the backend has not said where they are. */
   const [dirs, setDirs] = useState<StoreDirs | null>(null);
   const [dirsError, setDirsError] = useState<string | null>(null);
@@ -181,6 +192,67 @@ export default function SettingsPanel({
       })
       .catch((e) => setDirsError(errorMessage(e)));
   }, []);
+
+  /**
+   * Ask the release endpoint whether a newer version exists.
+   *
+   * A failed check is a toast rather than state on the page: offline, no release yet, and a
+   * malformed latest.json are all things the row cannot act on, and an idle row after a toast
+   * is less alarming than one frozen on an error.
+   */
+  const checkForUpdate = async () => {
+    setUpdatePhase("checking");
+    setUpdate(null);
+    setUpdateProgress(null);
+    try {
+      const found = await check();
+      if (found) {
+        // The handle is a Rust resource; a second check makes the first one unreachable.
+        if (update) void update.close();
+        setUpdate(found);
+        setUpdatePhase("available");
+      } else {
+        setUpdatePhase("latest");
+      }
+    } catch (e) {
+      setUpdatePhase("idle");
+      onToast(errorMessage(e));
+    }
+  };
+
+  /**
+   * Download the update and hand it to the installer.
+   *
+   * On Windows the passive installer takes over and restarts the app, so anything after the
+   * await only runs when it finished without closing this process.
+   */
+  const installUpdate = async () => {
+    if (!update) return;
+    setUpdatePhase("downloading");
+    setUpdateProgress({ done: 0, total: 0 });
+    try {
+      await update.downloadAndInstall((event) => {
+        if (event.event === "Started") {
+          setUpdateProgress({ done: 0, total: event.data.contentLength ?? 0 });
+        } else if (event.event === "Progress") {
+          setUpdateProgress((prev) =>
+            prev ? { done: prev.done + event.data.chunkLength, total: prev.total } : prev
+          );
+        } else {
+          setUpdatePhase("installing");
+        }
+      });
+      setUpdatePhase("available");
+    } catch (e) {
+      setUpdatePhase("available");
+      onToast(errorMessage(e));
+    }
+  };
+
+  const updatePercent =
+    updateProgress && updateProgress.total > 0
+      ? Math.min(100, Math.round((updateProgress.done / updateProgress.total) * 100))
+      : 0;
 
   /**
    * Hand one of those folders to the shell. Only the two paths the backend just returned are
@@ -897,6 +969,43 @@ export default function SettingsPanel({
             <div className="setting-group">
               <img className="about-logo" src={logoUrl} alt={t("app.name")} />
               <p>{t("settings.version", { version })}</p>
+              {/* The only row here that touches the network, and only when asked: an editor
+                  does not need to phone home on every start to be opened. */}
+              <SettingField label={t("settings.updates")}>
+                <button
+                  className="btn small"
+                  disabled={
+                    updatePhase === "checking" ||
+                    updatePhase === "downloading" ||
+                    updatePhase === "installing"
+                  }
+                  onClick={() => void checkForUpdate()}
+                >
+                  {t(
+                    updatePhase === "checking"
+                      ? "settings.updateChecking"
+                      : "settings.updateCheck"
+                  )}
+                </button>
+              </SettingField>
+              <p className="muted">
+                {updatePhase === "idle" && t("settings.updateIdle")}
+                {updatePhase === "checking" && t("settings.updateChecking")}
+                {updatePhase === "latest" && t("settings.updateLatest", { version })}
+                {updatePhase === "available" &&
+                  update &&
+                  t("settings.updateFound", { version: update.version })}
+                {updatePhase === "downloading" &&
+                  t("settings.updateDownloading", { percent: updatePercent })}
+                {updatePhase === "installing" && t("settings.updateInstalling")}
+              </p>
+              {updatePhase === "available" && update && (
+                <SettingField label={t("settings.updateInstall")}>
+                  <button className="btn small primary" onClick={() => void installUpdate()}>
+                    {t("settings.updateInstallAction")}
+                  </button>
+                </SettingField>
+              )}
               <p className="muted">{t("settings.aboutLine")}</p>
               <p className="muted">{t("settings.draftLine")}</p>
               {/* The folders are named by the backend and opened by the shell rather than

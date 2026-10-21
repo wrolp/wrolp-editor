@@ -21,6 +21,9 @@ pub fn run() {
     .plugin(tauri_plugin_opener::init())
     // Only read by the editor's own paste, which cannot reach the web clipboard here.
     .plugin(tauri_plugin_clipboard_manager::init())
+    // Signs nothing itself: it reads the endpoint and public key from tauri.conf.json and
+    // verifies every downloaded installer against that key.
+    .plugin(tauri_plugin_updater::Builder::new().build())
     .manage(commands::PendingFiles::default())
     .manage(unlock::UnlockStore::default())
     .setup(|app| {

@@ -30,9 +30,21 @@
       }
     }
   },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/wrolp/wrolp-editor/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEI4MzlGOTgzRTk2RUM4REEKUldUYXlHN3BnL2s1dU1HVm8wQ05lK1IzZmVyVktKNXVvQzNPVG45MHRDWDd2NnN4dUpvanN2UFEK",
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
     "publisher": "WROLP",
     "category": "Utility",
     "shortDescription": "WROLP Editor",

@@ -27,6 +27,7 @@
 | 单实例 | 再次启动时把路径交给已运行的窗口，新增标签并聚焦 |
 | 设置 | 右键菜单开关、编辑器字号、minimap、界面语言；即时生效并持久化。右键菜单页还会显示当前注册表实际启动的命令，指向别的构建或当前是 debug 构建时给出警告 |
 | 语言 | 默认英文，可在设置里下拉切换成中文。所有文案（含 Rust 侧返回的报错）都走同一张 key 表 |
+| 版本更新 | 设置 → 关于 可按需检查 GitHub 上的最新版本，下载后交给 passive 安装器并自动重启；不在后台自动检查 |
 | 标签分组 | 一个分组就是**一组有名字的标签**。标题栏上的小牌在同一窗口里切换分组；标签顺序与光标位置在下次启动时还原 |
 | 移动 / 复制标签 | 标签右键菜单可把标签归到另一个分组。改的是「哪个分组列着它」，磁盘上的文件不动 |
 | 配置备份 | 分组、设置、最近文件与文件夹历史的时间戳快照，应用打开和关闭时自动更新，也可手动；超过保留数会删旧的，设置 → 备份 里可任选一份恢复。不含草稿与版本历史 |
@@ -80,7 +81,9 @@ npm run upload    # 创建/补传 GitHub release v<version>，上传 setup.exe
 # 或：npm run publish
 ```
 
-`upload` 需要 `gh` CLI，并用对仓库有写权限的账号登录；仓库地址取自 `git remote get-url origin`（可用 `--repo owner/name` 覆盖），还接受 `--tag`、`--notes`、`--draft`、`--pre` 和 `--dry-run`。本应用还没有更新器，所以 release 里只有安装包，没有签名和 `latest.json`。
+`upload` 需要 `gh` CLI，并用对仓库有写权限的账号登录；仓库地址取自 `git remote get-url origin`（可用 `--repo owner/name` 覆盖），还接受 `--tag`、`--notes`、`--draft`、`--pre` 和 `--dry-run`。
+
+构建用 `.tauri/priv.key` 签名（该文件不入库；用 `npx tauri signer generate -w .tauri/priv.key` 生成并务必备份——丢了它，已安装的版本就无法再接受更新）。`release` 会在安装包旁写出 `latest.json`，`upload` 把两者一起上传；应用从 `https://github.com/wrolp/wrolp-editor/releases/latest/download/latest.json` 读取。构建前先把三个版本号一起改好。
 
 ### 脚本
 
@@ -89,8 +92,8 @@ npm run upload    # 创建/补传 GitHub release v<version>，上传 setup.exe
 | `npm run dev` | 在 1520 端口起 Vite dev server（供 `tauri dev` 使用） |
 | `npm run build` | 先做类型检查，再产出 `dist/` 生产包 |
 | `npm run tauri` | Tauri CLI 透传（`dev`、`build`、`icon` 等） |
-| `npm run release` | 校验版本号后打 NSIS 安装包 |
-| `npm run upload` | 把安装包上传到 GitHub release |
+| `npm run release` | 校验版本号，签名构建并写出 `latest.json` |
+| `npm run upload` | 把安装包与 `latest.json` 上传到 GitHub release |
 | `npm run publish` | 依次执行 `release` 与 `upload` |
 
 ## 数据存放位置
