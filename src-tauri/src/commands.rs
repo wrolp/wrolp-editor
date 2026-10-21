@@ -7,6 +7,7 @@ use crate::group::{GroupStore, TabTransfer};
 use crate::unlock::UnlockStore;
 use crate::window::{MonitorRect, Placement, WindowState};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -186,6 +187,11 @@ pub struct Settings {
   /// runs the text the width of the pane. A line length is worth capping because a
   /// paragraph that spans a wide window is hard to track back to its next line.
   pub preview_width: String,
+  /// The layout each previewable file was last left in, keyed by absolute path:
+  /// text | split | preview. A file with no entry follows `preview_layout`, so only explicit
+  /// choices are stored. A rename rewrites the key; an entry for a file since deleted is
+  /// harmless and is simply never read.
+  pub preview_modes: HashMap<String, String>,
   /// Colour scheme: system | dark | light. `system` follows the OS preference at runtime,
   /// so a machine that switches at dusk does not need the app restarted.
   pub theme: String,
@@ -254,6 +260,7 @@ impl Default for Settings {
       scroll_beyond_last_line: true,
       preview_layout: "text".into(),
       preview_width: "narrow".into(),
+      preview_modes: HashMap::new(),
       theme: "system".into(),
       encrypt_idle_minutes: ENCRYPT_IDLE_DEFAULT_MINUTES,
       versioning_enabled: false,
@@ -289,6 +296,9 @@ const DRAFT_RESTORE: [&str; 2] = ["auto", "ask"];
 /// Preview layouts a file can open in. `auto` is the per-kind behaviour the frontend used
 /// to hardcode: markdown and SVG side by side, pictures as the picture.
 const PREVIEW_LAYOUT: [&str; 4] = ["auto", "text", "split", "preview"];
+/// Per-file layouts. `auto` is deliberately absent: an entry exists only because somebody
+/// picked a layout for that file, and the fallback stays in `preview_layout`.
+const PER_FILE_PREVIEW: [&str; 3] = ["text", "split", "preview"];
 /// Widths the markdown preview body can take, as capped reading measures. The numbers
 /// themselves live in the stylesheet; this only names the three choices.
 const PREVIEW_WIDTH: [&str; 3] = ["narrow", "wide", "full"];
@@ -413,6 +423,17 @@ impl Settings {
         self.preview_width.clone()
       } else {
         "narrow".into()
+      },
+      // An entry is an explicit choice, so anything this build cannot show is dropped rather
+      // than carried around forever — the file then falls back to `preview_layout`.
+      preview_modes: {
+        let mut out = HashMap::new();
+        for (path, mode) in self.preview_modes {
+          if !path.is_empty() && PER_FILE_PREVIEW.contains(&mode.as_str()) {
+            out.insert(path, mode);
+          }
+        }
+        out
       },
       // Same reasoning as the layout above: an unknown theme would leave the frontend with
       // no palette to apply, and an app with no palette is worse than one that ignores it.
@@ -1676,6 +1697,27 @@ mod tests {
     assert_eq!(s.sidebar_view, "explorer");
     assert_eq!(s.font_size, 14.0);
     assert_eq!(s.sidebar_width, 240.0);
+  }
+
+  /// Every layout toggle writes this map into settings.json, which makes it state a hand edit
+  /// can reach: a mode this build does not know, or an entry with no path, is dropped while
+  /// real choices survive.
+  #[test]
+  fn per_file_preview_modes_keep_only_real_choices() {
+    let filled = Settings {
+      preview_modes: HashMap::from([
+        (r"C:\a.md".into(), "split".into()),
+        (r"C:\b.md".into(), "sideways".into()),
+        ("".into(), "preview".into()),
+      ]),
+      ..Default::default()
+    }
+    .filled();
+    assert_eq!(filled.preview_modes.len(), 1);
+    assert_eq!(
+      filled.preview_modes.get(r"C:\a.md").map(String::as_str),
+      Some("split")
+    );
   }
 
   /// Backups go beside the state folder unless another one was chosen, and the count is bounded

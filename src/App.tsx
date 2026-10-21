@@ -141,6 +141,8 @@ const DEFAULT_SETTINGS: Settings = {
   // A capped line length is the readable default; the other two are for readers who want
   // the text to use the room they gave it.
   previewWidth: "narrow",
+  // Empty until a file is put in a layout by hand: every file then follows the global choice.
+  previewModes: {},
   // An encrypted file is left unlocked for as long as it is being used, then locked: long
   // enough to read and edit without being asked again, short enough that walking away from
   // the machine does not leave the key sitting in memory indefinitely.
@@ -156,6 +158,20 @@ const DEFAULT_SETTINGS: Settings = {
   // few weeks of daily ones.
   backupDir: "",
   backupRetain: 20,
+}
+
+/**
+ * The persisted per-file layouts, reduced to the ones this build can show.
+ *
+ * The map arrives from settings.json, which an older build or a hand edit may have filled with
+ * anything; a value with no meaning would leave a file in a layout that does not exist.
+ */
+function storedPreviewModes(map: Record<string, string> | undefined): Record<string, PreviewMode> {
+  const out: Record<string, PreviewMode> = {};
+  for (const [path, mode] of Object.entries(map ?? {})) {
+    if (mode === "text" || mode === "split" || mode === "preview") out[path] = mode;
+  }
+  return out;
 }
 
 /**
@@ -278,9 +294,12 @@ export default function App() {
   const [cursor, setCursor] = useState({ line: 1, column: 1 });
   /**
    * Preview layout per file. A missing key means "auto": markdown opens side by side,
-   * anything else is text only. Storing the choice is what makes it stick per file.
+   * anything else is text only. Kept in `settings.previewModes` across restarts, and mirrored
+   * here so a toggle can compose with the previous one without waiting for a render.
    */
   const [previewPref, setPreviewPref] = useState<Record<string, PreviewMode>>({});
+  const previewPrefRef = useRef(previewPref);
+  previewPrefRef.current = previewPref;
   const [scrollRatio, setScrollRatio] = useState(0);
   const [stats, setStats] = useState<EditStats>({
     selectionChars: 0,
@@ -423,6 +442,7 @@ export default function App() {
       }
       setLang(loadedSettings.language);
       setSettings(loadedSettings);
+      setPreviewPref(storedPreviewModes(loadedSettings.previewModes));
       setSidebarVisible(loadedSettings.sidebarVisible);
       setSidebarView(
         loadedSettings.sidebarView === "history"
@@ -808,6 +828,25 @@ export default function App() {
   saveSettingsRef.current = saveSettings;
 
   /**
+   * Replace the per-file layout map and write it back.
+   *
+   * The ref is what makes two quick clicks compose: `saveSettings` would otherwise build the
+   * next settings object from the render's copy of the map, and the second write would silently
+   * drop the first choice.
+   */
+  const commitPreviewModes = useCallback((next: Record<string, PreviewMode>) => {
+    previewPrefRef.current = next;
+    setPreviewPref(next);
+    // An untitled buffer's path means nothing after this session — the next one starts at
+    // `untitled://1` again — so it is kept on screen but never written down.
+    const persistable: Record<string, PreviewMode> = {};
+    for (const [path, mode] of Object.entries(next)) {
+      if (!isUntitled(path)) persistable[path] = mode;
+    }
+    saveSettingsRef.current({ previewModes: persistable });
+  }, []);
+
+  /**
    * Move the Explorer to another folder. The folder itself is global view state — it does not
    * open or switch a group — but where it has been is remembered per group.
    */
@@ -850,15 +889,13 @@ export default function App() {
       if (out.path === out.oldPath) return true;
       tabs.rekeyTabs(out.oldPath, out.path);
       groupsRef.current.rekeyPaths(out.oldPath, out.path);
-      // Both of these are keyed by path: the layout choice for this session, and the file
-      // whose per-file panel is open.
-      setPreviewPref((prev) => {
-        const next: Record<string, PreviewMode> = {};
-        for (const [key, mode] of Object.entries(prev)) {
-          next[rekeyPath(key, out.oldPath, out.path)] = mode;
-        }
-        return next;
-      });
+      // Both of these are keyed by path: the stored layout choice, and the file whose
+      // per-file panel is open.
+      const rekeyedModes: Record<string, PreviewMode> = {};
+      for (const [key, mode] of Object.entries(previewPrefRef.current)) {
+        rekeyedModes[rekeyPath(key, out.oldPath, out.path)] = mode;
+      }
+      commitPreviewModes(rekeyedModes);
       setFileSettingsPath((prev) => (prev === null ? prev : rekeyPath(prev, out.oldPath, out.path)));
       if (rootRef.current && isUnder(rootRef.current, out.oldPath)) {
         setSidebarRoot(rekeyPath(rootRef.current, out.oldPath, out.path));
@@ -867,7 +904,7 @@ export default function App() {
       toast(t("rename.done", { name: basename(out.path) }));
       return true;
     },
-    [draft, refreshHistory, setSidebarRoot, tabs, toast]
+    [commitPreviewModes, draft, refreshHistory, setSidebarRoot, tabs, toast]
   );
 
   /**
@@ -1559,7 +1596,7 @@ export default function App() {
   /**
    * The layout a previewable file opens in. Global rather than per file: it is the answer to
    * "what does opening one of these look like", asked once, and a per-file choice on top of
-   * it is what `previewPref` already remembers for the session.
+   * it is what `previewPref` remembers — written back to settings, so it survives a restart.
    */
   const previewLayout = settings.previewLayout;
 
@@ -1624,8 +1661,8 @@ const defaultModeFor = useCallback(
   const setPreviewMode = useCallback((mode: PreviewMode) => {
     const path = tabs.activeTab?.path;
     if (!path) return;
-    setPreviewPref((prev) => ({ ...prev, [path]: mode }));
-  }, [tabs.activeTab?.path]);
+    commitPreviewModes({ ...previewPrefRef.current, [path]: mode });
+  }, [tabs.activeTab?.path, commitPreviewModes]);
 
   /**
    * Context-menu shortcut: walks the layouts this file actually has instead of a fixed
@@ -1634,14 +1671,13 @@ const defaultModeFor = useCallback(
    */
   const togglePreview = useCallback(
     (path: string) => {
-      setPreviewPref((prev) => {
-        const current = prev[path] ?? defaultModeFor(path);
-        if (current === "text") return { ...prev, [path]: defaultModeFor(path) };
-        if (current === "preview") return { ...prev, [path]: "split" };
-        return { ...prev, [path]: "text" };
-      });
+      const prev = previewPrefRef.current;
+      const current = prev[path] ?? defaultModeFor(path);
+      if (current === "text") commitPreviewModes({ ...prev, [path]: defaultModeFor(path) });
+      else if (current === "preview") commitPreviewModes({ ...prev, [path]: "split" });
+      else commitPreviewModes({ ...prev, [path]: "text" });
     },
-    [defaultModeFor]
+    [commitPreviewModes, defaultModeFor]
   );
 
   /** The preview is the driver when the user scrolls it, so mirror it into the editor. */

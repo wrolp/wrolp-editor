@@ -155,6 +155,12 @@ export interface Settings {
    */
   previewWidth: string;
   /**
+   * Layout each previewable file was last left in, keyed by absolute path: `text` | `split` |
+   * `preview`. A missing key means the file follows `previewLayout`; the backend drops values
+   * it does not recognise, so this map only ever carries explicit choices.
+   */
+  previewModes: Record<string, string>;
+  /**
    * Minutes an encrypted file stays unlocked without being touched. 0 means never lock
    * automatically, and is a choice rather than a missing value: the backend keeps it as
    * written, so the frontend has to carry it back or a save would reset it to the default.
