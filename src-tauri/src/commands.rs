@@ -23,7 +23,7 @@ const WINDOW_FILE: &str = "window.json";
 /// Raster images: bytes with no text in them, so decoding them as text fails and the file
 /// could not be opened at all. SVG is deliberately absent — it is text, and is edited as
 /// source.
-const BINARY_EXT: [&str; 11] = [
+pub(crate) const BINARY_EXT: [&str; 11] = [
   "png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "ico", "tif", "tiff", "heic",
 ];
 
@@ -195,6 +195,11 @@ pub struct Settings {
   /// Which side the markdown outline takes in preview-only mode: left | right. Right by
   /// default, so the column does not sit against the Explorer.
   pub toc_side: String,
+  /// Seconds each picture stays on screen in the gallery slideshow. A short list of choices in
+  /// the frontend, clamped here so a hand-edited file cannot make the timer absurd.
+  pub gallery_interval: u32,
+  /// Start the gallery slideshow over after the last picture instead of stopping on it.
+  pub gallery_loop: bool,
   /// Colour scheme: system | dark | light. `system` follows the OS preference at runtime,
   /// so a machine that switches at dusk does not need the app restarted.
   pub theme: String,
@@ -265,6 +270,8 @@ impl Default for Settings {
       preview_width: "narrow".into(),
       preview_modes: HashMap::new(),
       toc_side: "right".into(),
+      gallery_interval: GALLERY_INTERVAL_DEFAULT_SECONDS,
+      gallery_loop: true,
       theme: "system".into(),
       encrypt_idle_minutes: ENCRYPT_IDLE_DEFAULT_MINUTES,
       versioning_enabled: false,
@@ -309,6 +316,9 @@ const PREVIEW_WIDTH: [&str; 3] = ["narrow", "wide", "full"];
 /// Sides the markdown outline can take. Right by default: the Explorer is on the left, and a
 /// contents column against it would read as a second sidebar.
 const TOC_SIDES: [&str; 2] = ["left", "right"];
+/// A slideshow interval: long enough to look at the picture, short enough to feel like motion.
+const GALLERY_INTERVAL_DEFAULT_SECONDS: u32 = 5;
+const GALLERY_INTERVAL_MAX_SECONDS: u32 = 60;
 /// A key left in memory for a day is not an idle lock any more, so the setting stops there.
 const ENCRYPT_IDLE_DEFAULT_MINUTES: u32 = 10;
 const ENCRYPT_IDLE_MAX_MINUTES: u32 = 1440;
@@ -431,6 +441,8 @@ impl Settings {
       } else {
         "narrow".into()
       },
+      gallery_interval: self.gallery_interval.clamp(1, GALLERY_INTERVAL_MAX_SECONDS),
+      gallery_loop: self.gallery_loop,
       // An entry is an explicit choice, so anything this build cannot show is dropped rather
       // than carried around forever — the file then falls back to `preview_layout`.
       preview_modes: {

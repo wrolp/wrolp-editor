@@ -53,6 +53,22 @@ export interface FsEntry {
   isDir: boolean;
 }
 
+/** One picture in a gallery listing. Metadata only; the image itself is read by the webview. */
+export interface ImageEntry {
+  name: string;
+  path: string;
+  bytes: number;
+}
+
+/** Pictures in a folder, in natural order, plus what the walk did. */
+export interface ImageList {
+  items: ImageEntry[];
+  /** The folder held more pictures than one listing returns. */
+  truncated: boolean;
+  /** Directory entries examined to build the list. */
+  scanned: number;
+}
+
 /** What pasting the system clipboard produced: the copies made, and sources it could not take. */
 export interface ClipboardPaste {
   copied: FsEntry[];
@@ -171,6 +187,10 @@ export interface Settings {
    * default, so the column does not sit against the Explorer.
    */
   tocSide: string;
+  /** Seconds a gallery slideshow keeps one picture on screen, 1 to 60. */
+  galleryInterval: number;
+  /** After the last picture, the slideshow starts over instead of stopping. */
+  galleryLoop: boolean;
   /**
    * Minutes an encrypted file stays unlocked without being touched. 0 means never lock
    * automatically, and is a choice rather than a missing value: the backend keeps it as
@@ -525,6 +545,12 @@ export const api = {
   removeEncryption: (path: string, password: string) =>
     invoke<SavedFile>("remove_encryption", { path, password }),
   listDir: (path: string) => invoke<FsEntry[]>("list_dir", { path }),
+  /**
+   * Pictures in a folder, files only and in natural order (`IMG_2` before `IMG_10`).
+   * A recursive listing walks up to four levels and skips `node_modules`/`target`/`dist`/`.git`.
+   */
+  listImages: (dir: string, recursive: boolean) =>
+    invoke<ImageList>("list_images", { dir, recursive }),
   fileSettingsView: (path: string) => invoke<FileSettingsView>("file_settings_view", { path }),
   saveFileSettings: (path: string, settings: FileSettings) =>
     invoke<FileSettings>("save_file_settings", { path, settings }),

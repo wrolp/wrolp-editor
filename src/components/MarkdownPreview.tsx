@@ -906,7 +906,7 @@ function monacoLanguage(token: string): string | null {
 }
 
 /** Extensions worth spending an asset grant on. Anything else is left alone. */
-const IMAGE_EXT = /\.(?:png|jpe?g|gif|webp|avif|bmp|ico|svg)$/i;
+const IMAGE_EXT = /\.(?:png|jpe?g|gif|webp|avif|bmp|ico|svg|tiff?|heic)$/i;
 
 let mermaidModule: Promise<typeof import("mermaid")> | null = null;
 

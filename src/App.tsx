@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import ImagePreview from "./components/ImagePreview";
+import ImageGallery from "./components/ImageGallery";
 import HtmlPreview from "./components/HtmlPreview";
 import Editor from "./components/Editor";
 import DiffView from "./components/DiffView";
@@ -146,6 +147,10 @@ const DEFAULT_SETTINGS: Settings = {
   // Right by default: the Explorer is on the left, and a contents column beside it would read
   // as a second sidebar.
   tocSide: "right",
+  // A slideshow's pace and whether it starts over: five seconds is long enough to look and
+  // short enough to feel like a show, and looping is what a slideshow is expected to do.
+  galleryInterval: 5,
+  galleryLoop: true,
   // An encrypted file is left unlocked for as long as it is being used, then locked: long
   // enough to read and edit without being asked again, short enough that walking away from
   // the machine does not leave the key sitting in memory indefinitely.
@@ -1427,6 +1432,7 @@ export default function App() {
   }, [openFiles, openUntitled, requestClose, handSave, tabs.activeId, toggleSidebar]);
 
   const showSettings = tabs.activeTab?.isSettings === true;
+  const showGallery = tabs.activeTab?.gallery !== undefined;
   const sidebarShown = sidebarVisible && !showSettings;
   const editorTab = tabs.editorTab;
   /** The line ending the tab on screen would be saved with; "" for one that has none to speak of. */
@@ -1840,6 +1846,7 @@ const defaultModeFor = useCallback(
             setSidebarVisible(true);
             setSidebarRoot(dir);
           }}
+          onBrowseImages={(dir) => void tabs.openGallery(dir)}
           onCreate={createEntry}
           onPaste={pasteEntry}
           onPasteFiles={pasteFiles}
@@ -1868,7 +1875,10 @@ const defaultModeFor = useCallback(
             <div
               className="editor-host"
               style={{
-                display: showSettings || !showEditor || showDiff ? "none" : "block",
+                display:
+                  showSettings || showGallery || !showEditor || showDiff
+                    ? "none"
+                    : "block",
               }}
             >
               <Editor
@@ -1937,11 +1947,15 @@ const defaultModeFor = useCallback(
             </div>
           )}
 
-          {showPreview && !showSettings && editorTab && previewKind === "image" && (
-            <ImagePreview path={editorTab.path} text={isSvg(editorTab.path) ? docText : null} />
+          {showPreview && !showSettings && !showGallery && editorTab && previewKind === "image" && (
+            <ImagePreview
+              path={editorTab.path}
+              text={isSvg(editorTab.path) ? docText : null}
+              onBrowseFolder={(path) => void tabs.openGallery(dirname(path), path)}
+            />
           )}
 
-          {showPictureAsText && editorTab && (
+          {showPictureAsText && !showGallery && editorTab && (
             <div className="pane-hint">
               <span>{t("preview.hintImage")}</span>
               <button
@@ -1953,7 +1967,7 @@ const defaultModeFor = useCallback(
             </div>
           )}
 
-          {showPreview && !showSettings && editorTab && previewKind === "markdown" && (
+          {showPreview && !showSettings && !showGallery && editorTab && previewKind === "markdown" && (
             <MarkdownPreview
               text={docText}
               path={editorTab.path}
@@ -1969,7 +1983,7 @@ const defaultModeFor = useCallback(
             />
           )}
 
-          {showPreview && !showSettings && editorTab && previewKind === "html" && (
+          {showPreview && !showSettings && !showGallery && editorTab && previewKind === "html" && (
             <HtmlPreview
               text={docText}
               path={editorTab.path}
@@ -1979,7 +1993,20 @@ const defaultModeFor = useCallback(
             />
           )}
 
-          {!editorTab && !showDiff && <div className="editor-empty">{t("app.empty")}</div>}
+          {!editorTab && !showDiff && !showGallery && (
+            <div className="editor-empty">{t("app.empty")}</div>
+          )}
+
+          {showGallery && tabs.activeTab?.gallery && (
+            <ImageGallery
+              key={`${tabs.activeTab.id}:${tabs.activeTab.gallery.startPath ?? ""}`}
+              dir={tabs.activeTab.gallery.dir}
+              startPath={tabs.activeTab.gallery.startPath}
+              interval={settings.galleryInterval}
+              loop={settings.galleryLoop}
+              onSaveSettings={saveSettings}
+            />
+          )}
 
           {showSettings && (
             <SettingsPanel

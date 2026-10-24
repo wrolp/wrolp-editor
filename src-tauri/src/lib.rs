@@ -6,6 +6,7 @@ mod draft;
 mod encoding;
 mod entry;
 mod file_settings;
+mod gallery;
 mod group;
 mod rename;
 mod unlock;
@@ -49,6 +50,7 @@ pub fn run() {
       commands::save_draft,
       commands::clear_draft,
       commands::list_dir,
+      gallery::list_images,
       commands::allow_asset_dir,
       commands::render_diagram,
       commands::get_file_settings,

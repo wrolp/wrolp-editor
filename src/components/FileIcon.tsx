@@ -1,5 +1,5 @@
 import { fileIcon } from "../lib/path";
-import { IconCompare, IconSettings } from "./icons";
+import { IconCompare, IconImage, IconSettings } from "./icons";
 import type { Tab } from "../lib/types";
 
 /**
@@ -29,6 +29,13 @@ export function TabIcon({ tab }: { tab: Tab }) {
     return (
       <span className="file-glyph icon-settings">
         <IconSettings size={12} />
+      </span>
+    );
+  }
+  if (tab.gallery) {
+    return (
+      <span className="file-glyph icon-image">
+        <IconImage size={12} />
       </span>
     );
   }

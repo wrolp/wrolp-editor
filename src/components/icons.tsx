@@ -219,6 +219,17 @@ export function IconModePreview({ size = 16 }: IconProps) {
   );
 }
 
+/** A picture: a frame with a sun and a horizon, the shape a gallery is recognised by. */
+export function IconImage({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <rect x="3" y="4" width="18" height="16" rx="2" />
+      <circle cx="8.5" cy="9.5" r="1.4" />
+      <path d="M21 15.5 15.5 10 5 20" />
+    </svg>
+  );
+}
+
 /** A new file: the document, with a plus where its contents would go. */
 export function IconFilePlus({ size = 14 }: IconProps) {
   return (

@@ -34,6 +34,16 @@ export interface Tab {
    */
   compare?: ComparePair;
   /**
+   * A whole-folder picture view rather than a file. `path` is `gallery://<folder>` and the
+   * tab has no buffer, no draft and no save: everything that looks for a file has to skip it,
+   * which is what `isFileTab` does.
+   */
+  gallery?: {
+    dir: string;
+    /** The picture the gallery was opened from, so "browse this folder" lands on it. */
+    startPath?: string;
+  };
+  /**
    * Encoding the file on disk turned out to be, and whether it carried a BOM. A save
    * must write the same encoding back or a legacy file comes out mangled.
    */
@@ -120,12 +130,12 @@ export interface ComparePair {
 export type SidebarView = "explorer" | "history" | "versions";
 
 /**
- * A tab backed by a real file the user can edit. Settings and comparison tabs are not:
- * they have no editable model, so everything that saves, drafts or counts edits must
+ * A tab backed by a real file the user can edit. Settings, comparison and gallery tabs are
+ * not: they have no editable model, so everything that saves, drafts or counts edits must
  * skip them. Getting this wrong is silent — a comparison would try to save itself.
  */
 export function isFileTab(tab: Tab): boolean {
-  return !tab.isSettings && !tab.compare;
+  return !tab.isSettings && !tab.compare && !tab.gallery;
 }
 
 /**

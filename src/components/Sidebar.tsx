@@ -10,6 +10,7 @@ import {
   IconFolder,
   IconFolderPlus,
   IconGoUp,
+  IconImage,
   IconOpenFolder,
   IconPaste,
   IconPencil,
@@ -575,6 +576,8 @@ interface Props extends Omit<
   onReveal: (path: string) => void;
   /** Points the Explorer at a folder, the same action as the tab menu's. */
   onSetRoot: (dir: string) => void;
+  /** Opens the folder's pictures in a gallery tab. */
+  onBrowseImages: (dir: string) => void;
   /** Open one version beside what the editor holds now. */
   onCompareVersion: (path: string, oid: string) => void;
   /** Put a version's text into the editor, marked unsaved. */
@@ -624,6 +627,7 @@ export default function Sidebar(props: Props) {
     onRemoveFolder,
     onReveal,
     onSetRoot,
+    onBrowseImages,
     onCompareVersion,
     onRestoreVersion,
   } = props;
@@ -756,6 +760,11 @@ export default function Sidebar(props: Props) {
     const token = ++refreshSeq.current;
     setRefreshed((prev) => ({ ...prev, [pathKey(dir)]: token }));
     setRefresh({ path: dir, token });
+    // A gallery tab is not part of the tree, so it cannot be bumped directly. The folder name
+    // is enough for it to decide whether the change was inside what it is showing.
+    window.dispatchEvent(
+      new CustomEvent<string>("wrolp:folder-changed", { detail: dir })
+    );
   };
 
   /**
@@ -1212,6 +1221,18 @@ export default function Sidebar(props: Props) {
                 <div
                   className="ctx-item"
                   onClick={() => {
+                    onBrowseImages(rootDir);
+                    setMenu(null);
+                  }}
+                >
+                  <span className="ctx-icon">
+                    <IconImage size={14} />
+                  </span>
+                  {t("side.menuBrowseImages")}
+                </div>
+                <div
+                  className="ctx-item"
+                  onClick={() => {
                     bumpFolder(rootDir);
                     setMenu(null);
                   }}
@@ -1342,6 +1363,18 @@ export default function Sidebar(props: Props) {
                   file, which is why these are offered on a folder only. */}
               {menu.isDir && (
                 <>
+                  <div
+                    className="ctx-item"
+                    onClick={() => {
+                      onBrowseImages(menu.path);
+                      setMenu(null);
+                    }}
+                  >
+                    <span className="ctx-icon">
+                      <IconImage size={14} />
+                    </span>
+                    {t("side.menuBrowseImages")}
+                  </div>
                   {/* Re-reads this folder and everything open inside it, and leaves every
                       other folder exactly as it is: the tree keeps its shape, which is what
                       the toolbar's own refresh cannot do. */}

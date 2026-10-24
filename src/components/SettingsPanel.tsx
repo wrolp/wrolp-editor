@@ -72,6 +72,9 @@ const PREVIEW_LAYOUTS = ["text", "split", "preview", "auto"] as const;
 const PREVIEW_WIDTHS = ["narrow", "wide", "full"] as const;
 /** Right first: it is the default, and it keeps the outline off the Explorer's edge. */
 const TOC_SIDES = ["right", "left"] as const;
+/** Slideshow paces, in seconds. A select rather than a number field for the same reason as
+ * the idle limits: these are the paces worth offering, and a typed 0 has no meaning. */
+const GALLERY_INTERVALS = [2, 3, 5, 8, 10, 15, 30] as const;
 const THEMES = ["system", "dark", "light"] as const;
 /** `auto` first: it is the default, and `ask` is the opt-in for anyone who wants to see each draft before it lands. */
 const DRAFT_MODES = ["auto", "ask"] as const;
@@ -614,6 +617,30 @@ export default function SettingsPanel({
                 </select>
               </SettingField>
               <p className="muted">{t("settings.tocSideDesc")}</p>
+              <SettingField label={t("settings.galleryInterval")}>
+                <select
+                  className="select"
+                  value={settings.galleryInterval}
+                  onChange={(e) =>
+                    onSaveSettings({
+                      galleryInterval: Number(e.target.value),
+                    })
+                  }
+                >
+                  {GALLERY_INTERVALS.map((sec) => (
+                    <option key={sec} value={sec}>
+                      {t("settings.gallerySeconds", { n: sec })}
+                    </option>
+                  ))}
+                </select>
+              </SettingField>
+              <p className="muted">{t("settings.galleryIntervalDesc")}</p>
+              <SettingCheck
+                label={t("settings.galleryLoop")}
+                checked={settings.galleryLoop}
+                onChange={(v) => onSaveSettings({ galleryLoop: v })}
+                description={t("settings.galleryLoopDesc")}
+              />
               <SettingCheck
                 label={t("settings.wordWrap")}
                 checked={settings.wordWrap}

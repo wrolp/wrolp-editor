@@ -12,6 +12,11 @@ interface Props {
    * `.svg`. Null for a raster image, which has no text to build a URL from.
    */
   text?: string | null;
+  /**
+   * Open the picture's folder as a gallery, landing on this picture. The parent passes the
+   * whole path so the gallery can find it in its own naturally-ordered list.
+   */
+  onBrowseFolder?: (path: string) => void;
 }
 
 const STEPS = [25, 50, 75, 100, 150, 200, 400];
@@ -57,7 +62,7 @@ function xmlIsWellFormed(svg: string): boolean {
  * SVG goes through `<img>` like everything else, which is also what keeps it safe: scripts
  * inside an SVG do not run when it is loaded as an image, only when it is a document.
  */
-export default function ImagePreview({ path, text }: Props) {
+export default function ImagePreview({ path, text, onBrowseFolder }: Props) {
   const [src, setSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   /** null means "fit the pane"; a number is a percentage of the image's own size. */
@@ -149,6 +154,15 @@ export default function ImagePreview({ path, text }: Props) {
           <span className="img-dims">
             {dims.width} × {dims.height}
           </span>
+        )}
+        {onBrowseFolder && (
+          <button
+            className="img-tool"
+            title={t("img.browseFolder")}
+            onClick={() => onBrowseFolder(path)}
+          >
+            {t("img.browseFolder")}
+          </button>
         )}
         {viaAsset && <span className="img-note">{t("img.viaAsset")}</span>}
       </div>

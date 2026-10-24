@@ -1981,6 +1981,369 @@ body.resizing .editor-host {
   background: transparent;
 }
 
+/* ---------- Picture gallery ----------
+   A pseudo-tab that takes the pane but leaves the Explorer where it is: browsing a folder is
+   something done while looking at its tree. */
+.image-gallery {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg);
+  outline: none;
+}
+.gal-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--titlebar);
+  font-size: 11px;
+  color: var(--muted);
+}
+.gal-modes {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 6px;
+  background: var(--surface);
+}
+.gal-mode {
+  padding: 4px 10px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+.gal-mode:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+.gal-mode.active {
+  background: var(--surface-active);
+  color: var(--text-strong);
+}
+.gal-nav,
+.gal-slideshow-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.gal-tool {
+  min-width: 24px;
+  height: 22px;
+  padding: 0 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.gal-tool:hover:not(:disabled) {
+  background: var(--surface-active);
+}
+.gal-tool:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.gal-tool.active {
+  background: var(--surface-active);
+}
+.gal-position {
+  min-width: 52px;
+  text-align: center;
+  color: var(--text-dim);
+}
+.gal-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.gal-check input {
+  margin: 0;
+}
+.gal-select {
+  height: 22px;
+  padding: 0 4px;
+  font-size: 11px;
+}
+.gal-meta {
+  margin-left: auto;
+  color: var(--muted);
+}
+.gal-warn {
+  color: var(--warn);
+}
+.gal-refresh {
+  color: var(--muted);
+}
+
+/* Stacked view: pictures one after another, at most as wide as they are, never stretched. */
+.gal-stack {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 10px 16px 40px;
+}
+.gal-item {
+  margin: 0 auto 14px;
+  max-width: min(100%, 1200px);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface);
+  cursor: pointer;
+}
+.gal-item.active {
+  border-color: var(--accent-soft);
+}
+.gal-item figcaption {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--titlebar);
+  color: var(--muted);
+  font-size: 11px;
+}
+.gal-item-index {
+  min-width: 2.2em;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+.gal-item-name {
+  overflow: hidden;
+  color: var(--text-dim);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gal-item-size {
+  margin-left: auto;
+  white-space: nowrap;
+}
+/* The host is what stays behind when the image is removed: its measured height keeps the
+   list from closing the gap and pulling the scroll position upwards. */
+.gal-lazy {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 30vh;
+  background: var(--sunken-2);
+}
+/* While a mounted picture decodes, a soft sweep says the space is working rather than
+   empty. An unmounted one keeps its measured height with a flat block and no animation:
+   a list of offscreen shimmers costs paint for nothing. */
+.gal-placeholder,
+.gal-loading {
+  position: absolute;
+  inset: 0;
+}
+.gal-loading {
+  background-image: linear-gradient(
+    100deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.07) 50%,
+    transparent 70%
+  );
+  background-size: 220% 100%;
+  animation: gal-shimmer 1.2s linear infinite;
+}
+@keyframes gal-shimmer {
+  from {
+    background-position: 160% 0;
+  }
+  to {
+    background-position: -60% 0;
+  }
+}
+.gal-lazy img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  opacity: 0;
+  transition: opacity 0.18s ease-out;
+}
+.gal-lazy img.loaded {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .gal-loading {
+    animation: none;
+  }
+  .gal-lazy img {
+    transition: none;
+  }
+}
+.gal-broken {
+  color: var(--danger);
+  font-size: 20px;
+  font-weight: 600;
+}
+
+/* Grid: square cells, cover-cropped, so a row is a row whatever the pictures' shapes. */
+.gal-grid {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+  padding: 10px;
+}
+.gal-grid.large {
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+}
+.gal-cell {
+  position: relative;
+  aspect-ratio: 1;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--sunken-2);
+  cursor: pointer;
+}
+.gal-cell.active {
+  border-color: var(--accent-soft);
+}
+.gal-cell .gal-lazy,
+.gal-thumb .gal-lazy {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+.gal-cell img,
+.gal-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.gal-cell-unsupported,
+.gal-thumb-unsupported {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  color: var(--text-faint);
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+/* Filmstrip under the single view: a locator, not a second gallery. */
+.gal-single {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.gal-single-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+.gal-single-stage > .img-preview {
+  flex: 1 1 auto;
+}
+.gal-strip {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 6px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--titlebar);
+}
+.gal-thumb {
+  flex: 0 0 auto;
+  width: 64px;
+  height: 64px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: var(--sunken-2);
+  cursor: pointer;
+}
+.gal-thumb.active {
+  border-color: var(--accent-soft);
+}
+
+.gal-status,
+.gal-empty {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.8;
+  text-align: center;
+}
+/* A refresh that failed keeps the last list on screen; the line says why it is stale. */
+.gal-banner {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--danger-bg);
+  color: var(--warn-text);
+  font-size: 12px;
+}
+.gal-banner span {
+  flex: 1 1 auto;
+}
+.gal-undrawable {
+  flex: 1 1 auto;
+  min-height: 30vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px;
+  background: var(--sunken-2);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.8;
+  text-align: center;
+}
+/* Neighbours of the picture on screen, decoded ahead of time. Kept out of layout so a
+   five-picture warm-up cannot change what is on screen. */
+.gal-preload {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .settings-panel {
   position: absolute;
   inset: 0;

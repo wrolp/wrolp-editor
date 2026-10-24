@@ -23,6 +23,7 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | Auto-save | Off by default. On, the file **on screen** is written once it has gone N seconds without an edit — typing restarts that file's countdown, so the write lands on a pause rather than mid-sentence. A tab you are not looking at neither starts a countdown nor loses one already running, and its unsaved text stays held by its draft. Untitled buffers, locked files, pictures, and anything the disk check already has a question about are left alone. Its writes record no version unless Settings → Versions says otherwise |
 | Restore | On open, disk content is compared with the draft; a differing draft is loaded back and the tab stays marked unsaved. Settings can switch this to a per-file Restore / Discard dialog |
 | Sidebar | Explorer file tree (lazy folders, refresh button), a History list of recently opened files, and a Versions view. Drag the divider to resize (180–640 px, double-click resets); the width is persisted. The tree's text size is a setting, 11–20 px |
+| Picture gallery | A whole folder in one tab, in natural order (`IMG_2` before `IMG_10`): stacked, one at a time, slideshow, or a grid. Subfolders are opt-in and walked four levels deep; one listing stops at 2,000 pictures and says so. Pictures are drawn through the asset protocol, so the editor's text-size limit does not apply. HEIC and TIFF are listed and marked as formats this renderer cannot draw |
 | Version history | Off by default. On, every save by hand records what the file said, and any two of them — a version against a version, or either against what is open — can be compared side by side, folded down to the changes, or put back into the editor. One file's saves can be excluded, or forced in, from its tab menu. See [Version history](#version-history) |
 | Single instance | Launching a second time hands the path to the running window, adds a tab and focuses it |
 | Settings | Context-menu switch, editor font size, minimap, UI language; persisted and applied live. The context-menu page also shows the command the entry currently launches, and warns when it points at a different build or when this is a debug build |
@@ -46,6 +47,19 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | `Ctrl+B` | Toggle the sidebar |
 
 Scrolling the mouse wheel over the tab strip scrolls it sideways.
+
+## Picture gallery
+
+Right-click a folder in the Explorer — or the blank space under the tree — and choose **Browse pictures**. The folder opens in its own tab with four ways to look at the same naturally ordered list:
+
+- **Stacked** (the default): every picture one after another, at most its own width and never stretched, with its name, size and dimensions above it.
+- **One by one**: one picture with zoom, fit and 100%, plus a filmstrip of the folder.
+- **Slideshow**: the same pane advancing on a timer. Hovering the picture pauses it, and so does leaving the window; the pace and looping are settings, and also reachable from the gallery toolbar.
+- **Grid**: square thumbnails, small or large. Clicking any picture opens it one-by-one at that position.
+
+A picture opened in a normal tab has a **Browse folder** button that opens its folder and lands on it. The gallery reads only local folders — it does not contact an image host, upload anything or produce links.
+
+Only pictures near the viewport are mounted, and ones two screens away are removed from the DOM so Chromium can release the decoded bitmap; in the stacked view the space they occupied is kept, so scrolling back does not jump. In the stacked view `Up`/`Down` scroll the column and `Left`/`Right` move between pictures; in one-by-one and slideshow `Left`/`Right` move between pictures. `Home`/`End` jump to the ends, `Space` plays or pauses a slideshow (and pages the stacked view), and `Esc` returns to one-by-one. Folder changes made in the Explorer refresh an open gallery. `gallery://` tabs are never written into a saved group, so restarting brings back files only.
 
 ## Getting started
 

@@ -1223,6 +1223,46 @@ export function useEditorTabs({
     await activate(tab.id);
   }, [activate]);
 
+  /**
+   * Show a folder's pictures in its own tab.
+   *
+   * Same folder asked for twice activates the tab that is already there rather than piling up
+   * another view of it. `startPath` is the picture to land on; the gallery resolves it to an
+   * index once the listing is in, because the tab is created before the files are known.
+   */
+  const openGallery = useCallback(
+    async (dir: string, startPath?: string) => {
+      const existing = tabsRef.current.find(
+        (t) => t.gallery && pathKey(t.gallery.dir) === pathKey(dir)
+      );
+      if (existing) {
+        setTabs((prev) =>
+          prev.map((t) =>
+            t.id === existing.id ? { ...t, gallery: { dir, startPath } } : t
+          )
+        );
+        await activate(existing.id);
+        return;
+      }
+      const tab: Tab = {
+        id: nextId(),
+        path: `gallery://${dir}`,
+        name: basename(dir) || dir,
+        language: "plaintext",
+        original: "",
+        dirty: false,
+        gallery: { dir, startPath },
+        encoding: "UTF-8",
+        bom: false,
+        bytes: null,
+        fileSettings: EMPTY_FILE_SETTINGS,
+      };
+      setTabs((prev) => [...prev, tab]);
+      await activate(tab.id);
+    },
+    [activate]
+  );
+
   const closeTab = useCallback(
     async (id: number) => {
       const list = tabsRef.current;
@@ -2344,7 +2384,9 @@ export function useEditorTabs({
     cursorRev,
     /** Where Editor takes path/defaultValue: keeps the last file tab while Settings shows. */
     editorTab:
-      activeTab && !activeTab.isSettings ? activeTab : lastFileTabRef.current,
+      activeTab && !activeTab.isSettings && !activeTab.gallery
+        ? activeTab
+        : lastFileTabRef.current,
     /**
      * The last real file tab. Editor must stay mounted on this one even while a
      * comparison is on screen: @monaco-editor/react disposes a model when its editor
@@ -2392,6 +2434,7 @@ export function useEditorTabs({
     swapCompare,
     openUntitled,
     openSettings,
+    openGallery,
     closeTab,
     moveTab,
     clearAllTabs,
