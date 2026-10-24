@@ -937,16 +937,31 @@ pub(crate) fn protected_roots() -> Vec<PathBuf> {
 /// is a picture next door, whereas reaching the home directory is not. Refusing every
 /// ancestor of a protected root draws that line without needing a full path policy.
 pub(crate) fn refused_by_scope(dir: &Path, protected: &[PathBuf]) -> bool {
+  // `normalize_path` lowercases on Windows while the protected roots come from the
+  // environment with their original case, so comparing the two directly would let
+  // `c:\users` through as if it were an unrelated folder. Fold both sides first.
+  let dir = fold_case(dir);
   // A drive root such as "C:\" has no parent to be anything but a whole disk.
   match dir.parent() {
     Some(parent) if !parent.as_os_str().is_empty() => {}
     _ => return true,
   }
   protected.iter().any(|root| {
+    let root = fold_case(root);
     let same_length = root.components().count() == dir.components().count();
     // The root itself, or any folder that contains it.
-    (same_length && root.as_path() == dir) || (root.starts_with(dir) && !same_length)
+    (same_length && root.as_path() == dir) || (root.starts_with(&dir) && !same_length)
   })
+}
+
+/// The spelling two paths can be compared in. Windows paths are case-insensitive, and the
+/// normalized form this app keeps everything in is already lowercase on that platform.
+fn fold_case(path: &Path) -> PathBuf {
+  if cfg!(windows) {
+    PathBuf::from(path.to_string_lossy().to_lowercase())
+  } else {
+    path.to_path_buf()
+  }
 }
 
 /// Let the asset protocol read one directory, so markdown can show relative images.
@@ -1880,6 +1895,25 @@ mod tests {
   fn a_drive_root_is_refused_even_without_protected_roots() {
     assert!(refused_by_scope(Path::new(r"C:\"), &[]));
     assert!(refused_by_scope(Path::new(r"\\server\share"), &[]));
+  }
+
+  /// Normalized paths arrive lowercased while the protected roots come from the environment
+  /// as written. Neither spelling is allowed to slip past the line.
+  #[test]
+  fn the_scope_line_ignores_the_case_of_either_side() {
+    let protected = vec![PathBuf::from(r"C:\Users\X")];
+    for dir in [r"c:\users\x\docs", r"C:\USERS\X\Downloads", r"c:\Users\X\a"] {
+      assert!(
+        !refused_by_scope(Path::new(dir), &protected),
+        "{dir} is inside the profile and must be granted"
+      );
+    }
+    for dir in [r"c:\users", r"C:\USERS", r"c:\Users\X", r"C:\Users\x"] {
+      assert!(
+        refused_by_scope(Path::new(dir), &protected),
+        "{dir} is a protected root or its parent and must be refused"
+      );
+    }
   }
 
   /// Compact mode is a deliberate opt-in, so a settings.json written before the key
