@@ -9,6 +9,9 @@
 // served to existing installs — the script refuses rather than leaving a release that silently
 // cannot update anyone.
 //
+// tauri.conf.json keeps `createUpdaterArtifacts` false so that a plain `yarn tauri build` neither
+// signs nor asks for the key passphrase; this script is the only place that turns it on.
+//
 // Usage:
 //   npm run release            (or: node scripts/release.mjs)
 
@@ -62,7 +65,12 @@ const require = createRequire(import.meta.url)
 const tauriCli = require.resolve('@tauri-apps/cli/tauri.js')
 
 console.log(`[release] building and signing ${productName} ${version} ...`)
-const res = spawnSync(process.execPath, [tauriCli, 'build'], {
+const res = spawnSync(process.execPath, [
+  tauriCli,
+  'build',
+  '--config',
+  JSON.stringify({ bundle: { createUpdaterArtifacts: true } }),
+], {
   stdio: 'inherit',
   cwd: root,
   env,
@@ -80,11 +88,12 @@ if (!existsSync(installer)) {
   process.exit(1)
 }
 
-// `createUpdaterArtifacts` makes the CLI sign the installer when the key is set. A missing
-// `.sig` means the key was not picked up, and latest.json would have nothing to carry.
+// The `--config` override above is what makes the CLI sign, and only for this script. Signing is
+// skipped silently, and an unsigned build leaves the previous release's `.sig` sitting in the same
+// folder — so the file has to be at least as new as the installer to count as this build's.
 const signature = installer + '.sig'
-if (!existsSync(signature)) {
-  console.error(`[release] updater signature missing: ${signature}`)
+if (!existsSync(signature) || statSync(signature).mtimeMs < statSync(installer).mtimeMs) {
+  console.error(`[release] no updater signature from this build: ${signature}`)
   console.error('[release] the build was not signed; check .tauri/priv.key')
   process.exit(1)
 }
