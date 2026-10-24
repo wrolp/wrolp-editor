@@ -1068,6 +1068,11 @@ export function useEditorTabs({
       // One commit: the strip fills in all at once and the editor opens on the active file.
       setTabs(tabsBuilt);
       setActiveId(active ? active.id : null);
+      // The tab list is read through a ref by callers that snapshot it in the same turn
+      // (switching groups commits the new group's tabs right after this returns). React has
+      // not rendered yet, so without this the snapshot would still be the outgoing group's.
+      tabsRef.current = tabsBuilt;
+      activeRef.current = active ? active.id : null;
 
       // An encrypted file nobody has decrypted yet is restored as a lock, and its password is
       // asked for in the order the tabs sit in the strip — one dialog at a time, which is what
@@ -1331,6 +1336,11 @@ export function useEditorTabs({
     lastFileTabRef.current = null;
     setTabs([]);
     setActiveId(null);
+    // Same reason as in `restoreTabs`: a group switch snapshots the live tabs immediately
+    // after clearing them, and an empty group must be committed as empty rather than
+    // inheriting the tabs that were just on screen.
+    tabsRef.current = [];
+    activeRef.current = null;
   }, [editorRef]);
 
   const onEditorChange = useCallback(
