@@ -47,6 +47,7 @@ import { useEditorTabs } from "./hooks/useEditorTabs";
 import { useGroups } from "./hooks/useGroups";
 import { useVersions } from "./hooks/useVersions";
 import { useWindowFrame } from "./hooks/useWindowFrame";
+import { useMenuPlacement } from "./hooks/useMenuPlacement";
 import { setLang, t } from "./lib/i18n";
 import {
   basename,
@@ -87,6 +88,7 @@ import {
   type FolderHistoryEntry,
   type HistoryEntry,
   type MenuTarget,
+  type RenameInput,
   type Settings,
   type VersionEntry,
   type VersionState,
@@ -326,6 +328,7 @@ export default function App() {
     panel: "root" | "move" | "copy" | "moveAll";
   } | null>(null);
   const tabMenuRef = useRef<HTMLDivElement>(null);
+  const tabMenuAt = useMenuPlacement(tabMenu, tabMenuRef);
   /** The tab whose name is being edited in place, or null. */
   const [renamingTab, setRenamingTab] = useState<number | null>(null);
   /** The tab waiting on the unsaved-changes prompt, or null. */
@@ -877,6 +880,40 @@ export default function App() {
   );
 
   /**
+   * Move everything this window keys by a path, after the backend has moved the entry.
+   *
+   * The stores on disk are the backend's to rewrite; what is moved here is the copy a render
+   * and the next save read from. Both path-keyed pieces of UI state are in this list for the
+   * same reason: the stored layout choice for a path, and the file whose panel is open.
+   *
+   * The Explorer's own folder is deliberately not here: it is a setting, and moving it also
+   * records it in the folder history, so the caller does that once with the final path rather
+   * than once per pair.
+   */
+  const rehomePairs = useCallback(
+    (pairs: { oldPath: string; path: string }[]) => {
+      // One simultaneous substitution, the same rule the hooks apply: a batch can swap two
+      // paths, so each pair is tried against the path as it was and the first match wins.
+      const mapPath = (path: string) => {
+        for (const pair of pairs) {
+          const next = rekeyPath(path, pair.oldPath, pair.path);
+          if (next !== path) return next;
+        }
+        return path;
+      };
+      tabs.rekeyTabsMany(pairs);
+      groupsRef.current.rekeyPathsMany(pairs);
+      const rekeyedModes: Record<string, PreviewMode> = {};
+      for (const [key, mode] of Object.entries(previewPrefRef.current)) {
+        rekeyedModes[mapPath(key)] = mode;
+      }
+      commitPreviewModes(rekeyedModes);
+      setFileSettingsPath((prev) => (prev === null ? prev : mapPath(prev)));
+    },
+    [commitPreviewModes, tabs]
+  );
+
+  /**
    * Rename a file or a folder on disk, then move everything the app keys by its path.
    *
    * Pending drafts are written first: a debounced draft that landed after the backend had
@@ -895,16 +932,7 @@ export default function App() {
       // A name that differs only in spelling Windows folds away moves nothing, and there is
       // then nothing to re-home.
       if (out.path === out.oldPath) return true;
-      tabs.rekeyTabs(out.oldPath, out.path);
-      groupsRef.current.rekeyPaths(out.oldPath, out.path);
-      // Both of these are keyed by path: the stored layout choice, and the file whose
-      // per-file panel is open.
-      const rekeyedModes: Record<string, PreviewMode> = {};
-      for (const [key, mode] of Object.entries(previewPrefRef.current)) {
-        rekeyedModes[rekeyPath(key, out.oldPath, out.path)] = mode;
-      }
-      commitPreviewModes(rekeyedModes);
-      setFileSettingsPath((prev) => (prev === null ? prev : rekeyPath(prev, out.oldPath, out.path)));
+      rehomePairs([out]);
       if (rootRef.current && isUnder(rootRef.current, out.oldPath)) {
         setSidebarRoot(rekeyPath(rootRef.current, out.oldPath, out.path));
       }
@@ -912,7 +940,35 @@ export default function App() {
       toast(t("rename.done", { name: basename(out.path) }));
       return true;
     },
-    [commitPreviewModes, draft, refreshHistory, setSidebarRoot, tabs, toast]
+    [draft, rehomePairs, refreshHistory, setSidebarRoot, toast]
+  );
+
+  /**
+   * Rename the entries the Explorer has selected.
+   *
+   * Pending drafts are written first for the same reason as a single rename. Everything after
+   * the backend answers is applied at once, as a substitution over the paths as they were —
+   * which is also what makes a swap land on the right sides.
+   */
+  const renameMany = useCallback(
+    async (items: RenameInput[]): Promise<boolean> => {
+      await draft.flushAll();
+      const out = await api.renameEntries(items).catch((e) => {
+        toast(errorMessage(e));
+        return null;
+      });
+      if (!out) return false;
+      const moved = out.filter((pair) => pair.path !== pair.oldPath);
+      if (moved.length === 0) return true;
+      rehomePairs(moved);
+      const root = rootRef.current;
+      const hit = root ? moved.find((pair) => isUnder(root, pair.oldPath)) : undefined;
+      if (root && hit) setSidebarRoot(rekeyPath(root, hit.oldPath, hit.path));
+      refreshHistory();
+      toast(t("batch.done", { count: moved.length }));
+      return true;
+    },
+    [draft, rehomePairs, refreshHistory, setSidebarRoot, toast]
   );
 
   /**
@@ -1832,6 +1888,7 @@ const defaultModeFor = useCallback(
           onCompareVersion={(path, oid) => void openVersionDiff(path, oid)}
           onRestoreVersion={(path, oid) => void restoreFromList(path, oid)}
           onRename={(target, name) => renameEntry(target.path, name)}
+          onBatchRename={renameMany}
           onRemoveHistory={(path) =>
             api
               .removeHistory(path)
@@ -2036,7 +2093,7 @@ const defaultModeFor = useCallback(
         <div
           className="ctx-menu"
           ref={tabMenuRef}
-          style={{ display: "block", left: tabMenu.x, top: tabMenu.y }}
+          style={{ display: "block", left: tabMenuAt.left, top: tabMenuAt.top }}
         >
           {tabMenu.panel === "root" && !menuTabIsFile ? (
             /* A comparison or the Settings panel is not a file, so every path action in

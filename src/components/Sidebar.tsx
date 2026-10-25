@@ -23,6 +23,7 @@ import {
 } from "./icons";
 import FileIcon from "./FileIcon";
 import DeleteEntryDialog from "./DeleteEntryDialog";
+import BatchRenameDialog from "./BatchRenameDialog";
 import {
   api,
   copyText,
@@ -36,6 +37,7 @@ import {
 } from "../lib/tauri";
 import { basename, isUnder, isUntitled } from "../lib/path";
 import { pathKey, type SidebarView } from "../lib/types";
+import { useMenuPlacement } from "../hooks/useMenuPlacement";
 
 /** A tree node an action is aimed at. `name` keeps the folder's trailing separator. */
 interface NodeTarget {
@@ -271,6 +273,12 @@ interface TreeHandlers {
   onRename: (target: NodeTarget, name: string) => Promise<boolean>;
   /** Gives up on the edit in progress without touching the disk. */
   onRenameEnd: () => void;
+  /** `pathKey`s of the rows selected for a batch action. */
+  selected: ReadonlySet<string>;
+  /** Adds a row to the selection or takes it out, without opening anything (Ctrl+click). */
+  onToggleSelect: (target: NodeTarget) => void;
+  /** Selects every sibling between the anchor and this row (Shift+click). */
+  onSelectRange: (target: NodeTarget, siblings: NodeTarget[]) => void;
   /** The folder a new entry is being named in, and what it will be; null when idle. */
   creating: CreatingTarget | null;
   /** Creates a node on disk; resolves false when the name or the disk refused it. */
@@ -354,21 +362,45 @@ function FileRow({
   onRename,
   onRenameEnd,
   onContextMenu: openMenu,
-}: NodeProps & { entry: FsEntry }) {
-  const active = !!activePath && pathKey(activePath) === pathKey(entry.path);
-  const editing = renaming === pathKey(entry.path);
+  selected,
+  onToggleSelect,
+  onSelectRange,
+  siblings,
+}: NodeProps & { entry: FsEntry; siblings: NodeTarget[] }) {
+  const key = pathKey(entry.path);
+  const active = !!activePath && pathKey(activePath) === key;
+  const editing = renaming === key;
+  const target: NodeTarget = { path: entry.path, name: entry.name, isDir: false };
   return (
     <TreeTooltip name={entry.name} detail={entry.path}>
       <div
-        className={`tree-row file${active ? " ctx-active" : ""}`}
+        className={`tree-row file${active ? " ctx-active" : ""}${selected.has(key) ? " sel" : ""}`}
         style={indent(depth)}
         // A click inside the row is the edit taking or losing the focus, not a request to
         // open the file the row happens to name.
-        onClick={editing ? undefined : () => onOpenPath(entry.path)}
+        onClick={
+          editing
+            ? undefined
+            : (e) => {
+                // A modified click is about the selection, not about opening: it stops here
+                // so the view's own handler does not clear what it just changed.
+                if (e.ctrlKey || e.metaKey) {
+                  e.stopPropagation();
+                  onToggleSelect(target);
+                  return;
+                }
+                if (e.shiftKey) {
+                  e.stopPropagation();
+                  onSelectRange(target, siblings);
+                  return;
+                }
+                onOpenPath(entry.path);
+              }
+        }
         onContextMenu={(e) => {
           e.preventDefault();
           e.stopPropagation();
-          openMenu({ path: entry.path, name: entry.name, isDir: false }, e.clientX, e.clientY);
+          openMenu(target, e.clientX, e.clientY);
         }}
       >
         <span className="chev" />
@@ -401,8 +433,12 @@ function FolderNode({
   expandLimit,
   refreshed,
   refresh,
+  selected,
+  onToggleSelect,
+  onSelectRange,
+  siblings,
   ...handlers
-}: NodeProps & { entry: FsEntry }) {
+}: NodeProps & { entry: FsEntry; siblings: NodeTarget[] }) {
   // The initial state only: a folder the user folded stays folded, so the setting applies
   // when a directory is opened (or refreshed), not to the tree already on screen.
   const [collapsed, setCollapsed] = useState(depth >= expandLimit);
@@ -417,8 +453,10 @@ function FolderNode({
   // counter of a refresh aimed at a folder above it. The higher one wins, so a folder always
   // re-reads at the newest request that covers it and never falls back to a stale question.
   const token = Math.max(refreshed[pathKey(entry.path)] ?? 0, covers(refresh, entry.path));
-  const editing = renaming === pathKey(entry.path);
-  const naming = !!creating && pathKey(creating.dir) === pathKey(entry.path);
+  const key = pathKey(entry.path);
+  const editing = renaming === key;
+  const naming = !!creating && pathKey(creating.dir) === key;
+  const target: NodeTarget = { path: entry.path, name: entry.name, isDir: true };
 
   // A folder being added to has to be open: an input row created inside a collapsed folder
   // would be off screen, taking the focus with it.
@@ -452,13 +490,29 @@ function FolderNode({
     <>
       <TreeTooltip name={entry.name.replace(/\/$/, "")} detail={entry.path}>
         <div
-          className={`tree-row folder${collapsed ? " collapsed" : ""}`}
+          className={`tree-row folder${collapsed ? " collapsed" : ""}${selected.has(key) ? " sel" : ""}`}
           style={indent(depth)}
-          onClick={editing ? undefined : () => setCollapsed((v) => !v)}
+          onClick={
+            editing
+              ? undefined
+              : (e) => {
+                  if (e.ctrlKey || e.metaKey) {
+                    e.stopPropagation();
+                    onToggleSelect(target);
+                    return;
+                  }
+                  if (e.shiftKey) {
+                    e.stopPropagation();
+                    onSelectRange(target, siblings);
+                    return;
+                  }
+                  setCollapsed((v) => !v);
+                }
+          }
           onContextMenu={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            openMenu({ path: entry.path, name: entry.name, isDir: true }, e.clientX, e.clientY);
+            openMenu(target, e.clientX, e.clientY);
           }}
         >
           {/* An icon, not a character: it stays crisp at any DPI, and the expanded
@@ -498,6 +552,9 @@ function FolderNode({
               onCreate={onCreate}
               onCreateEnd={onCreateEnd}
               onContextMenu={openMenu}
+              selected={selected}
+              onToggleSelect={onToggleSelect}
+              onSelectRange={onSelectRange}
               refreshed={refreshed}
               refresh={refresh}
             />
@@ -520,13 +577,33 @@ function FolderNode({
 }
 
 function TreeLevel({ entries, depth, ...handlers }: LevelProps) {
+  // The rows of this one folder, in the order they are drawn: what a Shift+click selects
+  // between. Built once per listing rather than per row, and passed down explicitly because
+  // it is about this level, not something the handlers above it know.
+  const siblings: NodeTarget[] = entries.map((entry) => ({
+    path: entry.path,
+    name: entry.name,
+    isDir: entry.isDir,
+  }));
   return (
     <>
       {entries.map((entry) =>
         entry.isDir ? (
-          <FolderNode key={entry.path} {...handlers} entry={entry} depth={depth} />
+          <FolderNode
+            key={entry.path}
+            {...handlers}
+            entry={entry}
+            depth={depth}
+            siblings={siblings}
+          />
         ) : (
-          <FileRow key={entry.path} {...handlers} entry={entry} depth={depth} />
+          <FileRow
+            key={entry.path}
+            {...handlers}
+            entry={entry}
+            depth={depth}
+            siblings={siblings}
+          />
         )
       )}
     </>
@@ -544,6 +621,9 @@ interface Props extends Omit<
   | "creating"
   | "onCreate"
   | "onCreateEnd"
+  | "selected"
+  | "onToggleSelect"
+  | "onSelectRange"
 > {
   visible: boolean;
   width: number;
@@ -604,6 +684,12 @@ interface Props extends Omit<
    * in the tree, and the caller is only reached once the user has answered it.
    */
   onDelete: (target: NodeTarget) => Promise<boolean>;
+  /**
+   * Renames the entries the tree has selected, as one batch. Every name is checked before
+   * anything moves, so a refused one leaves the disk as it was. Resolves false then, which
+   * keeps the dialog up with the names the user typed.
+   */
+  onBatchRename: (items: { path: string; name: string }[]) => Promise<boolean>;
 }
 
 export default function Sidebar(props: Props) {
@@ -643,12 +729,25 @@ export default function Sidebar(props: Props) {
   const [entries, setEntries] = useState<FsEntry[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
   const [menu, setMenu] = useState<MenuTarget | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuAt = useMenuPlacement(menu, menuRef);
   /** `pathKey` of the node whose name is being edited in place. */
   const [renaming, setRenaming] = useState<string | null>(null);
   /** The folder a new entry is being named in, and what it will be. */
   const [creating, setCreating] = useState<CreatingTarget | null>(null);
   /** The node waiting on the delete prompt, or null. */
   const [deleting, setDeleting] = useState<NodeTarget | null>(null);
+  /**
+   * The rows picked for a batch, by `pathKey`, each with the name it answers to.
+   *
+   * A map rather than a set of paths: the dialog needs names, and a rename between picking
+   * and opening it would leave a set of paths that no row explains any more.
+   */
+  const [selected, setSelected] = useState<Map<string, NodeTarget>>(new Map());
+  /** `pathKey` of the row a Shift+click measures its range from. */
+  const [anchor, setAnchor] = useState<string | null>(null);
+  /** The entries waiting in the batch rename dialog, or null. */
+  const [batch, setBatch] = useState<NodeTarget[] | null>(null);
   /** Whether the recent-folders menu is open under the picker button. */
   const [foldersOpen, setFoldersOpen] = useState(false);
   /**
@@ -854,6 +953,92 @@ export default function Sidebar(props: Props) {
     }
   };
 
+  /**
+   * The selection, and the two gestures that build it.
+   *
+   * A plain click leaves it alone as far as this is concerned — it is handled by the view and
+   * clears the selection — so holding more than one row always takes a modifier, which is
+   * also what keeps a plain click on a row meaning "open it" for everybody else.
+   */
+  const toggleSelect = (target: NodeTarget) => {
+    const key = pathKey(target.path);
+    setSelected((prev) => {
+      const next = new Map(prev);
+      if (next.has(key)) next.delete(key);
+      else next.set(key, target);
+      return next;
+    });
+    setAnchor(key);
+  };
+
+  /** Everything between the anchor and this row, in the order the folder draws them. */
+  const selectRange = (target: NodeTarget, siblings: NodeTarget[]) => {
+    const key = pathKey(target.path);
+    const to = siblings.findIndex((item) => pathKey(item.path) === key);
+    const from =
+      anchor === null ? -1 : siblings.findIndex((item) => pathKey(item.path) === anchor);
+    // No anchor in this folder — a first Shift+click, or one after a click in another folder:
+    // the range is then the row itself, which is the only reading that is not a guess.
+    if (from < 0 || to < 0) {
+      setSelected(new Map([[key, target]]));
+      setAnchor(key);
+      return;
+    }
+    const [start, end] = from <= to ? [from, to] : [to, from];
+    setSelected(
+      new Map(siblings.slice(start, end + 1).map((item) => [pathKey(item.path), item]))
+    );
+  };
+
+  const clearSelection = () => {
+    setSelected(new Map());
+    setAnchor(null);
+  };
+
+  /**
+   * Carry out a batch the dialog has worked out, then re-read every folder an entry came
+   * from: rows are listings of one folder, so those folders are the whole of what changed.
+   */
+  const applyBatch = async (items: { path: string; name: string }[]): Promise<boolean> => {
+    const targets = batch;
+    if (!targets) return false;
+    if (!(await props.onBatchRename(items))) return false;
+    const dirs = new Set<string>();
+    for (const target of targets) {
+      const parent = parentOf(target.path) || rootDir;
+      if (parent) dirs.add(parent);
+    }
+    for (const dir of dirs) bumpFolder(dir);
+    setBatch(null);
+    clearSelection();
+    return true;
+  };
+
+  /**
+   * Open the batch dialog on everything a folder holds, without the user selecting it row by
+   * row. The listing is read here rather than taken from the tree: a folder may be folded, and
+   * a command that only saw the rows on screen would be a different, hidden one.
+   */
+  const batchFolder = async (dir: string) => {
+    const list = await api.listDir(dir).catch((e) => {
+      onError(errorMessage(e));
+      return null;
+    });
+    if (!list) return;
+    if (list.length === 0) {
+      onError(t("batch.emptyFolder"));
+      return;
+    }
+    setBatch(
+      list.map((entry) => ({
+        path: entry.path,
+        // Folders carry their trailing separator here; the dialog works on bare names.
+        name: basename(entry.path),
+        isDir: entry.isDir,
+      }))
+    );
+  };
+
   // The Explorer's own folder is one more listing, so it takes the same pair of counters any
   // other folder does: its own slot, and a request aimed at it or at something above it.
   const rootToken = rootDir
@@ -884,6 +1069,13 @@ export default function Sidebar(props: Props) {
     // Re-fetch on view switch, explicit refresh and a rename in this folder. The token only
     // ever counts up, so these do not re-run for a refresh aimed somewhere else in the tree.
   }, [rootDir, onError, view, refreshKey, rootToken]);
+
+  // Rows of another folder are not rows of this one, so a selection does not outlive a change
+  // of what the tree is showing, or a re-read that may have replaced the rows themselves.
+  useEffect(() => {
+    setSelected(new Map());
+    setAnchor(null);
+  }, [view, rootDir, refreshKey]);
 
   if (!visible) return null;
 
@@ -1061,7 +1253,7 @@ export default function Sidebar(props: Props) {
         {/* The handler the tree used to carry now sits on the whole view, so the blank
             space below the rows is covered by the same one: the round trip to the root
             folder's own row is the only way to create anything in it. */}
-        <div className="tree">
+        <div className="tree" onClick={clearSelection}>
           {rootDir === null ? (
             <div className="empty">{t("side.noFolder")}</div>
           ) : (
@@ -1083,7 +1275,19 @@ export default function Sidebar(props: Props) {
                 onCreateEnd={() => setCreating(null)}
                 refreshed={refreshed}
                 refresh={refresh}
-                onContextMenu={(target, x, y) => setMenu({ ...target, x, y })}
+                selected={new Set(selected.keys())}
+                onToggleSelect={toggleSelect}
+                onSelectRange={selectRange}
+                onContextMenu={(target, x, y) => {
+                  // A right-click outside the selection means that row alone: keeping a
+                  // selection the user is not looking at would make the menu act on rows
+                  // other than the one under the pointer.
+                  if (!selected.has(pathKey(target.path))) {
+                    setSelected(new Map());
+                    setAnchor(pathKey(target.path));
+                  }
+                  setMenu({ ...target, x, y });
+                }}
               />
               {creating && pathKey(creating.dir) === pathKey(rootDir) && (
                 <NewRow
@@ -1196,7 +1400,8 @@ export default function Sidebar(props: Props) {
       {menu && (
         <div
           className="ctx-menu"
-          style={{ display: "block", left: menu.x, top: menu.y }}
+          ref={menuRef}
+          style={{ display: "block", left: menuAt.left, top: menuAt.top }}
           onMouseDown={(e) => e.stopPropagation()}
         >
           {/* No node was aimed at: the menu is about the folder being shown. With no folder
@@ -1278,6 +1483,20 @@ export default function Sidebar(props: Props) {
                     <IconFolderPlus size={14} />
                   </span>
                   {t("side.menuNewFolder")}
+                </div>
+                <div className="ws-sep" />
+                <div
+                  className="ctx-item"
+                  onClick={() => {
+                    const dir = rootDir;
+                    setMenu(null);
+                    void batchFolder(dir);
+                  }}
+                >
+                  <span className="ctx-icon">
+                    <IconPencil size={14} />
+                  </span>
+                  {t("side.menuBatchFolder")}
                 </div>
                 {/* The folder being shown has no row of its own, so this is the only place
                     a paste into it can be asked for. */}
@@ -1426,7 +1645,41 @@ export default function Sidebar(props: Props) {
                     </span>
                     {t("side.menuNewFolder")}
                   </div>
+                  <div className="ws-sep" />
+                  {/* The same command as the selection's, aimed at everything the folder
+                      holds: a folder is a unit of work, and picking its rows one by one to
+                      say "all of them" is busywork. */}
+                  <div
+                    className="ctx-item"
+                    onClick={() => {
+                      const dir = menu.path;
+                      setMenu(null);
+                      void batchFolder(dir);
+                    }}
+                  >
+                    <span className="ctx-icon">
+                      <IconPencil size={14} />
+                    </span>
+                    {t("side.menuBatchFolder")}
+                  </div>
                 </>
+              )}
+              {/* Two or more rows are a different question from one: one pattern applied to
+                  each, previewed first. Offered only while the row under the pointer is part
+                  of the selection, so the count and the target cannot disagree. */}
+              {selected.size >= 2 && selected.has(pathKey(menu.path)) && (
+                <div
+                  className="ctx-item"
+                  onClick={() => {
+                    setBatch([...selected.values()]);
+                    setMenu(null);
+                  }}
+                >
+                  <span className="ctx-icon">
+                    <IconPencil size={14} />
+                  </span>
+                  {t("side.menuBatchRename", { count: selected.size })}
+                </div>
               )}
               <div
                 className="ctx-item"
@@ -1440,6 +1693,24 @@ export default function Sidebar(props: Props) {
                 </span>
                 {t("side.menuRename")}
               </div>
+              {/* A file still belongs to a folder, and "all of them" is a question about that
+                  folder: the same command its own row offers, aimed at the one holding this
+                  file. A folder's menu already has it for the folder itself. */}
+              {!menu.isDir && (
+                <div
+                  className="ctx-item"
+                  onClick={() => {
+                    const dir = parentOf(menu.path) || rootDir;
+                    setMenu(null);
+                    if (dir) void batchFolder(dir);
+                  }}
+                >
+                  <span className="ctx-icon">
+                    <IconPencil size={14} />
+                  </span>
+                  {t("side.menuBatchFolder")}
+                </div>
+              )}
               <div className="ws-sep" />
               {/* A copy here and a paste there, so both are offered on every row: what is
                   taken is the path, not the bytes, which is what lets a folder be copied
@@ -1561,6 +1832,14 @@ export default function Sidebar(props: Props) {
           isDir={deleting.isDir}
           onDelete={() => void confirmDelete()}
           onCancel={() => setDeleting(null)}
+        />
+      )}
+
+      {batch && (
+        <BatchRenameDialog
+          entries={batch}
+          onApply={applyBatch}
+          onCancel={() => setBatch(null)}
         />
       )}
     </div>

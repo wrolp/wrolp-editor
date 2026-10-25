@@ -914,16 +914,29 @@ export function useEditorTabs({
    * Re-home every tab whose file moved on disk, with the Monaco model, the remembered caret
    * and the queued draft prompt that belong to it.
    *
-   * The models are re-pointed rather than rebuilt: their buffers are the only place a file's
-   * unsaved text and undo stack live. Everything here runs in one synchronous block, so no
-   * render can ever show a tab whose model is still under the old path. Pending drafts must
-   * already be flushed by the caller, or they would be written back under the old key.
+   * The buffers are the only place a file's unsaved text lives, so they come across; the undo
+   * stack cannot, because Monaco has no way to rename a model's URI and a rebuilt model starts
+   * with an empty history. That is the price of the move and the reason the rebuild happens
+   * here rather than as a reopen: the text, the language and the caret are all kept.
+   * Everything here runs in one synchronous block, so no render can ever show a tab whose
+   * model is still under the old path. Pending drafts must already be flushed by the caller,
+   * or they would be written back under the old key.
    */
-  const rekeyTabs = useCallback((oldRoot: string, newRoot: string) => {
+  const rekeyTabsMany = useCallback((pairs: { oldPath: string; path: string }[]) => {
+    // One simultaneous substitution. A batch can swap two names, so every pair is tried
+    // against the path as it was and the first match wins; entries of a batch never nest,
+    // which is what makes one match the right number.
+    const mapPath = (path: string) => {
+      for (const pair of pairs) {
+        const next = rekeyPath(path, pair.oldPath, pair.path);
+        if (next !== path) return next;
+      }
+      return path;
+    };
     const moved = new Map<string, string>();
     for (const tab of tabsRef.current) {
       if (!isFileTab(tab) || isUntitled(tab.path)) continue;
-      const next = rekeyPath(tab.path, oldRoot, newRoot);
+      const next = mapPath(tab.path);
       if (next !== tab.path) moved.set(pathKey(tab.path), next);
     }
     if (moved.size === 0) return;
@@ -936,7 +949,19 @@ export function useEditorTabs({
         const model = h.monaco.editor.getModel(h.monaco.Uri.parse(modelUri(tab.path)));
         // A tab that has never mounted has no model to move; Editor builds it under the new
         // path the first time the tab is shown.
-        model?.updateUri(h.monaco.Uri.parse(modelUri(next)));
+        if (!model) continue;
+        const uri = h.monaco.Uri.parse(modelUri(next));
+        if (h.monaco.editor.getModel(uri)) {
+          // A tab left over for the new path already keeps a model there. That model belongs
+          // to the path, so this one is dropped rather than made to fight it for the URI.
+          model.dispose();
+          continue;
+        }
+        // Monaco 0.57 has no API to rename a model's URI; the model is rebuilt under the new
+        // path with its text and its language, and the editor follows it when it is showing it.
+        const rebuilt = h.monaco.editor.createModel(model.getValue(), model.getLanguageId(), uri);
+        if (h.editor.getModel() === model) h.editor.setModel(rebuilt);
+        model.dispose();
       }
     }
     for (const [key, next] of moved) {
@@ -968,6 +993,12 @@ export function useEditorTabs({
     // A document can point at its own pictures, and the grant covered the old folder.
     for (const next of moved.values()) void api.allowAssetDir(dirname(next)).catch(() => {});
   }, []);
+
+  /** One pair, for a rename that moves a single entry. */
+  const rekeyTabs = useCallback(
+    (oldRoot: string, newRoot: string) => rekeyTabsMany([{ oldPath: oldRoot, path: newRoot }]),
+    [rekeyTabsMany]
+  );
 
   /** Serializable view of the open tabs, for the group store. */
   const snapshotTabs = useCallback((): { tabs: GroupTab[]; active: string } => {
@@ -2243,8 +2274,8 @@ export function useEditorTabs({
    * being the end of it. The tab moves to the parked copy rather than keeping the dead path:
    * staying there would leave a file that cannot be saved, reopened or compared, and the
    * parked one is a real file that can be all three. Everything keyed by the old path comes
-   * along, because `rekeyTabs` already knows how to move a tab without losing its model —
-   * and with the model go the undo stack and the caret, which a fresh open would not have.
+   * along, because `rekeyTabs` already knows how to move a tab with its buffer and its caret,
+   * neither of which a fresh open would have.
    */
   const keepDeletedFile = useCallback(
     async (id: number): Promise<boolean> => {
@@ -2449,6 +2480,8 @@ export function useEditorTabs({
     moveTab,
     clearAllTabs,
     rekeyTabs,
+    /** Re-home every tab after a batch of renames, as one simultaneous substitution. */
+    rekeyTabsMany,
     selectTab: activate,
     saveActive,
     saveTab,

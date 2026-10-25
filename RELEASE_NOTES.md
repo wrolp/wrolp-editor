@@ -15,6 +15,7 @@ A small local text editor for Windows, built on Tauri v2 + React + TypeScript, w
 - **Drafts** — kept while you type, flushed on tab switch, close and window blur, and restored on open, with a Restore / Discard dialog available
 - **Auto-save** — off by default; on, the file on screen is written on a pause rather than mid-sentence
 - **Sidebar** — Explorer tree with lazy folders, recently opened files, and a version history; resizable, with the width persisted
+- **Batch rename** — select rows or a whole folder, then rename by pattern or by regular expression with a replacement, previewed row by row; the order can be sorted or nudged by hand, and the numbering follows it
 - **Version history** — off by default; any two versions, or either against what is open, can be compared side by side and folded down to the changes
 - **Encrypted files** — a self-describing AES-256-GCM container keyed from a password, with an idle lock and opt-in password remembering in the Windows credential store
 - **Single instance** — a second launch hands its path to the running window

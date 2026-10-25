@@ -24,6 +24,7 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | Restore | On open, disk content is compared with the draft; a differing draft is loaded back and the tab stays marked unsaved. Settings can switch this to a per-file Restore / Discard dialog |
 | Sidebar | Explorer file tree (lazy folders, refresh button), a History list of recently opened files, and a Versions view. Drag the divider to resize (180–640 px, double-click resets); the width is persisted. The tree's text size is a setting, 11–20 px |
 | Picture gallery | A whole folder in one tab, in natural order (`IMG_2` before `IMG_10`): stacked, one at a time, slideshow, or a grid. Subfolders are opt-in and walked four levels deep; one listing stops at 2,000 pictures and says so. Pictures are drawn through the asset protocol, so the editor's text-size limit does not apply. HEIC and TIFF are listed and marked as formats this renderer cannot draw |
+| Batch rename | Multi-select rows or rename a whole folder at once; one pattern (`{name}`, `{ext}`, `{n}`) or a regular expression with a replacement, a live preview, and an order — name, extension, modified time or manual — that `{n}` counts. See [Batch rename](#batch-rename) |
 | Version history | Off by default. On, every save by hand records what the file said, and any two of them — a version against a version, or either against what is open — can be compared side by side, folded down to the changes, or put back into the editor. One file's saves can be excluded, or forced in, from its tab menu. See [Version history](#version-history) |
 | Single instance | Launching a second time hands the path to the running window, adds a tab and focuses it |
 | Settings | Context-menu switch, editor font size, minimap, UI language; persisted and applied live. The context-menu page also shows the command the entry currently launches, and warns when it points at a different build or when this is a debug build |
@@ -60,6 +61,23 @@ Right-click a folder in the Explorer — or the blank space under the tree — a
 A picture opened in a normal tab has a **Browse folder** button that opens its folder and lands on it. The gallery reads only local folders — it does not contact an image host, upload anything or produce links.
 
 Only pictures near the viewport are mounted, and ones two screens away are removed from the DOM so Chromium can release the decoded bitmap; in the stacked view the space they occupied is kept, so scrolling back does not jump. In the stacked view `Up`/`Down` scroll the column and `Left`/`Right` move between pictures; in one-by-one and slideshow `Left`/`Right` move between pictures. `Home`/`End` jump to the ends, `Space` plays or pauses a slideshow (and pages the stacked view), and `Esc` returns to one-by-one. Folder changes made in the Explorer refresh an open gallery. `gallery://` tabs are never written into a saved group, so restarting brings back files only.
+
+## Batch rename
+
+Rename many entries at once from the Explorer: `Ctrl+click` rows (or `Shift+click` for a run of them), then **Rename N items…** in the row menu. A folder can be renamed whole without selecting anything — **Rename everything in this folder…** is on the folder's own menu and on a file's menu (for the folder holding it), and the blank area's menu offers the same command for the folder the Explorer is showing.
+
+Every name is worked out and checked before anything on disk changes, so a refused name leaves the folder as it was. The dialog shows the new name of every row as it is typed, and marks a row that would collide with another row of the same batch.
+
+Two rules are offered:
+
+- **Pattern** — tokens for the parts of a name: `{name}` is the old name without its extension, `{ext}` the extension including its dot, and `{n}` a counter. `{name}{ext}` changes nothing, `photo-{n}{ext}` numbers a folder, and `{name}-backup{ext}` appends to every name. The counter starts at *Start at* and is padded to *Digits*, so `01`, `02`, … rather than `1`, `2`, ….
+- **Regex** — a regular expression matched against the whole name, extension included, plus a replacement. `$1` refers to a capture group, *Ignore case* adds the `i` flag, and rows the expression does not match keep their name. The replacement takes `{name}`, `{ext}` and `{n}` as well, so a group and a counter can be combined: `^(.+)\.jpe?g$` → `photo-{n}-$1.jpg`.
+
+The counter counts rows in the list, not matches: under a regular expression, a row that does not match still takes its number, which keeps a sequence stable when only some of the files are affected.
+
+Before applying, the list can be ordered — *As given*, *Name* (numbers read as numbers, so `photo-9` comes before `photo-10`), *Extension*, *Modified*, or *Manual* — and flipped between ascending and descending. Dragging a row, or the arrows that appear on hover, fine-tunes the order, and `{n}` follows whatever is on screen, so the numbering can be nudged until it reads the way it should. A name already taken by an entry outside the batch is refused by the backend with a message rather than overwriting it; a folder and something inside it cannot move in one batch.
+
+A renamed file keeps its text, its caret and any unsaved edits in the tab that is showing it. The undo stack of that document starts over, because Monaco has no way to move a buffer to another path. A name in the preview that is too long to fit keeps its full text as a tooltip.
 
 ## Getting started
 

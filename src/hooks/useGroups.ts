@@ -28,6 +28,8 @@ export interface GroupStoreCommitter {
   isNameTaken(name: string, exceptId?: string): boolean;
   /** Move the stored tab paths of a file or folder that was renamed on disk. */
   rekeyPaths(oldRoot: string, newRoot: string): void;
+  /** The same for a whole batch, applied as one simultaneous substitution. */
+  rekeyPathsMany(pairs: { oldPath: string; path: string }[]): void;
   /** Forget the tabs; the group stays in the list. */
   clearContents(id: string): void;
   /** Drop the record. Drafts and files on disk are deliberately left alone. */
@@ -165,25 +167,40 @@ export function useGroups({ onError }: Options): GroupStoreCommitter {
    * saved next, so it has to move with it: otherwise the very next commit would put the old
    * paths back and undo the groups that are not on screen.
    */
-  const rekeyPaths = useCallback(
-    (oldRoot: string, newRoot: string) => {
+  const rekeyPathsMany = useCallback(
+    (pairs: { oldPath: string; path: string }[]) => {
+      // Simultaneous, not one pair after another: a batch can swap two paths, and the second
+      // pair would then find the first pair's result instead of the path it was written for.
+      const mapPath = (path: string) => {
+        for (const pair of pairs) {
+          const next = rekeyPath(path, pair.oldPath, pair.path);
+          if (next !== path) return next;
+        }
+        return path;
+      };
       const s = storeRef.current;
       let changed = false;
       const items = s.items.map((item) => {
         const tabs = item.tabs.map((tab) => {
           if (!tab.path) return tab;
-          const next = rekeyPath(tab.path, oldRoot, newRoot);
+          const next = mapPath(tab.path);
           if (next === tab.path) return tab;
           changed = true;
           return { ...tab, path: next };
         });
-        const active = rekeyPath(item.active, oldRoot, newRoot);
+        const active = mapPath(item.active);
         if (active !== item.active) changed = true;
         return { ...item, tabs, active };
       });
       if (changed) schedule({ ...s, items });
     },
     [schedule]
+  );
+
+  const rekeyPaths = useCallback(
+    (oldRoot: string, newRoot: string) =>
+      rekeyPathsMany([{ oldPath: oldRoot, path: newRoot }]),
+    [rekeyPathsMany]
   );
 
   const clearContents = useCallback(
@@ -222,6 +239,7 @@ export function useGroups({ onError }: Options): GroupStoreCommitter {
     rename,
     isNameTaken,
     rekeyPaths,
+    rekeyPathsMany,
     clearContents,
     remove,
   };

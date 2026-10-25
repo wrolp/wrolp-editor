@@ -46,6 +46,7 @@ pub fn run() {
       commands::stat_file,
       commands::save_file,
       rename::rename_path,
+      rename::rename_entries,
       entry::create_file,
       entry::create_dir,
       entry::copy_entry,

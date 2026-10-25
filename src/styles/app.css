@@ -959,6 +959,11 @@ textarea.ver-note-body {
   position: fixed;
   z-index: 100;
   min-width: 200px;
+  /* Last resort for a menu taller than the window: scroll rather than run off the bottom
+     edge, where the remaining rows would be unreachable. The placement hook keeps a shorter
+     menu inside the window on its own. */
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
@@ -1450,6 +1455,14 @@ body.resizing .editor-host {
    and cannot be mistaken for a hue that means something. */
 .tree-row.ctx-active {
   background: var(--surface-active);
+  color: var(--text-strong);
+}
+/* Rows picked for a batch. An inset ring rather than a fill: the fill is already spoken for by
+   the file the editor is showing, and one row can be both at once. */
+.tree-row.sel {
+  background: var(--surface-hover);
+  outline: 1px solid var(--accent-soft);
+  outline-offset: -1px;
   color: var(--text-strong);
 }
 .tree-row .chev {
@@ -2903,6 +2916,203 @@ body.resizing .editor-host {
   flex-wrap: wrap;
   gap: 10px;
   margin-top: 20px;
+}
+/* The batch rename dialog. The preview list is the whole point, so this one is wider than the
+   question-sized modals, and the list scrolls under a fixed dialog rather than stretching it. */
+.modal.batch-modal {
+  width: 540px;
+}
+/* Two ways to write the rule — the token pattern, or a regular expression. Small buttons
+   rather than a select, because the choice swaps the fields below it. */
+.batch-modes {
+  display: flex;
+  gap: 4px;
+  margin-top: 14px;
+}
+.batch-mode {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.batch-mode.on {
+  background: var(--surface-active);
+  border-color: var(--accent);
+  color: var(--text-strong);
+}
+.batch-flag {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.batch-form {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+  margin-top: 10px;
+}
+.batch-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.batch-field.batch-pattern {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.batch-field > input[type="number"] {
+  width: 76px;
+}
+/* The regex mode has two rows of fields: the expression and its replacement, then the
+   numbering that `{n}` uses. */
+.batch-form + .batch-form {
+  margin-top: 6px;
+}
+.batch-input {
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  box-sizing: border-box;
+}
+.batch-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.batch-hint {
+  margin: 8px 0 0;
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+.batch-list {
+  margin-top: 10px;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: 4px 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.batch-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 10px;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+.batch-old,
+.batch-new {
+  flex: 1 1 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.batch-old {
+  color: var(--text-dim);
+}
+.batch-new {
+  color: var(--text-strong);
+}
+.batch-arrow {
+  color: var(--muted);
+}
+.batch-row.bad .batch-new {
+  color: var(--danger);
+}
+.batch-problem {
+  color: var(--danger);
+  font-size: 11.5px;
+}
+/* Ordering the list: the sort control above it, and the row-level nudge handles. */
+.batch-order {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.batch-order-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.batch-input.batch-sort {
+  padding: 4px 6px;
+  font-size: 12px;
+}
+.batch-dir {
+  padding: 3px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.batch-dir:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.batch-order-hint {
+  margin: 0;
+  font-size: 11px;
+}
+.batch-row[draggable="true"] {
+  cursor: grab;
+}
+.batch-row.dragging {
+  opacity: 0.5;
+}
+.batch-row.over {
+  box-shadow: inset 0 1px 0 var(--accent-soft);
+}
+.batch-grip {
+  color: var(--muted);
+  font-size: 10px;
+  letter-spacing: -2px;
+  opacity: 0.55;
+}
+.batch-move {
+  display: flex;
+  align-self: center;
+  gap: 2px;
+  margin-left: 2px;
+  opacity: 0;
+}
+.batch-row:hover .batch-move,
+.batch-row:focus-within .batch-move {
+  opacity: 1;
+}
+.batch-move button {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
+  padding: 2px 3px;
+  cursor: pointer;
+}
+.batch-move button:hover:enabled {
+  color: var(--text-strong);
+}
+.batch-move button:disabled {
+  opacity: 0.25;
+  cursor: default;
 }
 .btn {
   padding: 8px 16px;

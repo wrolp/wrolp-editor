@@ -100,6 +100,12 @@ export interface Renamed {
   path: string;
 }
 
+/** One entry of a batch rename: a bare name for the entry at `path`. */
+export interface RenameInput {
+  path: string;
+  name: string;
+}
+
 export interface Settings {
   fontSize: number;
   minimap: boolean;
@@ -455,6 +461,16 @@ export const api = {
    */
   renamePath: (path: string, name: string) =>
     invoke<Renamed>("rename_path", { path, name }),
+  /**
+   * Rename several entries at once.
+   *
+   * The whole batch is checked before anything moves, so a refused name leaves the disk
+   * alone; names that are still occupied by other entries of the batch — a numbering that
+   * shifts, a swap — are handled by the backend stepping through a temporary name. Returns
+   * one `oldPath`/`path` pair per item, in the order asked for.
+   */
+  renameEntries: (items: RenameInput[]) =>
+    invoke<Renamed[]>("rename_entries", { items }),
   /**
    * Create an empty file inside a folder. `name` is a bare name, and the backend appends
    * `.txt` to one typed without any dot, so the result is a text file rather than a name

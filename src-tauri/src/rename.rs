@@ -12,8 +12,9 @@ use crate::file_settings;
 use crate::group::GroupStore;
 use crate::unlock::{self, UnlockStore};
 use crate::versioning;
-use serde::Serialize;
-use std::path::Path;
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 use zeroize::Zeroize;
 
@@ -149,6 +150,220 @@ pub fn rename_path(app: AppHandle, path: String, name: String) -> Result<Renamed
     old_path: old,
     path: new,
   })
+}
+
+/// One rename asked for as part of a batch: the entry at `path` takes the bare name `name`.
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RenameRequest {
+  pub path: String,
+  pub name: String,
+}
+
+/// One entry a batch will move, plus the name it waits under when its target is still
+/// occupied by another entry of the same batch.
+struct Planned {
+  old: String,
+  new: String,
+  /// True when another planned entry is moving out of `new`, so that name is only free once
+  /// that entry has moved. Such an entry steps aside first and lands in the second pass.
+  waits: bool,
+  /// The temporary name it steps aside to, filled in while the batch runs.
+  bridge: String,
+}
+
+/// Rename several entries, and re-home the state that follows each of them.
+///
+/// A batch is what makes one name depend on the whole list: numbering that shifts every file
+/// by one has targets still occupied by entries waiting their turn. The disk work therefore
+/// runs in two passes — the entries whose target is occupied step aside to a temporary name,
+/// then everything lands — and a failure in either pass puts back what had already moved.
+///
+/// Everything is checked before anything moves, so a refused batch leaves the disk alone.
+#[tauri::command]
+pub fn rename_entries(app: AppHandle, items: Vec<RenameRequest>) -> Result<Vec<Renamed>, String> {
+  let mut planned = plan_batch(&items)?;
+  apply_batch(&mut planned)?;
+  rekey_batch(&app, &planned)?;
+  Ok(
+    planned
+      .into_iter()
+      .map(|item| Renamed {
+        old_path: item.old,
+        path: item.new,
+      })
+      .collect(),
+  )
+}
+
+/// Read a batch against the disk: every name usable, every source there, no two entries
+/// landing on one name, and nothing the rename would have to overwrite.
+fn plan_batch(items: &[RenameRequest]) -> Result<Vec<Planned>, String> {
+  if items.is_empty() {
+    return Err("rename_batch_empty".into());
+  }
+  let mut planned = Vec::with_capacity(items.len());
+  let mut sources = HashSet::with_capacity(items.len());
+  for item in items {
+    let clean = validate_name(&item.name)?;
+    let old = draft::normalize_path(&item.path);
+    if old.is_empty() {
+      return Err("path_empty".into());
+    }
+    // The same entry twice: the second rename would look for a file the first one moved.
+    if !sources.insert(old.clone()) {
+      return Err("rename_batch_duplicate".into());
+    }
+    let source = Path::new(&old);
+    source
+      .metadata()
+      .map_err(|e| format!("rename_not_found:{e}"))?;
+    if refused_by_scope(source, &protected_roots()) {
+      return Err("rename_refused".into());
+    }
+    let parent = source.parent().ok_or("rename_no_parent")?;
+    let new = draft::normalize_path(&parent.join(&clean).to_string_lossy());
+    if new.is_empty() {
+      return Err("path_unresolvable".into());
+    }
+    planned.push(Planned {
+      old,
+      new,
+      waits: false,
+      bridge: String::new(),
+    });
+  }
+  // A folder carries its subtree, so renaming it together with something inside it would move
+  // one entry twice, and the inner path is gone by the time it is its turn.
+  for outer in &planned {
+    for inner in &planned {
+      if inner.old != outer.old && under(&inner.old, &outer.old) {
+        return Err("rename_batch_nested".into());
+      }
+    }
+  }
+  // Two entries may not land on one name, whether they are in one folder or rely on the same
+  // name in different ones only by accident.
+  let mut targets = HashSet::new();
+  for item in planned.iter().filter(|item| item.new != item.old) {
+    if !targets.insert(item.new.clone()) {
+      return Err("rename_batch_duplicate".into());
+    }
+  }
+  // An occupied target is only fine when the entry occupying it is one of this batch's own
+  // sources; anything else would be overwritten rather than moved.
+  let vacated: HashSet<String> = planned
+    .iter()
+    .filter(|item| item.new != item.old)
+    .map(|item| item.old.clone())
+    .collect();
+  for item in planned.iter_mut().filter(|item| item.new != item.old) {
+    if vacated.contains(&item.new) {
+      item.waits = true;
+    } else if Path::new(&item.new).exists() {
+      return Err("rename_exists".into());
+    }
+  }
+  Ok(planned)
+}
+
+/// Do the moves `plan_batch` approved, and nothing else.
+fn apply_batch(planned: &mut [Planned]) -> Result<(), String> {
+  let mut bridged = Vec::new();
+  for index in 0..planned.len() {
+    if !planned[index].waits {
+      continue;
+    }
+    let parent = Path::new(&planned[index].old)
+      .parent()
+      .ok_or("rename_no_parent")?;
+    let bridge = free_bridge(parent);
+    if let Err(e) = std::fs::rename(&planned[index].old, &bridge) {
+      undo_batch(planned, &[], &bridged);
+      return Err(format!("rename_failed:{e}"));
+    }
+    planned[index].bridge = bridge.to_string_lossy().to_string();
+    bridged.push(index);
+  }
+  // The entries whose name was already free go first, so a waiting entry's target has been
+  // vacated by the time it lands.
+  let mut landed: Vec<usize> = Vec::new();
+  for index in 0..planned.len() {
+    if planned[index].waits || planned[index].new == planned[index].old {
+      continue;
+    }
+    if let Err(e) = std::fs::rename(&planned[index].old, &planned[index].new) {
+      undo_batch(planned, &landed, &bridged);
+      return Err(format!("rename_failed:{e}"));
+    }
+    landed.push(index);
+  }
+  for &index in &bridged {
+    if let Err(e) = std::fs::rename(&planned[index].bridge, &planned[index].new) {
+      undo_batch(planned, &landed, &bridged);
+      return Err(format!("rename_failed:{e}"));
+    }
+    landed.push(index);
+  }
+  Ok(())
+}
+
+/// Put back what a failed batch had already moved, best effort.
+///
+/// Each index appears at exactly one of the two names it could have reached, so the undo asks
+/// for the final name first and the bridge second; an entry still waiting under its bridge is
+/// the one the second rename finds. A rollback that itself fails is not reported — the error
+/// that stopped the batch is the one worth saying, and a second one would only bury it.
+fn undo_batch(planned: &[Planned], landed: &[usize], bridged: &[usize]) {
+  for &index in landed.iter().rev() {
+    let _ = std::fs::rename(&planned[index].new, &planned[index].old);
+  }
+  for &index in bridged.iter().rev() {
+    let _ = std::fs::rename(&planned[index].bridge, &planned[index].old);
+  }
+}
+
+/// A name no entry is using, in the folder the entry came from.
+///
+/// Short on purpose: the entry's own name may already sit at the length Windows allows, and a
+/// temporary name derived from it would be one character too long to move to.
+fn free_bridge(parent: &Path) -> PathBuf {
+  let stamp = std::time::SystemTime::now()
+    .duration_since(std::time::UNIX_EPOCH)
+    .map(|since| since.as_nanos())
+    .unwrap_or(0);
+  for attempt in 0..1000u32 {
+    let candidate = parent.join(format!(".wrolp-rename-{stamp:x}-{attempt}"));
+    if !candidate.exists() {
+      return candidate;
+    }
+  }
+  parent.join(format!(".wrolp-rename-{stamp:x}"))
+}
+
+/// Move every stored path that pointed at an old name to the new one.
+///
+/// Two passes when anything had to wait: the state has to leave the old names before any of it
+/// is stored under a new one, or a swap would have the first side overwrite the second's
+/// records while they are still under their original paths.
+fn rekey_batch(app: &AppHandle, planned: &[Planned]) -> Result<(), String> {
+  let waits: Vec<&Planned> = planned
+    .iter()
+    .filter(|item| item.new != item.old && !item.bridge.is_empty())
+    .collect();
+  for item in &waits {
+    rekey_state(app, &item.old, &item.bridge)?;
+  }
+  for item in &waits {
+    rekey_state(app, &item.bridge, &item.new)?;
+  }
+  for item in planned
+    .iter()
+    .filter(|item| item.new != item.old && item.bridge.is_empty())
+  {
+    rekey_state(app, &item.old, &item.new)?;
+  }
+  Ok(())
 }
 
 /// Move every stored path that pointed at `old` or inside it.
@@ -347,5 +562,107 @@ mod tests {
     assert!(!under(r"c:\a", r"c:\a\b"));
     assert!(under(r"c:\a", r"c:\a"));
     assert!(!under(r"c:\ab", r"c:\a"));
+  }
+
+  /// A fresh folder per test, named after it so two tests cannot share one.
+  fn sandbox(tag: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("wrolp-rename-{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    dir
+  }
+
+  fn ask(dir: &Path, from: &str, to: &str) -> RenameRequest {
+    RenameRequest {
+      path: dir.join(from).to_string_lossy().to_string(),
+      name: to.to_string(),
+    }
+  }
+
+  #[test]
+  fn a_batch_moves_every_entry_and_lands_the_new_names() {
+    let dir = sandbox("plain");
+    std::fs::write(dir.join("a.txt"), "a").unwrap();
+    std::fs::write(dir.join("b.txt"), "b").unwrap();
+    let items = [ask(&dir, "a.txt", "one.txt"), ask(&dir, "b.txt", "two.txt")];
+    let mut planned = plan_batch(&items).unwrap();
+    apply_batch(&mut planned).unwrap();
+    assert!(dir.join("one.txt").exists() && dir.join("two.txt").exists());
+    assert!(!dir.join("a.txt").exists() && !dir.join("b.txt").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  /// Each target is occupied for the whole of the batch, which is what the two passes are for.
+  #[test]
+  fn a_swap_goes_through_a_temporary_name() {
+    let dir = sandbox("swap");
+    std::fs::write(dir.join("a.txt"), "A").unwrap();
+    std::fs::write(dir.join("b.txt"), "B").unwrap();
+    let items = [ask(&dir, "a.txt", "b.txt"), ask(&dir, "b.txt", "a.txt")];
+    let mut planned = plan_batch(&items).unwrap();
+    assert!(planned.iter().all(|item| item.waits));
+    apply_batch(&mut planned).unwrap();
+    assert_eq!(std::fs::read_to_string(dir.join("b.txt")).unwrap(), "A");
+    assert_eq!(std::fs::read_to_string(dir.join("a.txt")).unwrap(), "B");
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  /// A target occupied by an entry the batch is not moving would be overwritten, so the whole
+  /// batch is refused before anything on disk changes.
+  #[test]
+  fn a_target_another_entry_is_not_leaving_is_refused_before_anything_moves() {
+    let dir = sandbox("taken");
+    std::fs::write(dir.join("a.txt"), "a").unwrap();
+    std::fs::write(dir.join("taken.txt"), "t").unwrap();
+    let items = [ask(&dir, "a.txt", "taken.txt")];
+    assert!(matches!(plan_batch(&items), Err(code) if code == "rename_exists"));
+    assert!(dir.join("a.txt").exists() && dir.join("taken.txt").exists());
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn two_entries_may_not_land_on_one_name() {
+    let dir = sandbox("same-target");
+    std::fs::write(dir.join("a.txt"), "a").unwrap();
+    std::fs::write(dir.join("b.txt"), "b").unwrap();
+    let items = [ask(&dir, "a.txt", "same.txt"), ask(&dir, "b.txt", "same.txt")];
+    assert!(matches!(plan_batch(&items), Err(code) if code == "rename_batch_duplicate"));
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn one_entry_named_twice_is_refused() {
+    let dir = sandbox("twice");
+    std::fs::write(dir.join("a.txt"), "a").unwrap();
+    let items = [ask(&dir, "a.txt", "one.txt"), ask(&dir, "a.txt", "two.txt")];
+    assert!(matches!(plan_batch(&items), Err(code) if code == "rename_batch_duplicate"));
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  /// A folder carries its subtree, so the inner path would be gone when its turn came.
+  #[test]
+  fn a_folder_and_its_child_cannot_move_in_one_batch() {
+    let dir = sandbox("nested");
+    std::fs::create_dir_all(dir.join("sub")).unwrap();
+    std::fs::write(dir.join("sub").join("x.txt"), "x").unwrap();
+    let items = [
+      ask(&dir, "sub", "renamed"),
+      ask(&dir, "sub/x.txt", "y.txt"),
+    ];
+    assert!(matches!(plan_batch(&items), Err(code) if code == "rename_batch_nested"));
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  /// Windows folds case, so a batch that only changes the spelling asks for nothing.
+  #[test]
+  fn a_name_that_only_changes_case_moves_nothing() {
+    let dir = sandbox("case");
+    std::fs::write(dir.join("a.txt"), "a").unwrap();
+    let items = [ask(&dir, "a.txt", "A.txt")];
+    let mut planned = plan_batch(&items).unwrap();
+    assert_eq!(planned[0].old, planned[0].new);
+    apply_batch(&mut planned).unwrap();
+    assert!(dir.join("a.txt").exists());
+    let _ = std::fs::remove_dir_all(&dir);
   }
 }
