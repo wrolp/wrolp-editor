@@ -125,7 +125,7 @@ export interface Settings {
    * away from discarding it.
    */
   draftRestore: string;
-  /** Folder the Explorer shows. Global view state, not part of a group. */
+  /** Where the Explorer stood before groups kept their own folder; read once at startup. */
   sidebarRoot: string;
   /** Expand folders when a directory is opened. Off by default. */
   expandFolders: boolean;
@@ -330,6 +330,8 @@ export interface Group {
   tabs: GroupTab[];
   /** Key of the selected tab: its path, or `untitled://<name>`. Empty when none. */
   active: string;
+  /** Folder the Explorer shows while this group is on screen; empty when it has none. */
+  root: string;
   updatedAt: string;
 }
 

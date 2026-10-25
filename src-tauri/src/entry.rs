@@ -10,9 +10,7 @@
 //! text of files that were open when the entry went; a file deleted by mistake and created
 //! again should still be offered its own edits back, which is the one thing left that can be.
 
-use crate::commands::{
-  self, protected_roots, refused_by_scope, FsEntry, HistoryEntry, SavedFile, Settings,
-};
+use crate::commands::{self, protected_roots, refused_by_scope, FsEntry, HistoryEntry, SavedFile};
 use crate::draft;
 use crate::group::{GroupStore, GroupTab};
 use crate::rename::{check_name, under, NameError};
@@ -431,9 +429,8 @@ pub fn remove_entry(app: AppHandle, path: String) -> Result<(), String> {
 /// fails, and a session that restores a list of failures is worse than one that restores a
 /// shorter list.
 fn drop_state(app: &AppHandle, gone: &str) -> Result<(), String> {
-  drop_group_tabs(app, gone)?;
-  drop_history(app, gone)?;
-  lift_sidebar_root(app, gone)
+  drop_group_state(app, gone)?;
+  drop_history(app, gone)
 }
 
 /// The tabs a group keeps once `gone` is deleted, and the selection it is left pointing at.
@@ -451,15 +448,30 @@ fn drop_tabs(tabs: &mut Vec<GroupTab>, active: &mut String, gone: &str) -> bool 
   false
 }
 
-fn drop_group_tabs(app: &AppHandle, gone: &str) -> Result<(), String> {
+/// What each group keeps once `gone` is deleted: its tabs (minus any inside `gone`), the
+/// selection it is left pointing at, and its Explorer folder.
+///
+/// The folder is lifted to the parent rather than cleared. The tree was showing something that
+/// has just been deleted out from under it, and the parent is the one place certain to be
+/// there; a root pointing at nothing is a dead sidebar. Groups showing a folder elsewhere are
+/// left alone.
+fn drop_group_state(app: &AppHandle, gone: &str) -> Result<(), String> {
   let Some(mut store) = commands::read_json::<GroupStore>(app, commands::GROUPS_FILE)? else {
     return Ok(());
   };
+  let lifted = Path::new(gone)
+    .parent()
+    .map(|p| draft::normalize_path(&p.to_string_lossy()))
+    .unwrap_or_default();
   let mut changed = false;
   for item in &mut store.items {
     let mut active = item.active.clone();
     if drop_tabs(&mut item.tabs, &mut active, gone) {
       item.active = active;
+      changed = true;
+    }
+    if !item.root.is_empty() && under(&item.root, gone) {
+      item.root = lifted.clone();
       changed = true;
     }
   }
@@ -479,33 +491,6 @@ fn drop_history(app: &AppHandle, gone: &str) -> Result<(), String> {
     commands::write_json(app, "history.json", &history)?;
   }
   Ok(())
-}
-
-/// Keep the Explorer pointing at a folder that exists.
-///
-/// The parent is the one place that is certain to be there: whatever the tree was showing has
-/// just been deleted out from under it, and a root pointing at nothing is a dead sidebar.
-fn lift_sidebar_root(app: &AppHandle, gone: &str) -> Result<(), String> {
-  let Some(settings) = commands::read_json::<Settings>(app, "settings.json")? else {
-    return Ok(());
-  };
-  let root = draft::normalize_path(&settings.sidebar_root);
-  if root.is_empty() || !under(&root, gone) {
-    return Ok(());
-  }
-  let lifted = Path::new(gone)
-    .parent()
-    .map(|p| draft::normalize_path(&p.to_string_lossy()))
-    .unwrap_or_default();
-  let settings = settings.filled();
-  commands::write_json(
-    app,
-    "settings.json",
-    &Settings {
-      sidebar_root: lifted,
-      ..settings
-    },
-  )
 }
 
 #[cfg(test)]

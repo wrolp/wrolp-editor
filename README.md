@@ -22,7 +22,7 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | Drafts | Debounced ~500 ms after each edit; also flushed on tab switch, tab close and window blur |
 | Auto-save | Off by default. On, the file **on screen** is written once it has gone N seconds without an edit — typing restarts that file's countdown, so the write lands on a pause rather than mid-sentence. A tab you are not looking at neither starts a countdown nor loses one already running, and its unsaved text stays held by its draft. Untitled buffers, locked files, pictures, and anything the disk check already has a question about are left alone. Its writes record no version unless Settings → Versions says otherwise |
 | Restore | On open, disk content is compared with the draft; a differing draft is loaded back and the tab stays marked unsaved. Settings can switch this to a per-file Restore / Discard dialog |
-| Sidebar | Explorer file tree (lazy folders, refresh button), a History list of recently opened files, and a Versions view. Drag the divider to resize (180–640 px, double-click resets); the width is persisted. The tree's text size is a setting, 11–20 px |
+| Sidebar | Explorer file tree (lazy folders, refresh button, folders first and names in natural order — `2.txt` before `10.txt`), a History list of recently opened files, and a Versions view. Drag the divider to resize (180–640 px, double-click resets); the width is persisted. The tree's text size is a setting, 11–20 px |
 | Picture gallery | A whole folder in one tab, in natural order (`IMG_2` before `IMG_10`): stacked, one at a time, slideshow, or a grid. Subfolders are opt-in and walked four levels deep; one listing stops at 2,000 pictures and says so. Pictures are drawn through the asset protocol, so the editor's text-size limit does not apply. HEIC and TIFF are listed and marked as formats this renderer cannot draw |
 | Batch rename | Multi-select rows or rename a whole folder at once; one pattern (`{name}`, `{ext}`, `{n}`) or a regular expression with a replacement, a live preview, and an order — name, extension, modified time or manual — that `{n}` counts. See [Batch rename](#batch-rename) |
 | Version history | Off by default. On, every save by hand records what the file said, and any two of them — a version against a version, or either against what is open — can be compared side by side, folded down to the changes, or put back into the editor. One file's saves can be excluded, or forced in, from its tab menu. See [Version history](#version-history) |
@@ -30,7 +30,7 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | Settings | Context-menu switch, editor font size, minimap, UI language; persisted and applied live. The context-menu page also shows the command the entry currently launches, and warns when it points at a different build or when this is a debug build |
 | Language | English by default, switchable to 中文 from a dropdown in Settings. All strings, including messages coming from the Rust side, resolve through one key table |
 | Updates | Settings → About checks the latest GitHub release on request, then downloads and hands the signed NSIS package to the passive installer, which restarts the app. Nothing checks in the background |
-| Tab groups | A group is a **named set of open tabs**. The chip in the title bar switches between them inside the same window; tabs and caret positions come back on the next start |
+| Tab groups | A group is a **named set of open tabs plus the folder the Explorer shows**. The chip in the title bar switches between them inside the same window — tabs, caret positions and the tree come back with it |
 | Move / copy tabs | A tab can be re-homed into another group from its context menu. This changes *which group lists the tab*, never the file on disk |
 | Configuration backups | Timestamped snapshots of groups, settings, recent files and folder history, refreshed when the app opens and closes and on demand; older ones are pruned to a count you set, and any snapshot can be restored from Settings → Backups. Drafts and version history are not included |
 | Comparison | A read-only side-by-side diff of any two contents. Either side may be a file on disk or an unsaved buffer (an untitled tab included); a file against its own unsaved text has an entry of its own, and re-running a comparison refreshes its snapshot |
@@ -163,9 +163,9 @@ wrolp/
     │                         trimTrailingWhitespace, insertFinalNewline, autoSave, autoSaveInterval,
     │                         versioningEnabled, versioningShowLimit, versioningMaxFileSize, autoSaveVersions,
     │                         askNoteOnSave, backupDir, backupRetain,
-    │                         sidebarRoot, encryptIdleMinutes
+    │                         encryptIdleMinutes
     ├── file-settings.json    per-file overrides: encoding, line ending, view settings, versioning
-    ├── groups.json           the tab groups: name, tabs and caret positions
+    ├── groups.json           the tab groups: name, tabs, caret positions and the Explorer folder
     └── window.json           x, y, width, height in physical pixels, plus the maximized flag
 ```
 
@@ -207,10 +207,10 @@ boolean, because a value in a JavaScript heap is a value in a devtools console.
 
 ## Tab groups
 
-A group is a **named set of open tabs**. The chip in the title bar shows the current name and
-switches between groups inside the same window. Which folder the Explorer shows is a separate,
-global view setting (`sidebarRoot`), so two groups may sit on the same folder and one group may
-hold files from several folders.
+A group is a **named set of open tabs** plus the **folder the Explorer shows** while it is on
+screen. The chip in the title bar shows the current name and switches between groups inside the
+same window; the tree switches with it. A group may still hold files from several folders — the
+folder is where the next file is picked from, not where the open ones came from.
 
 - **There is always a group.** A window with no groups starts with one called *Default*, so tabs are
   persisted from the first moment without the user having to create anything. *New group…* asks for a
@@ -219,10 +219,12 @@ hold files from several folders.
   a fresh default.
 - **Files join the group on screen.** Opening a file from the Explorer context menu adds it to the
   current group; a right-click never changes your context under you. *Open folder…* and *Show folder
-  in sidebar* move the sidebar only — they do not create or switch a group.
-- **What is remembered:** the tab order, which tab was selected, and the caret position per tab
-  (`Settings → Reopen tabs from last time` turns this off), plus the text of untitled tabs, which
-  have no draft file so the group is their only copy. Capped at 32 groups, 200 tabs each, 64 KB of
+  in sidebar* move the Explorer and record the folder in that group — they do not create or switch
+  a group. A new group starts where the window already is, and can move on its own after that.
+- **What is remembered:** the tab order, which tab was selected, the caret position per tab
+  (`Settings → Reopen tabs from last time` turns this off), and the Explorer folder, plus the text
+  of untitled tabs, which have no draft file so the group is their only copy. Capped at 32 groups,
+  200 tabs each, 64 KB of
   scratch text per tab.
 - **Content is never duplicated.** File-backed tabs store only path + caret; unsaved text stays in
   the draft file, keyed by path. That is why a tab can be moved to another group without touching

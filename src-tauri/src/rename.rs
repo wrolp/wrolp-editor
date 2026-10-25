@@ -6,7 +6,7 @@
 //! filesystem would leave all of those pointing at a file that no longer exists, so the
 //! command moves the entry and then moves the state that follows it.
 
-use crate::commands::{self, protected_roots, refused_by_scope, HistoryEntry, Settings};
+use crate::commands::{self, protected_roots, refused_by_scope, HistoryEntry};
 use crate::draft;
 use crate::file_settings;
 use crate::group::GroupStore;
@@ -373,10 +373,11 @@ fn rekey_state(app: &AppHandle, old: &str, new: &str) -> Result<(), String> {
   // Each version history stands for one path, recorded in the repository's own metadata, so a
   // rename walks the store instead of reading a single commit.
   versioning::rekey_prefix(&versioning::base_dir(app)?, old, new)?;
+  // The groups store carries both the tab paths and each group's Explorer folder.
   rekey_groups(app, old, new)?;
   rekey_history(app, old, new)?;
   rekey_unlock(app, old, new);
-  rekey_sidebar_root(app, old, new)
+  Ok(())
 }
 
 /// What a rename does to the two halves of the unlock state.
@@ -435,29 +436,6 @@ fn rekey_history(app: &AppHandle, old: &str, new: &str) -> Result<(), String> {
     commands::write_json(app, "history.json", &history)?;
   }
   Ok(())
-}
-
-fn rekey_sidebar_root(app: &AppHandle, old: &str, new: &str) -> Result<(), String> {
-  let Some(settings) = commands::read_json::<Settings>(app, "settings.json")? else {
-    return Ok(());
-  };
-  let root = draft::normalize_path(&settings.sidebar_root);
-  if root.is_empty() {
-    return Ok(());
-  }
-  let moved = rekey(&root, old, new);
-  if moved == root {
-    return Ok(());
-  }
-  let settings = settings.filled();
-  commands::write_json(
-    app,
-    "settings.json",
-    &Settings {
-      sidebar_root: moved,
-      ..settings
-    },
-  )
 }
 
 #[cfg(test)]

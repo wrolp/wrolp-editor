@@ -463,8 +463,6 @@ export default function App() {
             : "explorer"
       );
       setSidebarWidth(loadedSettings.sidebarWidth);
-      // The Explorer folder is global view state; a group only remembers tabs.
-      setRootDir(loadedSettings.sidebarRoot || null);
 
       // Refresh the day's snapshot with the configuration this session opens on, before
       // anything here can change it. A failure is not worth a toast over a backup nobody
@@ -476,6 +474,13 @@ export default function App() {
         return null;
       });
       const active = store?.active ? store.items.find((w) => w.id === store.active) ?? null : null;
+      // The Explorer folder belongs to the group, but it used to be one global setting. Adopt
+      // that folder into the groups of an install from before that, once, so it opens where
+      // it left off; from then on every group remembers its own.
+      groupsRef.current.adoptRoot(loadedSettings.sidebarRoot);
+      const root = active?.root || loadedSettings.sidebarRoot || "";
+      rootRef.current = root || null;
+      setRootDir(root || null);
       if (active && loadedSettings.restoreSession && active.tabs.length > 0) {
         const result = await tabs.restoreTabs(active.tabs, active.active);
         if (result.skipped > 0) toast(t("grp.skipped", { n: result.skipped }));
@@ -565,12 +570,12 @@ export default function App() {
   }, [booted, commitLive, tabs.tabs, tabs.activeId, tabs.cursorRev]);
 
   fileOpened.current = (dir: string) => {
-    // The Explorer follows a file only while it has no folder of its own; after that,
+    // The Explorer follows a file only while the group has no folder of its own; after that,
     // moving it is a deliberate action (Open folder… / Show folder in sidebar).
     if (!rootRef.current) {
       rootRef.current = dir;
       setRootDir(dir);
-      saveSettingsRef.current({ sidebarRoot: dir });
+      groupsRef.current.setRoot(dir);
     }
     commitLive(true);
   };
@@ -583,7 +588,7 @@ export default function App() {
    */
   useEffect(() => {
     if (!booted || groups.store.items.length > 0) return;
-    groupsRef.current.create(t("grp.default"));
+    groupsRef.current.create(t("grp.default"), rootRef.current ?? "");
     commitLive(true);
   }, [booted, commitLive, groups.store.items.length]);
 
@@ -609,6 +614,9 @@ export default function App() {
         await draft.flushAll();
         groupsRef.current.commit(snapshotOf.current(), true);
         groupsRef.current.select(id);
+        // The Explorer belongs to the group as much as the tabs do: bring its folder back.
+        rootRef.current = target.root || null;
+        setRootDir(target.root || null);
         tabs.clearAllTabs();
         if (target.tabs.length > 0) {
           const result = await tabs.restoreTabs(target.tabs, target.active);
@@ -634,7 +642,10 @@ export default function App() {
       try {
         await draft.flushAll();
         groupsRef.current.commit(snapshotOf.current(), true);
-        const { group: created, problem } = groupsRef.current.create(name);
+        const { group: created, problem } = groupsRef.current.create(
+          name,
+          rootRef.current ?? ""
+        );
         if (!created) {
           // The dialog validated the name already; a race here just leaves things as they were.
           if (problem === "duplicate") toast(t("grp.nameDuplicate"));
@@ -650,8 +661,10 @@ export default function App() {
     [draft, tabs, toast]
   );
 
-  /** Forget the current context but keep the entry, per the "Close group" menu item. */
-  /** Forget a group's tabs but keep the entry; the sidebar folder is global and stays. */
+  /**
+   * Forget a group's tabs but keep the entry, per the "Close group" menu item. Its Explorer
+   * folder stays: the group still exists, and closing tabs is not moving the tree.
+   */
   const clearGroup = useCallback(
     async (id: string) => {
       const target = groupsRef.current.store.items.find((w) => w.id === id);
@@ -858,14 +871,14 @@ export default function App() {
   }, []);
 
   /**
-   * Move the Explorer to another folder. The folder itself is global view state — it does not
-   * open or switch a group — but where it has been is remembered per group.
+   * Move the Explorer to another folder. The folder belongs to the group on screen, so
+   * switching away and back brings it back; it does not open or switch a group.
    */
   const setSidebarRoot = useCallback(
     (dir: string) => {
       rootRef.current = dir;
       setRootDir(dir);
-      saveSettings({ sidebarRoot: dir });
+      groupsRef.current.setRoot(dir);
       // Every way of moving the Explorer goes through here — the folder picker, the parent
       // button, "Set as Explorer folder", a rename that moves the root — so this one call
       // records all of them, into the menu of the group that is on screen. Recording is a
@@ -876,7 +889,7 @@ export default function App() {
         .then(refreshFolderHistory)
         .catch(() => refreshFolderHistory());
     },
-    [refreshFolderHistory, saveSettings]
+    [refreshFolderHistory]
   );
 
   /**
@@ -1834,7 +1847,16 @@ const defaultModeFor = useCallback(
             onNew={() => setNewGroupOpen(true)}
             onRename={groups.rename}
             onClear={(id) => void clearGroup(id)}
-            onRemove={groups.remove}
+            onRemove={(id) => {
+              const wasActive = id === groups.store.active;
+              groups.remove(id);
+              if (!wasActive) return;
+              // The group on screen changed, so the Explorer follows it — the same folder
+              // rule a deliberate switch uses.
+              const next = groups.store.items.find((g) => g.id !== id) ?? null;
+              rootRef.current = next?.root || null;
+              setRootDir(next?.root || null);
+            }}
           />
         }
         // The control describes the tab on screen, and the Settings page has no pane for it.

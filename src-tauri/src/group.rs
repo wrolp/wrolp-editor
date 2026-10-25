@@ -1,6 +1,6 @@
-//! Group storage: a group is a **named set of open tabs**. Which folder the Explorer shows
-//! is global view state (`Settings.sidebar_root`), so two groups may sit on the same folder
-//! and one group may hold files from several folders.
+//! Group storage: a group is a **named set of open tabs** plus the folder the Explorer shows
+//! while that group is on screen. Switching groups therefore switches both; a group may hold
+//! files from several folders, and the one it sits on is where the next file is picked from.
 
 use crate::draft::normalize_path;
 use chrono::Utc;
@@ -51,6 +51,10 @@ pub struct Group {
   pub tabs: Vec<GroupTab>,
   /// `GroupTab::key()` of the selected tab, empty when none.
   pub active: String,
+  /// Folder the Explorer shows while this group is on screen, normalized; empty when the
+  /// group has never shown one. Files the group holds may live elsewhere: this is where the
+  /// next one is picked from, not where the open ones came from.
+  pub root: String,
   pub updated_at: String,
 }
 
@@ -130,6 +134,7 @@ impl GroupStore {
         name,
         tabs,
         active,
+        root: normalize_path(&item.root),
         updated_at: if item.updated_at.is_empty() {
           Utc::now().to_rfc3339()
         } else {
@@ -173,7 +178,8 @@ impl GroupStore {
     self
   }
 
-  /// Re-home every tab that pointed at a file or folder which has just been renamed.
+  /// Re-home every tab that pointed at a file or folder which has just been renamed, and the
+  /// Explorer folder of any group that was showing it.
   ///
   /// `active` is a tab key, so it travels with the tab it names; scratch tabs have no path
   /// to move and are left as they are.
@@ -185,6 +191,8 @@ impl GroupStore {
         }
       }
       item.active = crate::rename::rekey(&item.active, old, new);
+      // `rekey` leaves an empty string alone, so a group with no folder stays that way.
+      item.root = crate::rename::rekey(&item.root, old, new);
     }
   }
 
@@ -342,11 +350,77 @@ mod tests {
     assert_eq!(store.active, "ws-1");
     assert_eq!(store.items[0].name, "notes");
     assert_eq!(store.items[0].tabs[0].cursor, 3);
+    // The old record's folder is read again, so a workspace from that era reopens on it.
+    assert!(!store.items[0].root.is_empty());
+  }
+
+  fn temp_dir(tag: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!(
+      "wrolp-groups-{tag}-{}-{}",
+      std::process::id(),
+      std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos()
+    ));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    dir
+  }
+
+  /// The Explorer folder belongs to the group: it is stored next to the tabs, normalized like
+  /// every other path, and it survives the round trip to groups.json.
+  #[test]
+  fn a_groups_explorer_folder_is_stored_normalized() {
+    let dir = temp_dir("root");
+    let raw = dir.to_string_lossy().to_string();
+    let filled = store(vec![Group {
+      root: format!("{raw}{}", std::path::MAIN_SEPARATOR),
+      ..grp("a", "notes", vec![])
+    }])
+    .filled();
+    let expected = crate::draft::normalize_path(&raw);
+    assert_eq!(filled.items[0].root, expected);
+
+    let json = serde_json::to_string(&filled).expect("serialize");
+    let back: GroupStore = serde_json::from_str(&json).expect("parse");
+    assert_eq!(back.items[0].root, expected);
+    std::fs::remove_dir_all(&dir).ok();
+  }
+
+  /// A renamed folder takes the Explorer folder of every group showing it, and leaves a group
+  /// showing a different folder — or no folder at all — exactly where it was.
+  #[test]
+  fn a_renamed_folder_moves_the_groups_explorer_folder() {
+    let base = temp_dir("rekey-root");
+    let inside = base.join("a");
+    std::fs::create_dir_all(&inside).expect("folder");
+    let old = crate::draft::normalize_path(&inside.to_string_lossy());
+    let new = crate::draft::normalize_path(&base.join("z").to_string_lossy());
+    let other = crate::draft::normalize_path(&base.join("other").to_string_lossy());
+    let mut prepared = store(vec![
+      Group {
+        root: old.clone(),
+        ..grp("a", "first", vec![])
+      },
+      Group {
+        root: other.clone(),
+        ..grp("b", "second", vec![])
+      },
+      Group {
+        root: String::new(),
+        ..grp("c", "third", vec![])
+      },
+    ])
+    .filled();
+    prepared.rekey_prefix(&old, &new);
+    assert_eq!(prepared.group("a").unwrap().root, new);
+    assert_eq!(prepared.group("b").unwrap().root, other);
+    assert_eq!(prepared.group("c").unwrap().root, "");
+    std::fs::remove_dir_all(&base).ok();
   }
 
   #[test]
-  fn empty_store_is_not_an_error() {
-    let filled = GroupStore::default().filled();
+  fn empty_store_is_not_an_error() {    let filled = GroupStore::default().filled();
     assert_eq!(filled.version, STORE_VERSION);
     assert_eq!(filled.active, "");
     assert!(filled.items.is_empty());

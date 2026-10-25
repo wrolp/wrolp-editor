@@ -127,8 +127,9 @@ pub struct Settings {
   /// `auto` is the default because the draft is the only copy of that typing, and a dialog
   /// that can be dismissed by reflex throws it away.
   pub draft_restore: String,
-  /// Folder the Explorer shows. Global view state: a group is a named set of tabs, so two
-  /// groups may sit on the same directory and one directory is never a group.
+  /// Where the Explorer stood before each group kept its own folder. Read once at startup,
+  /// to seed the groups of an install from that era; nothing writes it any more, and a new
+  /// install leaves it empty, because the folder belongs to a group (`Group::root`).
   pub sidebar_root: String,
   /// Expand folders in the Explorer when a directory is opened. Off by default: a tree
   /// that is already showing what it holds leaves no clue how deep the folder goes.
@@ -1204,7 +1205,8 @@ pub fn list_dir(path: String) -> Result<Vec<FsEntry>, String> {
   entries.sort_by(|a, b| {
     b.is_dir
       .cmp(&a.is_dir)
-      .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+      // The whole name, digits by value: `2.txt` before `10.txt`, which a text sort inverts.
+      .then_with(|| crate::name_order::natural_cmp(&a.name, &b.name))
   });
   Ok(entries)
 }
@@ -1590,6 +1592,31 @@ where
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// The Explorer reads names the way a person does: `2.txt` before `10.txt`, folders still
+  /// first. A text sort put `10.txt` ahead of `2.txt`.
+  #[test]
+  fn the_explorer_lists_names_in_the_order_a_person_reads_them() {
+    let dir = std::env::temp_dir().join(format!(
+      "wrolp-list-{}-{}",
+      std::process::id(),
+      std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos()
+    ));
+    std::fs::create_dir_all(dir.join("9folder")).expect("folder");
+    for name in ["10.txt", "2.txt", "notes.txt"] {
+      std::fs::write(dir.join(name), b"x").expect("file");
+    }
+    let names: Vec<String> = list_dir(dir.to_string_lossy().to_string())
+      .expect("listing")
+      .into_iter()
+      .map(|e| e.name)
+      .collect();
+    std::fs::remove_dir_all(&dir).ok();
+    assert_eq!(names, vec!["9folder/", "2.txt", "10.txt", "notes.txt"]);
+  }
 
   /// A folder read as missing is greyed out rather than dropped, so the same folder reached
   /// by two spellings must not show up twice.

@@ -22,7 +22,11 @@ export interface GroupStoreCommitter {
   snapshotStore(): GroupStore;
   /** Adopt a store produced elsewhere (a transfer) and persist it at once. */
   replace(next: GroupStore): void;
-  create(name: string): { group: Group | null; problem: NameProblem };
+  /** Record the folder the Explorer is showing in the group on screen. */
+  setRoot(root: string): void;
+  /** Give every group that has no folder the one an older install kept globally. */
+  adoptRoot(root: string): void;
+  create(name: string, root: string): { group: Group | null; problem: NameProblem };
   select(id: string): void;
   rename(id: string, name: string): NameProblem;
   isNameTaken(name: string, exceptId?: string): boolean;
@@ -37,8 +41,8 @@ export interface GroupStoreCommitter {
 }
 
 /**
- * Owns the group store: a group is a name plus the tabs opened under it. The sidebar folder
- * is not part of it — that is global view state in settings.
+ * Owns the group store: a group is a name, the tabs opened under it, and the folder the
+ * Explorer shows while it is on screen — so switching groups switches the tree as well.
  */
 export function useGroups({ onError }: Options): GroupStoreCommitter {
   const [store, setStore] = useState<GroupStore>({ version: 1, active: "", items: [] });
@@ -118,7 +122,7 @@ export function useGroups({ onError }: Options): GroupStoreCommitter {
   }, []);
 
   const create = useCallback(
-    (name: string) => {
+    (name: string, root: string) => {
       const trimmed = name.trim();
       if (!trimmed) return { group: null, problem: "empty" as NameProblem };
       if (isNameTaken(trimmed)) return { group: null, problem: "duplicate" as NameProblem };
@@ -128,6 +132,9 @@ export function useGroups({ onError }: Options): GroupStoreCommitter {
         name: trimmed,
         tabs: [],
         active: "",
+        // A new group starts where the window already is: creating a group is about splitting
+        // tabs, not about sending the Explorer somewhere blank. It can move on its own after.
+        root,
         updatedAt: "",
       };
       schedule({ ...s, active: group.id, items: [...s.items, group] });
@@ -141,6 +148,38 @@ export function useGroups({ onError }: Options): GroupStoreCommitter {
       const s = storeRef.current;
       if (!s.items.some((item) => item.id === id) || s.active === id) return;
       schedule({ ...s, active: id }, true);
+    },
+    [schedule]
+  );
+
+  const setRoot = useCallback(
+    (root: string) => {
+      const s = storeRef.current;
+      const current = s.items.find((item) => item.id === s.active);
+      if (!current || current.root === root) return;
+      schedule({
+        ...s,
+        items: s.items.map((item) =>
+          item.id === s.active ? { ...item, root } : item
+        ),
+      });
+    },
+    [schedule]
+  );
+
+  /**
+   * Groups did not always carry a folder: it used to be one global setting. Adopt it into the
+   * groups that have none, so an install from that era opens where it left off instead of on
+   * a blank panel. Only one write, and only while such groups exist.
+   */
+  const adoptRoot = useCallback(
+    (root: string) => {
+      const s = storeRef.current;
+      if (!root || !s.items.some((item) => !item.root)) return;
+      schedule({
+        ...s,
+        items: s.items.map((item) => (item.root ? item : { ...item, root })),
+      });
     },
     [schedule]
   );
@@ -236,6 +275,8 @@ export function useGroups({ onError }: Options): GroupStoreCommitter {
     replace,
     create,
     select,
+    setRoot,
+    adoptRoot,
     rename,
     isNameTaken,
     rekeyPaths,

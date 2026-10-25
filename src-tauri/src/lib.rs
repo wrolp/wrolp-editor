@@ -8,6 +8,7 @@ mod entry;
 mod file_settings;
 mod gallery;
 mod group;
+mod name_order;
 mod rename;
 mod unlock;
 mod versioning;
