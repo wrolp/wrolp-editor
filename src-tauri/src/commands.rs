@@ -1504,6 +1504,17 @@ pub fn get_window_state(app: AppHandle) -> Result<Option<WindowState>, String> {
   read_json::<WindowState>(&app, WINDOW_FILE)
 }
 
+/// Apply the saved rectangle while the window is still hidden, before it is first shown.
+///
+/// The page used to do this, which showed the configured frame for as long as the webview took
+/// to boot and then jumped to the stored size. A file that cannot be read is not worth stopping
+/// startup over: the window opens at the configured size, and the page still reports the error.
+pub(crate) fn restore_window(app: &AppHandle, window: &tauri::WebviewWindow<tauri::Wry>) {
+  if let Ok(Some(state)) = read_json::<WindowState>(app, WINDOW_FILE) {
+    let _ = state.apply(window);
+  }
+}
+
 #[tauri::command]
 pub fn save_window_state(app: AppHandle, state: WindowState) -> Result<WindowState, String> {
   write_json(&app, WINDOW_FILE, &state)?;

@@ -1,10 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import {
-  availableMonitors,
-  getCurrentWindow,
-  PhysicalPosition,
-  PhysicalSize,
-} from "@tauri-apps/api/window";
+import { availableMonitors, getCurrentWindow, type Window } from "@tauri-apps/api/window";
 import { t } from "../lib/i18n";
 import { api, errorMessage, type MonitorRect, type WindowState } from "../lib/tauri";
 
@@ -15,8 +10,20 @@ interface Options {
   onNotice: (message: string) => void;
 }
 
+/** The window's current rectangle, in physical pixels. */
+async function readGeometry(w: Window): Promise<WindowState> {
+  const [position, size] = await Promise.all([w.outerPosition(), w.outerSize()]);
+  return {
+    x: position.x,
+    y: position.y,
+    width: size.width,
+    height: size.height,
+    maximized: false,
+  };
+}
+
 export interface WindowFrame {
-  /** Apply the stored geometry. Must finish before anything starts measuring the window. */
+  /** Load the saved rectangle and maximized state. Must finish before anything measures the window. */
   restore(): Promise<void>;
   /** Write what is pending, plus the geometry as it is right now. */
   flush(): Promise<void>;
@@ -82,21 +89,24 @@ export function useWindowFrame({ onError, onNotice }: Options): WindowFrame {
     timer.current = window.setTimeout(() => void capture(), DEBOUNCE_MS);
   }, [capture]);
 
+  /**
+   * The backend placed the window in `setup`, before it was first shown, so there is no
+   * geometry left to apply here. What remains is the bookkeeping: remember the rectangle to
+   * fall back to when the window is maximized, since the window only reports the maximized
+   * frame in that state.
+   */
   const restore = useCallback(async () => {
     const w = win.current;
     try {
       const saved = await api.getWindowState();
-      const position = await w.outerPosition();
-      const size = await w.outerSize();
-      normal.current = {
-        x: position.x,
-        y: position.y,
-        width: size.width,
-        height: size.height,
-        maximized: false,
-      };
-      ready.current = true;
-      if (!saved) return; // first run: the configured size and `center` are the right answer
+      const maximizedNow = await w.isMaximized();
+      maximized.current = maximizedNow;
+      if (!saved) {
+        // First run: the configured size and `center` are the right answer.
+        normal.current = await readGeometry(w);
+        ready.current = true;
+        return;
+      }
 
       const monitors: MonitorRect[] = (await availableMonitors()).map((m) => ({
         x: m.position.x,
@@ -105,21 +115,16 @@ export function useWindowFrame({ onError, onNotice }: Options): WindowFrame {
         height: m.size.height,
       }));
       const plan = await api.planWindowPlacement(saved, monitors);
-      maximized.current = plan.maximized;
-      if (plan.maximized) {
-        if (!(await w.isMaximized())) await w.maximize();
-        return;
-      }
-      if (await w.isMaximized()) await w.unmaximize();
-      await w.setSize(new PhysicalSize(plan.width, plan.height));
-      await w.setPosition(new PhysicalPosition(plan.x, plan.y));
-      normal.current = {
-        x: plan.x,
-        y: plan.y,
-        width: plan.width,
-        height: plan.height,
-        maximized: false,
-      };
+      normal.current = maximizedNow
+        ? {
+            x: plan.x,
+            y: plan.y,
+            width: plan.width,
+            height: plan.height,
+            maximized: false,
+          }
+        : await readGeometry(w);
+      ready.current = true;
       // A window that teleports between monitors without explanation reads as a bug.
       if (plan.adjusted) onNotice(t("win.relocated"));
     } catch (e) {

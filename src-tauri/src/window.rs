@@ -3,6 +3,7 @@
 //! every drag.
 
 use serde::{Deserialize, Serialize};
+use tauri::{PhysicalPosition, PhysicalSize, Runtime, WebviewWindow};
 
 /// Physical pixels, matching what `outerPosition()` / `outerSize()` report.
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
@@ -91,6 +92,32 @@ fn clamp_size(width: u32, height: u32, monitor: Option<&MonitorRect>) -> (u32, u
 }
 
 impl WindowState {
+  /// Put the window at the rectangle this state names, while the window is still hidden.
+  ///
+  /// This has to happen before the first frame is painted. Restoring from the page showed the
+  /// configured 1180x740 frame first and only then resized (or maximized) it, and the jump read
+  /// as a flash. Maximizing a hidden window only sets the flag in tao; the show that follows
+  /// brings the window up already maximized.
+  pub fn apply<R: Runtime>(&self, window: &WebviewWindow<R>) -> tauri::Result<()> {
+    let monitors = window
+      .available_monitors()?
+      .iter()
+      .map(|m| MonitorRect {
+        x: m.position().x,
+        y: m.position().y,
+        width: m.size().width,
+        height: m.size().height,
+      })
+      .collect::<Vec<_>>();
+    let plan = self.plan(&monitors);
+    window.set_size(PhysicalSize::new(plan.width, plan.height))?;
+    window.set_position(PhysicalPosition::new(plan.x, plan.y))?;
+    if plan.maximized {
+      window.maximize()?;
+    }
+    Ok(())
+  }
+
   /// Turn a stored rectangle into one that can be applied today. Nothing here moves a window
   /// that is still reachable, so plugging a second monitor back in restores the old place.
   pub fn plan(&self, monitors: &[MonitorRect]) -> Placement {

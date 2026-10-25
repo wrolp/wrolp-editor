@@ -32,6 +32,12 @@ pub fn run() {
       for path in commands::paths_from_args(std::env::args()) {
         commands::enqueue_path(app.handle(), &path);
       }
+      // The main window is configured hidden: place it first so the first frame it paints is
+      // already at the saved size (and maximized, if that is how it was left), then show it.
+      if let Some(window) = app.get_webview_window("main") {
+        commands::restore_window(app.handle(), &window);
+        let _ = window.show();
+      }
       Ok(())
     })
     .invoke_handler(tauri::generate_handler![

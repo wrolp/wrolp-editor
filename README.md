@@ -483,6 +483,10 @@ The window reopens where you left it: same size, same spot, same maximized-or-no
   onto the primary at its saved size and a notice says why. Junk or absurdly large sizes fall back to
   the size a first run gets (1180×740, the same value as `tauri.conf.json`, duplicated as a Rust
   constant — change one, change the other), clamped to fit the screen.
+- **Applied before the window is shown.** The window is created hidden, placed in Rust during
+  setup, and only then shown, so the saved size is the first frame painted. Restoring from the page
+  instead showed the configured 1180×740 window for as long as the webview took to boot and then
+  resized it — a maximized window flashed up small before filling the screen.
 - **When it is written:** a ~600 ms debounce after moving or resizing, and a synchronous flush in the
   close sequence alongside drafts and groups.
 - **First run** keeps the size from `tauri.conf.json` and centers the window — no saved file, no
