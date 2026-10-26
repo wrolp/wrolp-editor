@@ -61,6 +61,8 @@ interface Props {
   startPath?: string;
   interval: number;
   loop: boolean;
+  /** What sits behind a transparent picture, passed to the single view's own toolbar. */
+  backdrop: string;
   onSaveSettings: (patch: Partial<Settings>) => void | Promise<unknown>;
 }
 
@@ -483,6 +485,7 @@ export default function ImageGallery({
   startPath,
   interval,
   loop,
+  backdrop,
   onSaveSettings,
 }: Props) {
   const [mode, setMode] = useState<GalleryMode>(startPath ? "single" : "stack");
@@ -959,7 +962,12 @@ export default function ImageGallery({
             {current && isUndrawable(current.name) ? (
               <Undrawable path={current.path} />
             ) : current ? (
-              <ImagePreview path={current.path} text={null} />
+              <ImagePreview
+                path={current.path}
+                text={null}
+                backdrop={backdrop}
+                onSaveBackdrop={(value) => onSaveSettings({ imageBackdrop: value })}
+              />
             ) : null}
           </div>
           <Filmstrip items={items} index={index} onPick={jumpTo} />

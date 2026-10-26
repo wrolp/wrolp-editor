@@ -7,6 +7,7 @@ import { parseExtensionList } from "../lib/path";
 import { LINE_ENDINGS } from "../lib/types";
 import SettingCheck from "./SettingCheck";
 import SettingField from "./SettingField";
+import BackdropPicker from "./BackdropPicker";
 import {
   api,
   errorMessage,
@@ -641,6 +642,13 @@ export default function SettingsPanel({
                 onChange={(v) => onSaveSettings({ galleryLoop: v })}
                 description={t("settings.galleryLoopDesc")}
               />
+              <SettingField label={t("settings.imageBackdrop")}>
+                <BackdropPicker
+                  value={settings.imageBackdrop}
+                  onChange={(v) => onSaveSettings({ imageBackdrop: v })}
+                />
+              </SettingField>
+              <p className="muted">{t("settings.imageBackdropDesc")}</p>
               <SettingCheck
                 label={t("settings.wordWrap")}
                 checked={settings.wordWrap}

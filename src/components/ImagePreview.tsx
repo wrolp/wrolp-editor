@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { t } from "../lib/i18n";
 import { api, revealItemInDir } from "../lib/tauri";
+import BackdropPicker from "./BackdropPicker";
 
 interface Props {
   path: string;
@@ -12,6 +13,13 @@ interface Props {
    * `.svg`. Null for a raster image, which has no text to build a URL from.
    */
   text?: string | null;
+  /**
+   * What sits behind the picture's transparent pixels: `checker`, or a `#rrggbb` colour. A prop
+   * rather than the pane's own state because the choice is global — the gallery's thumbnails
+   * paint with it too — and it survives the tab it was changed in.
+   */
+  backdrop: string;
+  onSaveBackdrop: (value: string) => void;
   /**
    * Open the picture's folder as a gallery, landing on this picture. The parent passes the
    * whole path so the gallery can find it in its own naturally-ordered list.
@@ -62,7 +70,13 @@ function xmlIsWellFormed(svg: string): boolean {
  * SVG goes through `<img>` like everything else, which is also what keeps it safe: scripts
  * inside an SVG do not run when it is loaded as an image, only when it is a document.
  */
-export default function ImagePreview({ path, text, onBrowseFolder }: Props) {
+export default function ImagePreview({
+  path,
+  text,
+  backdrop,
+  onSaveBackdrop,
+  onBrowseFolder,
+}: Props) {
   const [src, setSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
   /** null means "fit the pane"; a number is a percentage of the image's own size. */
@@ -155,6 +169,9 @@ export default function ImagePreview({ path, text, onBrowseFolder }: Props) {
             {dims.width} × {dims.height}
           </span>
         )}
+        {/* Here rather than only in Settings, because wanting it is a thing that happens while
+            looking at a picture that has gone invisible on the backdrop it is on. */}
+        <BackdropPicker value={backdrop} onChange={onSaveBackdrop} />
         {onBrowseFolder && (
           <button
             className="img-tool"

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import ImagePreview from "./components/ImagePreview";
 import ImageGallery from "./components/ImageGallery";
@@ -153,6 +153,9 @@ const DEFAULT_SETTINGS: Settings = {
   // short enough to feel like a show, and looping is what a slideshow is expected to do.
   galleryInterval: 5,
   galleryLoop: true,
+  // The checkerboard rather than a colour: it is the one backdrop that stays readable whatever
+  // is in the picture, because it is drawn from the theme the picture is being judged against.
+  imageBackdrop: "checker",
   // An encrypted file is left unlocked for as long as it is being used, then locked: long
   // enough to read and edit without being asked again, short enough that walking away from
   // the machine does not leave the key sitting in memory indefinitely.
@@ -168,6 +171,18 @@ const DEFAULT_SETTINGS: Settings = {
   // few weeks of daily ones.
   backupDir: "",
   backupRetain: 20,
+}
+
+/**
+ * The two tones a picture is drawn on behind its transparent pixels.
+ *
+ * `checker` leaves both to the stylesheet, so they follow the theme. A picked colour sets them
+ * equal, which paints the same grid flat: one rule then covers both, and the grid is what keeps
+ * a pale picture from disappearing into its own backdrop.
+ */
+function backdropTones(value: string): CSSProperties | undefined {
+  if (value === "checker") return undefined;
+  return { "--img-tone-a": value, "--img-tone-b": value } as CSSProperties;
 }
 
 /**
@@ -1834,6 +1849,7 @@ const defaultModeFor = useCallback(
       className="app"
       data-density={settings.compactMode ? "compact" : "cozy"}
       data-theme={theme}
+      style={backdropTones(settings.imageBackdrop)}
     >
       <TitleBar
         tabs={tabs.tabs}
@@ -2030,6 +2046,8 @@ const defaultModeFor = useCallback(
             <ImagePreview
               path={editorTab.path}
               text={isSvg(editorTab.path) ? docText : null}
+              backdrop={settings.imageBackdrop}
+              onSaveBackdrop={(value) => void saveSettings({ imageBackdrop: value })}
               onBrowseFolder={(path) => void tabs.openGallery(dirname(path), path)}
             />
           )}
@@ -2083,6 +2101,7 @@ const defaultModeFor = useCallback(
               startPath={tabs.activeTab.gallery.startPath}
               interval={settings.galleryInterval}
               loop={settings.galleryLoop}
+              backdrop={settings.imageBackdrop}
               onSaveSettings={saveSettings}
             />
           )}

@@ -60,6 +60,8 @@ Right-click a folder in the Explorer — or the blank space under the tree — a
 
 A picture opened in a normal tab has a **Browse folder** button that opens its folder and lands on it. The gallery reads only local folders — it does not contact an image host, upload anything or produce links.
 
+Behind a picture's transparent pixels sits a checkerboard taken from the theme. The row of swatches in the picture's toolbar — the same ones are in Settings → General — swaps that for white, black, or any colour the system picker gives you, which is how a white logo stops vanishing into a light backdrop; the choice covers the gallery's thumbnails as well, and is remembered for every picture.
+
 Only pictures near the viewport are mounted, and ones two screens away are removed from the DOM so Chromium can release the decoded bitmap; in the stacked view the space they occupied is kept, so scrolling back does not jump. In the stacked view `Up`/`Down` scroll the column and `Left`/`Right` move between pictures; in one-by-one and slideshow `Left`/`Right` move between pictures. `Home`/`End` jump to the ends, `Space` plays or pauses a slideshow (and pages the stacked view), and `Esc` returns to one-by-one. Folder changes made in the Explorer refresh an open gallery. `gallery://` tabs are never written into a saved group, so restarting brings back files only.
 
 ## Batch rename

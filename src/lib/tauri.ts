@@ -198,6 +198,12 @@ export interface Settings {
   /** After the last picture, the slideshow starts over instead of stopping. */
   galleryLoop: boolean;
   /**
+   * What sits behind a picture's transparent pixels: `checker` for the theme's checkerboard, or
+   * a lowercase `#rrggbb` colour. It is a colour rather than a swatch name because the picker is
+   * the browser's own, and its output is the value. The backend keeps only those two shapes.
+   */
+  imageBackdrop: string;
+  /**
    * Minutes an encrypted file stays unlocked without being touched. 0 means never lock
    * automatically, and is a choice rather than a missing value: the backend keeps it as
    * written, so the frontend has to carry it back or a save would reset it to the default.

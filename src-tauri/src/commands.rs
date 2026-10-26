@@ -201,6 +201,10 @@ pub struct Settings {
   pub gallery_interval: u32,
   /// Start the gallery slideshow over after the last picture instead of stopping on it.
   pub gallery_loop: bool,
+  /// What sits behind a picture's transparent pixels: `checker` for the theme's checkerboard,
+  /// or a `#rrggbb` colour picked by hand. Only the frontend draws it — this decides which
+  /// values are worth handing on, since an unusable one would leave the picture on nothing.
+  pub image_backdrop: String,
   /// Colour scheme: system | dark | light. `system` follows the OS preference at runtime,
   /// so a machine that switches at dusk does not need the app restarted.
   pub theme: String,
@@ -273,6 +277,7 @@ impl Default for Settings {
       toc_side: "right".into(),
       gallery_interval: GALLERY_INTERVAL_DEFAULT_SECONDS,
       gallery_loop: true,
+      image_backdrop: IMAGE_BACKDROP_CHECKER.into(),
       theme: "system".into(),
       encrypt_idle_minutes: ENCRYPT_IDLE_DEFAULT_MINUTES,
       versioning_enabled: false,
@@ -320,6 +325,8 @@ const TOC_SIDES: [&str; 2] = ["left", "right"];
 /// A slideshow interval: long enough to look at the picture, short enough to feel like motion.
 const GALLERY_INTERVAL_DEFAULT_SECONDS: u32 = 5;
 const GALLERY_INTERVAL_MAX_SECONDS: u32 = 60;
+/// The picture backdrop that comes from the theme instead of a colour.
+const IMAGE_BACKDROP_CHECKER: &str = "checker";
 /// A key left in memory for a day is not an idle lock any more, so the setting stops there.
 const ENCRYPT_IDLE_DEFAULT_MINUTES: u32 = 10;
 const ENCRYPT_IDLE_MAX_MINUTES: u32 = 1440;
@@ -333,6 +340,17 @@ const VERSIONING_DEFAULT_MAX_FILE_SIZE: u64 = 524_288;
 /// The ceiling on that setting. A value above it is either a typo or an intent to version binary
 /// files, and neither is what a text editor's history is for.
 const VERSIONING_MAX_FILE_SIZE_CEILING: u64 = 33_554_432;
+
+/// A `#rrggbb` colour, lowercased, or nothing when the string is not one. That is the only
+/// shape the colour picker produces and the only one worth writing into a stylesheet, so a
+/// hand-edited `#FFF000` and a picked one reach the frontend spelled the same way.
+fn as_hex_color(value: &str) -> Option<String> {
+  let digits = value.strip_prefix('#')?;
+  if digits.len() != 6 || !digits.bytes().all(|b| b.is_ascii_hexdigit()) {
+    return None;
+  }
+  Some(value.to_ascii_lowercase())
+}
 
 impl Settings {
   pub(crate) fn filled(self) -> Self {
@@ -444,6 +462,10 @@ impl Settings {
       },
       gallery_interval: self.gallery_interval.clamp(1, GALLERY_INTERVAL_MAX_SECONDS),
       gallery_loop: self.gallery_loop,
+      // The checkerboard or a colour. Anything else is a stale or hand-edited key, and a value
+      // the stylesheet cannot use would leave a transparent picture on no backdrop at all.
+      image_backdrop: as_hex_color(&self.image_backdrop)
+        .unwrap_or_else(|| IMAGE_BACKDROP_CHECKER.into()),
       // An entry is an explicit choice, so anything this build cannot show is dropped rather
       // than carried around forever — the file then falls back to `preview_layout`.
       preview_modes: {
