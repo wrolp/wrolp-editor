@@ -65,6 +65,20 @@ export default function MarkdownPreview({
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  /**
+   * Bumped whenever the body node turns out to be a fresh one, which is what makes the two
+   * injection passes below run for it rather than for the node they filled last time.
+   *
+   * Both of those mutate DOM that React owns, so they are keyed on `html` alone — and switching
+   * the layout re-creates the pane without changing `html`, which left a diagram that was on
+   * screen go blank on the way to side-by-side, with only the sanitizer's placeholder in it.
+   */
+  const [bodyGeneration, setBodyGeneration] = useState(0);
+  const attachBody = useCallback((el: HTMLDivElement | null) => {
+    if (bodyRef.current === el) return;
+    bodyRef.current = el;
+    if (el) setBodyGeneration((n) => n + 1);
+  }, []);
   /** Set while we move the preview ourselves, so our own scroll event is ignored. */
   const following = useRef(false);
   // Read through a ref so a theme change re-renders diagrams without rebuilding the
@@ -83,6 +97,12 @@ export default function MarkdownPreview({
   const cacheRef = useRef(
     new Map<string, { html?: string; svg?: string; error?: string }>()
   );
+  /**
+   * The inline `<svg>` markup the synchronous pass set aside, keyed by what its placeholder
+   * names in `data-inline-svg`. Rebuilt with every render of the document, and read back by the
+   * effect that puts the drawings in.
+   */
+  const inlineSvgRef = useRef(new Map<string, string>());
   /** Bumped when the cache gains something, so the synchronous pass re-runs. */
   const [resolved, setResolved] = useState(0);
 
@@ -181,7 +201,22 @@ export default function MarkdownPreview({
       breaks: true,
       renderer,
     }) as string;
-    return DOMPurify.sanitize(raw, SANITIZE);
+    // A hand-written `<svg>` cannot go through the pass below — its allow-list has no SVG in it,
+    // which is why the drawing used to arrive as an empty paragraph — so each one is set aside
+    // here and put back by the effect after the sanitized HTML is in the DOM, through
+    // `INLINE_SVG_SANITIZE`. The placeholder is inert and carries no attribute of its own.
+    //
+    // Only unescaped markup is matched: a code block reaches here as `&lt;svg`, so a document
+    // that shows an SVG as an example keeps showing it as an example.
+    const found = new Map<string, string>();
+    let taken = 0;
+    const withHoles = raw.replace(/<svg[\s\S]*?<\/svg>/gi, (svg) => {
+      const key = `svg${taken++}`;
+      found.set(key, svg);
+      return `<div data-inline-svg="${key}"></div>`;
+    });
+    inlineSvgRef.current = found;
+    return DOMPurify.sanitize(withHoles, SANITIZE);
   }, [text, resolved, theme]);
 
   /**
@@ -384,7 +419,28 @@ export default function MarkdownPreview({
         holder.insertAdjacentElement("afterbegin", note);
       }
     }
-  }, [html]);
+  }, [html, bodyGeneration]);
+
+  /**
+   * Puts the document's own `<svg>` drawings back.
+   *
+   * The markup was lifted out of the rendered HTML by the synchronous pass, because that pass
+   * has no SVG in its allow-list and would have left an empty paragraph where a drawing belongs.
+   * It comes back through `INLINE_SVG_SANITIZE` — the diagram profile, with the one thing a
+   * document is not trusted for taken out — and only after the sanitized HTML is in the DOM, so
+   * nothing here reaches the page unfiltered.
+   */
+  useLayoutEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    for (const holder of Array.from(
+      body.querySelectorAll<HTMLElement>("div[data-inline-svg]")
+    )) {
+      const svg = inlineSvgRef.current.get(holder.dataset.inlineSvg ?? "");
+      if (!svg) continue;
+      holder.innerHTML = DOMPurify.sanitize(svg, INLINE_SVG_SANITIZE);
+    }
+  }, [html, bodyGeneration]);
 
   /**
    * Size the tail that stands in for the editor's beyond-last-line space.
@@ -399,6 +455,10 @@ export default function MarkdownPreview({
    *
    * Runs before the scroll-sync effect below (layout effects precede passive ones), which
    * is what lets it measure a pane that does not yet contain its own tail.
+   *
+   * `bodyGeneration` is a dependency because the observer below holds the body node: a pane
+   * that was re-created would otherwise leave it watching a detached element, so the tail
+   * stops following the content it was sized for.
    */
   useLayoutEffect(() => {
     const pane = scrollRef.current;
@@ -416,7 +476,7 @@ export default function MarkdownPreview({
     observer.observe(pane);
     observer.observe(body);
     return () => observer.disconnect();
-  }, [html, beyondEnd]);
+  }, [html, beyondEnd, bodyGeneration]);
 
   // Follow the editor, but only when the editor is the one that moved.
   useEffect(() => {
@@ -611,7 +671,7 @@ export default function MarkdownPreview({
   const pane = (
     <div className="md-preview" data-md-width={width} ref={scrollRef} onScroll={onScroll}>
       {/* Sanitized in `sanitize` below; `path` is rendered as text, never interpolated. */}
-      <div className="md-body" ref={bodyRef} dangerouslySetInnerHTML={{ __html: html }} />
+      <div className="md-body" ref={attachBody} dangerouslySetInnerHTML={{ __html: html }} />
       {beyondEnd && <div className="md-tail" />}
     </div>
   );
@@ -838,6 +898,24 @@ const SVG_SANITIZE = {
     "animate", "animateMotion", "animateTransform", "set", "handler",
   ],
   FORBID_ATTR: ["onload", "onerror", "onclick", "onbegin", "onend", "onrepeat"],
+};
+
+/**
+ * The same profile for a drawing that came out of the document rather than out of a diagram tool.
+ *
+ * One thing less: `style`. Mermaid's own stylesheet is what colours its drawing, so the diagram
+ * pass has to keep it; a `<style>` written by the document would apply to the whole preview
+ * rather than to the picture, which is a way for a file to restyle the app around it. What is
+ * left is the markup's own attributes — fills, strokes, gradients, transforms — so a hand-written
+ * drawing still arrives, only without whatever a stylesheet block was doing for it.
+ */
+const INLINE_SVG_SANITIZE = {
+  USE_PROFILES: { svg: true, svgFilters: true },
+  FORBID_TAGS: [
+    "script", "foreignObject", "iframe", "object", "embed", "style",
+    "animate", "animateMotion", "animateTransform", "set", "handler",
+  ],
+  FORBID_ATTR: ["style", "onload", "onerror", "onclick", "onbegin", "onend", "onrepeat"],
 };
 
 /** Fence languages that are diagrams rather than source. */
@@ -1104,12 +1182,21 @@ function findHeadingBySlug(body: HTMLElement, want: string): HTMLElement | null 
  * links, and Windows paths spelled in the markdown ("C:\x.png") all return null: the
  * first group already resolves on its own, and the rest is what `NOT_A_LOCAL_PATH` refuses
  * for links too.
+ *
+ * Percent-decoded, for the same reason `resolveLocalTarget` is: the src arrives here out of the
+ * sanitiser's serialized string, and that serialization escapes every non-ASCII name — a picture
+ * called `架构图.svg` reaches this as `%E6%9E%B6%E6%9E%84%E5%9B%BE.svg`. Joining the escaped form
+ * hands `convertFileSrc` a `%` to escape a second time, and the asset protocol then answers 404
+ * for a file that is sitting right beside the document.
  */
 function resolveLocalImage(src: string | null, baseDir: string): string | null {
   if (!src) return null;
   if (baseDir && NOT_A_LOCAL_PATH.test(src)) return null;
-  if (!IMAGE_EXT.test(src.split(/[?#]/)[0])) return null;
-  return joinToLocal(src, baseDir);
+  const file = splitFragment(src)[0].split(/[?#]/)[0];
+  if (!IMAGE_EXT.test(file)) return null;
+  const decoded = decodeRef(file);
+  if (NOT_A_LOCAL_PATH.test(decoded)) return null;
+  return joinToLocal(decoded, baseDir);
 }
 
 /** Swap every local image reference for an asset URL the backend has allowed. */
