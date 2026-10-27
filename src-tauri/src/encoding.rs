@@ -52,7 +52,8 @@ fn bom_prefix(encoding: &'static Encoding) -> Option<&'static [u8]> {
 
 /// Map a setting value to an encoding. An unknown value is an error rather than a
 /// silent fall back to UTF-8: the user picked something, and quietly using another
-/// encoding is how files get mangled.
+/// encoding is how files get mangled. `auto` is not an encoding, so the write side
+/// uses [`resolve_for_write`] instead.
 pub fn resolve(name: &str) -> Result<&'static Encoding, String> {
   let key = name.trim().to_ascii_lowercase().replace('_', "-");
   match key.as_str() {
@@ -66,6 +67,16 @@ pub fn resolve(name: &str) -> Result<&'static Encoding, String> {
     "utf-16be" => Ok(UTF_16BE),
     _ => Err(format!("encoding_unsupported:{name}")),
   }
+}
+
+/// The encoding a write uses. `auto` is a reading instruction — sniff the bytes that are
+/// already there — and a file being created has no bytes to sniff, so it means UTF-8.
+/// Everything else goes through [`resolve`], where an unknown name is still an error.
+pub fn resolve_for_write(name: &str) -> Result<&'static Encoding, String> {
+  if name.trim().eq_ignore_ascii_case(AUTO) {
+    return Ok(UTF_8);
+  }
+  resolve(name)
 }
 
 /// True when `name` is a value the settings may store. `auto` is always allowed.
@@ -185,7 +196,7 @@ fn decode_with(
 /// Big5, ...) but wrong for UTF-16, whose output encoding the WHATWG rules this method
 /// implements define as UTF-8. UTF-16 is therefore written by hand.
 pub fn encode(text: &str, encoding: &str, bom: bool) -> Result<Vec<u8>, String> {
-  let target = resolve(encoding)?;
+  let target = resolve_for_write(encoding)?;
   let mut out = Vec::with_capacity(text.len() + 3);
   if bom {
     if let Some(prefix) = bom_prefix(target) {
@@ -250,6 +261,19 @@ mod tests {
     assert!(!is_known("latin1"));
     assert!(is_known("auto"));
     assert!(is_known("GBK"));
+  }
+
+  #[test]
+  fn auto_writes_utf8_and_still_refuses_a_name_that_is_not_an_encoding() {
+    // A new file has no bytes to sniff, which is exactly what `auto` asks for on read.
+    assert_eq!(encode("中文", "auto", false).unwrap(), "中文".as_bytes());
+    assert_eq!(resolve_for_write("Auto").unwrap().name(), "UTF-8");
+    assert_eq!(
+      resolve_for_write("latin1").unwrap_err(),
+      "encoding_unsupported:latin1"
+    );
+    // A real name is untouched by the write-side rule.
+    assert_eq!(resolve_for_write("gbk").unwrap().name(), "GBK");
   }
 
   #[test]

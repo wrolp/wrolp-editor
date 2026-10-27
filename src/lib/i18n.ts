@@ -324,7 +324,7 @@ const EN: Table = {
   "settings.enc.utf-16le": "UTF-16 LE",
   "settings.enc.utf-16be": "UTF-16 BE",
   "err.file_undecodable": "This file is not valid text in any supported encoding",
-  "err.encoding_unsupported": "Unsupported encoding: {name}",
+  "err.encoding_unsupported": "Unsupported encoding: {detail}",
   "err.text_not_encodable": "The text contains characters this file's encoding cannot hold. Save as UTF-8 instead.",
 
   "title.menuFileSettings": "File settings…",
@@ -943,7 +943,7 @@ const ZH: Table = {
   "settings.enc.utf-16le": "UTF-16 LE",
   "settings.enc.utf-16be": "UTF-16 BE",
   "err.file_undecodable": "该文件在任何受支持的编码下都不是有效文本",
-  "err.encoding_unsupported": "不支持的编码：{name}",
+  "err.encoding_unsupported": "不支持的编码：{detail}",
   "err.text_not_encodable": "文本中含有该文件编码无法表示的字符，请改存为 UTF-8。",
 
   "title.menuFileSettings": "文件设置…",
@@ -1300,14 +1300,18 @@ export function translateError(raw: string): string {
 }
 
 /**
- * An ISO-8601 instant in the reader's own locale.
+ * An ISO-8601 instant as `yyyy-MM-dd HH:mm:ss` in the reader's own timezone.
  *
- * The stored value stays the UTC string it was written as — this is only how it is shown. A
- * version list in `16/10/2026` and a file's own `2026-10-16T08:03:11Z` are the same moment, and
- * the row keeps the ISO string as its title for anybody who wants to be sure.
+ * The stored value stays the UTC string it was written as — this is only how it is shown. The
+ * parts are padded by hand instead of going through `toLocaleString`, so the separators and the
+ * field widths do not change with the UI language and a version list stays scannable by eye. The
+ * row keeps the ISO string as its title for anybody who wants to be sure.
  */
 export function formatWhen(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
-  return date.toLocaleString(current === "zh" ? "zh-CN" : "en-US");
+  const two = (n: number) => String(n).padStart(2, "0");
+  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())} ${two(
+    date.getHours(),
+  )}:${two(date.getMinutes())}:${two(date.getSeconds())}`;
 }

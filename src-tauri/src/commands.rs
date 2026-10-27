@@ -867,7 +867,9 @@ pub fn save_file(
   Ok(SavedFile {
     path: normalized,
     mtime,
-    encoding: crate::encoding::resolve(&target)?.name().to_string(),
+    encoding: crate::encoding::resolve_for_write(&target)?
+      .name()
+      .to_string(),
     bytes: written.len() as u64,
   })
 }

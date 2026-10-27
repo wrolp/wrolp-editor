@@ -375,7 +375,9 @@ pub fn keep_file(
   Ok(SavedFile {
     path,
     mtime,
-    encoding: crate::encoding::resolve(&chosen)?.name().to_string(),
+    encoding: crate::encoding::resolve_for_write(&chosen)?
+      .name()
+      .to_string(),
     bytes: written.len() as u64,
   })
 }
