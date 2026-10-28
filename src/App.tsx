@@ -5,6 +5,7 @@ import ImageGallery from "./components/ImageGallery";
 import HtmlPreview from "./components/HtmlPreview";
 import Editor from "./components/Editor";
 import DiffView from "./components/DiffView";
+import MergeView from "./components/MergeView";
 import MarkdownPreview from "./components/MarkdownPreview";
 import DraftRestoreDialog from "./components/DraftRestoreDialog";
 import NewGroupDialog from "./components/NewGroupDialog";
@@ -52,6 +53,7 @@ import { useVersions } from "./hooks/useVersions";
 import { useWindowFrame } from "./hooks/useWindowFrame";
 import { useMenuPlacement } from "./hooks/useMenuPlacement";
 import { setLang, t } from "./lib/i18n";
+import { parseConflicts } from "./lib/mergeConflicts";
 import {
   basename,
   dirname,
@@ -1689,6 +1691,7 @@ export default function App() {
         !tab ||
         tab.isSettings ||
         tab.compare ||
+        tab.merge ||
         tab.isBinary ||
         tab.encrypted ||
         isLockedBlank(tab) ||
@@ -1968,32 +1971,53 @@ export default function App() {
     [rootDir, tabs, toast]
   );
 
-  const openGitConflictDiff = useCallback(
+  const openGitMerge = useCallback(
     async (file: GitStatusEntry) => {
-      const sides = await git.conflictSides(file.abs);
-      if (!sides) return;
-      const name = basename(file.abs);
-      const language = langOf(file.abs);
-      await tabs.openSnapshotCompare(
-        {
-          path: file.abs,
-          name: `${name} · ${t("git.ours")}`,
-          content: sides.ours ?? "",
-          language,
-          kind: "git",
-          oid: `conflict:${file.path}:ours`,
-        },
-        {
-          path: file.abs,
-          name: `${name} · ${t("git.theirs")}`,
-          content: sides.theirs ?? "",
-          language,
-          kind: "git",
-          oid: `conflict:${file.path}:theirs`,
+      if (!selectedRepo) return;
+      try {
+        const sides = await git.conflictSides(file.abs);
+        if (!sides) return;
+        if (sides.binary) {
+          toast(t("merge.binary"));
+          return;
         }
-      );
+        if (sides.tooLarge) {
+          toast(t("merge.tooLarge"));
+          return;
+        }
+        const mergedText = sides.merged ?? (sides.ours ?? sides.theirs ?? "");
+        const parsed = parseConflicts(mergedText);
+        if (!parsed.ok) {
+          toast(
+            t(
+              parsed.problem === "diff3"
+                ? "merge.diff3"
+                : parsed.problem === "unterminated"
+                  ? "merge.unterminated"
+                  : "merge.unordered"
+            )
+          );
+          return;
+        }
+        await tabs.openMerge({
+          root: selectedRepo,
+          path: file.abs,
+          base: sides.base,
+          ours: sides.ours,
+          theirs: sides.theirs,
+          merged: mergedText,
+          originalMerged: mergedText,
+          binary: sides.binary,
+          encoding: sides.encoding,
+          bom: sides.bom,
+          eol: sides.eol,
+          tooLarge: sides.tooLarge,
+        });
+      } catch (e) {
+        toast(errorMessage(e));
+      }
     },
-    [git, tabs]
+    [git, selectedRepo, tabs, toast]
   );
 
   const openGitCommitDiff = useCallback(
@@ -2090,12 +2114,13 @@ const defaultModeFor = useCallback(
   // A comparison is text and nothing else: it already has two panes of its own.
   const previewMode: PreviewMode = lockedToPicture
     ? "preview"
-    : editorTab?.compare
+    : editorTab?.compare || editorTab?.merge
       ? "text"
       : (editorTab && previewPref[editorTab.path]) ||
         (editorTab ? defaultModeFor(editorTab.path) : "text");
   const showEditor = previewMode !== "preview";
-  const showPreview = previewMode !== "text" && !!editorTab;
+  const showMerge = !!editorTab?.merge;
+  const showPreview = previewMode !== "text" && !!editorTab && !showMerge;
   /** A comparison owns the pane; the text editor is only hidden behind it. */
   const showDiff = !!editorTab?.compare;
   /**
@@ -2278,7 +2303,7 @@ const defaultModeFor = useCallback(
               onOpenFile={(path) => void tabs.openPath(path)}
               onDiff={(file, scope) => void openGitDiff(file, scope)}
               onCommitFileDiff={(commit, file) => void openGitCommitDiff(commit, file)}
-              onConflictDiff={(file) => void openGitConflictDiff(file)}
+              onMergeConflict={(file) => void openGitMerge(file)}
               onError={toast}
               onNotice={toast}
             />
@@ -2327,7 +2352,7 @@ const defaultModeFor = useCallback(
               className="editor-host"
               style={{
                 display:
-                  showSettings || showGallery || !showEditor || showDiff
+                  showSettings || showGallery || !showEditor || showDiff || showMerge
                     ? "none"
                     : "block",
               }}
@@ -2394,6 +2419,34 @@ const defaultModeFor = useCallback(
                 detectIndentation={detectIndentation}
                 scrollBeyondLastLine={settings.scrollBeyondLastLine}
                 onStats={setDiffStats}
+              />
+            </div>
+          )}
+
+          {showMerge && editorTab?.merge && (
+            <div className="editor-host">
+              <MergeView
+                key={editorTab.id}
+                data={editorTab.merge}
+                theme={theme === "light" ? "vs" : "vs-dark"}
+                language={editorTab.language}
+                fontSize={settings.fontSize}
+                renderWhitespace={renderWhitespaceMode}
+                wordWrap={wordWrap}
+                tabSize={tabSize}
+                insertSpaces={insertSpaces}
+                detectIndentation={detectIndentation}
+                scrollBeyondLastLine={settings.scrollBeyondLastLine}
+                onDirty={(dirty) => tabs.setMergeDirty(editorTab.id, dirty)}
+                onResult={(text) => tabs.setMergeResult(editorTab.id, text)}
+                onApplied={() => {
+                  void tabs.closeTab(editorTab.id);
+                  void git.refresh();
+                  void tabs.checkDisk();
+                  void repos.refreshSummaries();
+                }}
+                onClose={() => requestClose(editorTab.id)}
+                onError={toast}
               />
             </div>
           )}

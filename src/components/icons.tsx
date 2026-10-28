@@ -364,6 +364,19 @@ export function IconBranch({ size = 14 }: IconProps) {
   );
 }
 
+export function IconMerge({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <circle cx="6" cy="5" r="2" />
+      <circle cx="6" cy="19" r="2" />
+      <circle cx="18" cy="12" r="2" />
+      <path d="M6 7v10" />
+      <path d="M8 5h2a4 4 0 0 1 4 4v1" />
+      <path d="M8 19h2a4 4 0 0 0 4-4v-1" />
+    </svg>
+  );
+}
+
 export function IconStage({ size = 14 }: IconProps) {
   return (
     <svg {...base(size)} strokeWidth={2}>

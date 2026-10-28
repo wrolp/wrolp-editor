@@ -17,6 +17,7 @@ A small local text editor for Windows, built on Tauri v2 + React + TypeScript, w
 - **Sidebar** — Explorer tree with lazy folders, recently opened files, and a version history; resizable, with the width persisted
 - **Version history** — off by default; any two versions, or either against what is open, can be compared side by side and folded down to the changes
 - **Encrypted files** — a self-describing AES-256-GCM container keyed from a password, with an idle lock and opt-in password remembering in the Windows credential store
+- **Merge editor** — a three-pane merge for each conflicted file: ours, theirs and an editable result; take either side or both per block, undo, jump between conflicts, and Apply writes the result back in the file's own encoding, BOM and line endings
 - **Multiple repositories** — the Source Control view lists the repository behind the group's folder, repositories found in its subdirectories (depth configurable, default 2), and repositories added by hand; pick one to work on it, with Explorer marks and the status bar following the selection
 - **Source control** — a fourth sidebar view for the real git repository behind the group's folder: staged and unstaged changes, diffs, stage / unstage / discard, commits and history, branches, and fetch / pull / push over HTTPS or SSH with progress, cancellation, conflict resolution and a trusted-host check
 - **Single instance** — a second launch hands its path to the running window

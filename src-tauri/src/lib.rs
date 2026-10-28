@@ -139,6 +139,8 @@ pub fn run() {
       git::remote::git_push,
       git::remote::git_conflict_sides,
       git::remote::git_resolve_conflict,
+      git::remote::git_write_resolution,
+      git::remote::git_delete_resolution,
       git::remote::git_merge_abort
     ]);
 

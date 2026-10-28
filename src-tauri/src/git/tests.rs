@@ -10,16 +10,20 @@ use super::diff::diff_of;
 use super::history::{commit_files, log_page};
 use super::index::{commit, discard, stage, unstage};
 use super::remote::{
-  conflict_sides_of, fetch_core, merge_abort, pull_core, push_core, resolve_conflict, Sink,
+  conflict_sides_of, delete_resolution, fetch_core, merge_abort, pull_core, push_core,
+  resolve_conflict, write_resolution, Sink,
 };
 use super::repos::scan_repos;
 use super::status::{status_of, summary_of};
 use super::{rel_of, GitLocks};
+use git2::build::CheckoutBuilder;
 use git2::{IndexAddOption, Repository};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
+
+use crate::encoding;
 
 struct Fixture {
   dir: PathBuf,
@@ -43,6 +47,9 @@ fn init(fixture: &Fixture) -> Repository {
   let mut config = repo.config().unwrap();
   config.set_str("user.name", "Test").unwrap();
   config.set_str("user.email", "test@example.com").unwrap();
+  // The machine's global `core.autocrlf` must not decide what these byte-level tests see.
+  config.set_bool("core.autocrlf", false).unwrap();
+  drop(config);
   repo
 }
 
@@ -778,7 +785,10 @@ fn local_remote_fetch_fast_forward_merge_conflict_and_push() {
   assert_eq!(status.repo.state, "merge");
 
   let abs = a.dir.join("shared.txt").to_string_lossy().into_owned();
-  let sides = conflict_sides_of(&root(&a), &abs, "auto").unwrap();
+  let sides = conflict_sides_of(&root(&a), &abs, "auto", "lf").unwrap();
+  assert_eq!(sides.eol, "lf");
+  assert!(!sides.binary);
+  assert!(sides.merged.as_deref().unwrap().contains("<<<<<<<"));
   assert_eq!(sides.ours.as_deref(), Some("ours
 "));
   assert_eq!(sides.theirs.as_deref(), Some("theirs again
@@ -976,4 +986,164 @@ fn the_summary_counts_the_same_changes_as_status() {
   assert_eq!(summary.untracked, status.untracked);
   assert_eq!(summary.conflicted, status.conflicted);
   assert_eq!(summary.files, status.files.len());
+}
+
+fn merge_branch(repo: &Repository, name: &str) {
+  let reference = repo
+    .find_reference(&format!("refs/heads/{name}"))
+    .unwrap();
+  let annotated = repo.reference_to_annotated_commit(&reference).unwrap();
+  let mut checkout = CheckoutBuilder::new();
+  checkout.conflict_style_merge(true);
+  repo.merge(&[&annotated], None, Some(&mut checkout)).unwrap();
+}
+
+fn commit_path(root: &str, path: &str, message: &str) {
+  stage(root, &[path.to_string()], &locks()).unwrap();
+  commit(root, message, None, &locks()).unwrap();
+}
+
+fn conflict_fixture(name: &str, base: &[u8], ours: &[u8], theirs: &[u8]) -> Fixture {
+  let fixture = fixture(name);
+  let repo = init(&fixture);
+  let file = fixture.dir.join("a.txt");
+  let file_text = file.to_string_lossy().into_owned();
+  let root = root(&fixture);
+  fs::write(&file, base).unwrap();
+  commit_path(&root, &file_text, "base");
+  let base_branch = status_of(&root).unwrap().repo.head.branch.unwrap();
+  let head = repo.head().unwrap().peel_to_commit().unwrap();
+  repo.branch("theirs", &head, false).unwrap();
+  drop(head);
+  switch_branch(&root, "theirs", &locks()).unwrap();
+  fs::write(&file, theirs).unwrap();
+  commit_path(&root, &file_text, "theirs");
+  switch_branch(&root, &base_branch, &locks()).unwrap();
+  fs::write(&file, ours).unwrap();
+  commit_path(&root, &file_text, "ours");
+  merge_branch(&repo, "theirs");
+  fixture
+}
+
+#[test]
+fn a_merge_result_is_written_in_the_files_own_encoding_and_crlf() {
+  let base = encoding::encode("first\r\nsecond\r\nthird\r\n", "gbk", false).unwrap();
+  let ours = encoding::encode("first\r\nours\r\nthird\r\n", "gbk", false).unwrap();
+  let theirs = encoding::encode("first\r\ntheirs\r\nthird\r\n", "gbk", false).unwrap();
+  let fixture = conflict_fixture("merge-write-gbk", &base, &ours, &theirs);
+  let root = root(&fixture);
+  let abs = fixture.dir.join("a.txt").to_string_lossy().into_owned();
+
+  let sides = conflict_sides_of(&root, &abs, "gbk", "lf").unwrap();
+  assert!(!sides.binary);
+  assert_eq!(sides.eol, "crlf");
+  assert_eq!(sides.encoding, encoding::resolve_for_write("gbk").unwrap().name());
+  assert!(sides.merged.as_deref().unwrap().contains("<<<<<<<"));
+
+  let saved = write_resolution(&root, &abs, "first\nours\nthird\n", "gbk", "lf", &locks()).unwrap();
+  assert_eq!(saved.encoding, encoding::resolve_for_write("gbk").unwrap().name());
+  assert_eq!(
+    fs::read(&abs).unwrap(),
+    encoding::encode("first\r\nours\r\nthird\r\n", "gbk", false).unwrap()
+  );
+  let status = status_of(&root).unwrap();
+  assert_eq!(status.conflicted, 0);
+  assert!(status.files.iter().all(|file| file.kind != "conflicted"));
+}
+
+#[test]
+fn a_bom_and_crlf_survive_the_merge_write() {
+  let base = encoding::encode("one\r\ntwo\r\n", "utf-8", true).unwrap();
+  let ours = encoding::encode("one\r\nmine\r\n", "utf-8", true).unwrap();
+  let theirs = encoding::encode("one\r\nyours\r\n", "utf-8", true).unwrap();
+  let fixture = conflict_fixture("merge-write-bom", &base, &ours, &theirs);
+  let root = root(&fixture);
+  let abs = fixture.dir.join("a.txt").to_string_lossy().into_owned();
+
+  let sides = conflict_sides_of(&root, &abs, "utf-8", "lf").unwrap();
+  assert!(sides.bom);
+  assert_eq!(sides.eol, "crlf");
+  write_resolution(&root, &abs, "one\nboth\n", "utf-8", "lf", &locks()).unwrap();
+  assert_eq!(
+    fs::read(&abs).unwrap(),
+    encoding::encode("one\r\nboth\r\n", "utf-8", true).unwrap()
+  );
+  assert_eq!(status_of(&root).unwrap().conflicted, 0);
+}
+
+#[test]
+fn a_deleted_side_can_be_resolved_by_deleting_the_file() {
+  let fixture = fixture("merge-delete");
+  let repo = init(&fixture);
+  let root = root(&fixture);
+  let file = fixture.dir.join("a.txt");
+  let file_text = file.to_string_lossy().into_owned();
+  fs::write(&file, "one\n").unwrap();
+  commit_path(&root, &file_text, "base");
+  let base_branch = status_of(&root).unwrap().repo.head.branch.unwrap();
+  let head = repo.head().unwrap().peel_to_commit().unwrap();
+  repo.branch("theirs", &head, false).unwrap();
+  drop(head);
+  switch_branch(&root, "theirs", &locks()).unwrap();
+  fs::remove_file(&file).unwrap();
+  commit_path(&root, &file_text, "theirs deletes");
+  switch_branch(&root, &base_branch, &locks()).unwrap();
+  fs::write(&file, "two\n").unwrap();
+  commit_path(&root, &file_text, "ours edits");
+  merge_branch(&repo, "theirs");
+
+  let sides = conflict_sides_of(&root, &file_text, "auto", "lf").unwrap();
+  assert!(sides.theirs.is_none());
+  delete_resolution(&root, &file_text, &locks()).unwrap();
+  assert!(!file.exists());
+  let status = status_of(&root).unwrap();
+  assert_eq!(status.conflicted, 0);
+  assert!(status
+    .files
+    .iter()
+    .any(|entry| entry.path == "a.txt" && entry.index.as_deref() == Some("D")));
+}
+
+#[test]
+fn choosing_a_missing_side_deletes_instead_of_writing_an_empty_file() {
+  let fixture = fixture("merge-delete-resolve");
+  let repo = init(&fixture);
+  let root = root(&fixture);
+  let file = fixture.dir.join("a.txt");
+  let file_text = file.to_string_lossy().into_owned();
+  fs::write(&file, "one\n").unwrap();
+  commit_path(&root, &file_text, "base");
+  let base_branch = status_of(&root).unwrap().repo.head.branch.unwrap();
+  let head = repo.head().unwrap().peel_to_commit().unwrap();
+  repo.branch("theirs", &head, false).unwrap();
+  drop(head);
+  switch_branch(&root, "theirs", &locks()).unwrap();
+  fs::remove_file(&file).unwrap();
+  commit_path(&root, &file_text, "theirs deletes");
+  switch_branch(&root, &base_branch, &locks()).unwrap();
+  fs::write(&file, "two\n").unwrap();
+  commit_path(&root, &file_text, "ours edits");
+  merge_branch(&repo, "theirs");
+
+  resolve_conflict(&root, &file_text, "theirs", &locks()).unwrap();
+  assert!(!file.exists());
+  assert_eq!(status_of(&root).unwrap().conflicted, 0);
+}
+
+#[test]
+fn writing_a_resolution_needs_a_conflict() {
+  let fixture = fixture("merge-not-conflicted");
+  let _repo = init(&fixture);
+  let root = root(&fixture);
+  let file = write(&fixture, "a.txt", "one\n");
+  commit_path(&root, &file, "base");
+  let error = match write_resolution(&root, &file, "two\n", "utf-8", "lf", &locks()) {
+    Ok(_) => panic!("a non-conflicted path must be refused"),
+    Err(error) => error,
+  };
+  assert_eq!(error, "git_not_conflicted");
+  assert_eq!(
+    delete_resolution(&root, &file, &locks()).unwrap_err(),
+    "git_not_conflicted"
+  );
 }

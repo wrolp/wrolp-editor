@@ -1,5 +1,5 @@
 import { fileIcon } from "../lib/path";
-import { IconCompare, IconImage, IconSettings } from "./icons";
+import { IconCompare, IconImage, IconMerge, IconSettings } from "./icons";
 import type { Tab } from "../lib/types";
 
 /**
@@ -18,6 +18,13 @@ export function FileIcon({ name }: { name: string }) {
  * the tab dropdown would otherwise each keep their own copy of the decision.
  */
 export function TabIcon({ tab }: { tab: Tab }) {
+  if (tab.merge) {
+    return (
+      <span className="file-glyph icon-merge" title={tab.merge.path}>
+        <IconMerge size={12} />
+      </span>
+    );
+  }
   if (tab.compare) {
     return (
       <span className="file-glyph icon-compare" title={tab.compare.left.path}>

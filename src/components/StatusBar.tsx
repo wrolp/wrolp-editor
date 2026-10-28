@@ -71,9 +71,11 @@ export default function StatusBar({
         {tab
           ? tab.isSettings
             ? t("tab.settings")
-            : comparing
-              ? t("cmp.label", { left: comparing.left.name, right: comparing.right.name })
-              : tab.path
+            : tab.merge
+              ? tab.name
+              : comparing
+                ? t("cmp.label", { left: comparing.left.name, right: comparing.right.name })
+                : tab.path
           : t("status.noFile")}
       </span>
       <span className="sb-spacer" />

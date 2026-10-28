@@ -502,6 +502,17 @@ export interface GitConflictSides {
   base: string | null;
   ours: string | null;
   theirs: string | null;
+  /** The working-tree text, markers included; null for a deleted file. */
+  merged: string | null;
+  /** A graphical merge is not possible. */
+  binary: boolean;
+  /** Encoding of the working tree, for display only: the backend writes with the same rule. */
+  encoding: string;
+  bom: boolean;
+  /** lf | crlf | "" */
+  eol: string;
+  /** The working tree is above the diff ceiling. */
+  tooLarge: boolean;
 }
 
 export interface GitIdentity {
@@ -953,6 +964,12 @@ export const api = {
   /** `choice` is `ours`, `theirs` or `markers`. */
   gitResolveConflict: (root: string, path: string, choice: string) =>
     invoke<void>("git_resolve_conflict", { root, path, choice }),
+  /** Write an arbitrary resolution over the working tree and mark the path resolved. */
+  gitWriteResolution: (root: string, path: string, content: string) =>
+    invoke<SavedFile>("git_write_resolution", { root, path, content }),
+  /** Resolve by removing the file (the chosen side is a deletion). */
+  gitDeleteResolution: (root: string, path: string) =>
+    invoke<void>("git_delete_resolution", { root, path }),
   gitMergeAbort: (root: string) => invoke<void>("git_merge_abort", { root }),
   gitAuthView: () => invoke<GitAuthView>("git_auth_view"),
   gitSaveHttps: (host: string, username: string, secret: string) =>

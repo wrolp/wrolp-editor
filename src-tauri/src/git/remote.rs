@@ -30,8 +30,9 @@ use super::auth::{self, AuthStore, Identity};
 use super::status::is_dirty;
 use super::{
   conflict_paths, discover, fail, git_path, rel_of, repo_info, signature, GitLocks, GitOps,
-  RepoInfo,
+  RepoInfo, MAX_DIFF_BYTES,
 };
+use crate::commands::{self, SavedFile};
 use crate::file_settings;
 use crate::encoding;
 
@@ -83,6 +84,17 @@ pub struct ConflictSides {
   pub base: Option<String>,
   pub ours: Option<String>,
   pub theirs: Option<String>,
+  /// The working tree text, which is where git has already put the markers.
+  pub merged: Option<String>,
+  /// Any side (or the working tree) is binary: the graphical merge is not available.
+  pub binary: bool,
+  /// Canonical encoding name for the working tree, or the preference when it is gone.
+  pub encoding: String,
+  pub bom: bool,
+  /// `lf`, `crlf`, or empty when the file has no break yet.
+  pub eol: String,
+  /// The working tree text is above the diff ceiling and was not carried.
+  pub too_large: bool,
 }
 
 #[tauri::command]
@@ -843,24 +855,34 @@ pub fn git_conflict_sides(
     &normalized,
     &crate::commands::stored_encoding(&app),
   );
-  conflict_sides_of(&root, &path, &preference)
+  let default_eol = commands::settings_of(&app).line_ending;
+  conflict_sides_of(&root, &path, &preference, &default_eol)
 }
 
 pub(crate) fn conflict_sides_of(
   root: &str,
   path: &str,
   preference: &str,
+  default_eol: &str,
 ) -> Result<ConflictSides, String> {
   let opened = discover(root)?;
   let rel = rel_of(&opened.workdir, path)?;
   let rel_text = git_path(&rel);
+  let abs = opened.workdir.join(&rel);
   let index = opened.repo.index().map_err(|e| fail("index", e))?;
   let mut sides = ConflictSides {
     path: rel_text.clone(),
     base: None,
     ours: None,
     theirs: None,
+    merged: None,
+    binary: false,
+    encoding: preference.to_string(),
+    bom: false,
+    eol: default_eol.to_string(),
+    too_large: false,
   };
+  let mut found = false;
   let conflicts = index.conflicts().map_err(|e| fail("index", e))?;
   for conflict in conflicts {
     let conflict = conflict.map_err(|e| fail("index", e))?;
@@ -873,10 +895,46 @@ pub(crate) fn conflict_sides_of(
     if String::from_utf8_lossy(&entry.path).replace('\\', "/") != rel_text {
       continue;
     }
-    sides.base = decode_blob(&opened.repo, conflict.ancestor.as_ref(), preference)?;
-    sides.ours = decode_blob(&opened.repo, conflict.our.as_ref(), preference)?;
-    sides.theirs = decode_blob(&opened.repo, conflict.their.as_ref(), preference)?;
+    found = true;
+    let (base, base_binary) =
+      decode_blob(&opened.repo, conflict.ancestor.as_ref(), preference)?;
+    let (ours, ours_binary) = decode_blob(&opened.repo, conflict.our.as_ref(), preference)?;
+    let (theirs, theirs_binary) =
+      decode_blob(&opened.repo, conflict.their.as_ref(), preference)?;
+    sides.base = base;
+    sides.ours = ours;
+    sides.theirs = theirs;
+    sides.binary = base_binary || ours_binary || theirs_binary;
     break;
+  }
+  if !found {
+    return Err("git_not_conflicted".into());
+  }
+
+  // The working tree is what Apply overwrites, so its encoding, BOM and line endings are the
+  // ones that matter — the blobs only contribute their text.
+  match fs::read(&abs) {
+    Ok(bytes) => {
+      if bytes.len() > MAX_DIFF_BYTES {
+        sides.too_large = true;
+      } else if bytes.iter().take(8000).any(|byte| *byte == 0) {
+        sides.binary = true;
+      } else if !sides.binary {
+        let decoded = encoding::decode(&bytes, preference)?;
+        sides.merged = Some(decoded.text);
+        sides.encoding = decoded.encoding;
+        sides.bom = decoded.bom;
+        let detected = detect_eol(&bytes);
+        if !detected.is_empty() {
+          sides.eol = detected;
+        }
+      }
+    }
+    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+    Err(error) => return Err(format!("git_conflict_read:{error}")),
+  }
+  if sides.binary {
+    sides.merged = None;
   }
   Ok(sides)
 }
@@ -885,15 +943,201 @@ fn decode_blob(
   repo: &Repository,
   entry: Option<&git2::IndexEntry>,
   preference: &str,
-) -> Result<Option<String>, String> {
+) -> Result<(Option<String>, bool), String> {
   let Some(entry) = entry else {
-    return Ok(None);
+    return Ok((None, false));
   };
   let blob = repo.find_blob(entry.id).map_err(|e| fail("blob", e))?;
   if blob.is_binary() {
-    return Ok(Some(String::new()));
+    return Ok((None, true));
   }
-  Ok(Some(encoding::decode(blob.content(), preference)?.text))
+  Ok((
+    Some(encoding::decode(blob.content(), preference)?.text),
+    false,
+  ))
+}
+
+/// `lf` / `crlf` from the first break a file contains, or empty when it has none.
+fn detect_eol(bytes: &[u8]) -> String {
+  // Conflict markers are written by libgit2 with LF even when the content around them is
+  // CRLF, so a marker line is not evidence of the file's own line endings.
+  let mut start = 0;
+  while start < bytes.len() {
+    let mut end = start;
+    while end < bytes.len() && bytes[end] != b'\n' && bytes[end] != b'\r' {
+      end += 1;
+    }
+    if end == bytes.len() {
+      return String::new();
+    }
+    let line = &bytes[start..end];
+    let marker = line.starts_with(b"<<<<<<<")
+      || line.starts_with(b"=======")
+      || line.starts_with(b">>>>>>>")
+      || line.starts_with(b"|||||||");
+    if !marker {
+      return if bytes[end] == b'\r' && bytes.get(end + 1) == Some(&b'\n') {
+        "crlf".into()
+      } else if bytes[end] == b'\n' {
+        "lf".into()
+      } else {
+        String::new()
+      };
+    }
+    if bytes[end] == b'\r' && bytes.get(end + 1) == Some(&b'\n') {
+      start = end + 2;
+    } else {
+      start = end + 1;
+    }
+  }
+  String::new()
+}
+
+/// Whether the index still holds conflict stages for a repository-relative path.
+fn conflict_entry(index: &git2::Index, rel: &str) -> Result<bool, String> {
+  if !index.has_conflicts() {
+    return Ok(false);
+  }
+  let conflicts = index.conflicts().map_err(|e| fail("index", e))?;
+  for conflict in conflicts {
+    let conflict = conflict.map_err(|e| fail("index", e))?;
+    let entry = conflict
+      .our
+      .as_ref()
+      .or(conflict.their.as_ref())
+      .or(conflict.ancestor.as_ref());
+    let Some(entry) = entry else { continue };
+    if String::from_utf8_lossy(&entry.path).replace('\\', "/") == rel {
+      return Ok(true);
+    }
+  }
+  Ok(false)
+}
+
+/// Write the merge result over the working copy and mark the path resolved.
+#[tauri::command]
+pub fn git_write_resolution(
+  app: AppHandle,
+  root: String,
+  path: String,
+  content: String,
+  locks: State<'_, GitLocks>,
+) -> Result<SavedFile, String> {
+  let normalized = crate::draft::normalize_path(&path);
+  let preference = file_settings::encoding_for(
+    &app,
+    &normalized,
+    &commands::stored_encoding(&app),
+  );
+  let default_eol = commands::settings_of(&app).line_ending;
+  write_resolution(&root, &path, &content, &preference, &default_eol, &locks)
+}
+
+pub(crate) fn write_resolution(
+  root: &str,
+  path: &str,
+  content: &str,
+  preference: &str,
+  default_eol: &str,
+  locks: &GitLocks,
+) -> Result<SavedFile, String> {
+  let opened = discover(root)?;
+  let _guard = locks.acquire(&opened.workdir)?;
+  let rel = rel_of(&opened.workdir, path)?;
+  let rel_text = git_path(&rel);
+  let abs = opened.workdir.join(&rel);
+  let repo = &opened.repo;
+  let mut index = repo.index().map_err(|e| fail("index", e))?;
+  if !conflict_entry(&index, &rel_text)? {
+    return Err("git_not_conflicted".into());
+  }
+
+  let existing = fs::read(&abs).ok();
+  let (encoding_name, bom, eol) = match existing.as_ref() {
+    Some(bytes) => {
+      let decoded = encoding::decode(bytes, preference)?;
+      let detected = detect_eol(bytes);
+      (
+        decoded.encoding,
+        decoded.bom,
+        if detected.is_empty() {
+          default_eol.to_string()
+        } else {
+          detected
+        },
+      )
+    }
+    None => (
+      encoding::resolve_for_write(preference)?.name().to_string(),
+      false,
+      default_eol.to_string(),
+    ),
+  };
+  // Monaco models are LF; the file gets the breaks it had.
+  let lf = content.replace("\r\n", "\n").replace('\r', "\n");
+  let text = if eol == "crlf" {
+    lf.replace('\n', "\r\n")
+  } else {
+    lf
+  };
+  let bytes = encoding::encode(&text, &encoding_name, bom)?;
+  if bytes.len() as u64 > commands::MAX_FILE_BYTES {
+    return Err(format!("file_too_large:{}", bytes.len() / (1024 * 1024)));
+  }
+  if let Some(parent) = abs.parent() {
+    fs::create_dir_all(parent).map_err(|e| format!("dir_create:{e}"))?;
+  }
+  commands::write_atomic(&abs, &bytes)?;
+  index
+    .add_path(Path::new(&rel_text))
+    .map_err(|e| fail("resolve", e))?;
+  index.write().map_err(|e| fail("resolve", e))?;
+  let mtime = fs::metadata(&abs)
+    .map(|meta| commands::mtime_ms(&meta))
+    .unwrap_or(0);
+  Ok(SavedFile {
+    path: crate::draft::normalize_path(&abs.to_string_lossy()),
+    mtime,
+    encoding: encoding::resolve_for_write(&encoding_name)?.name().to_string(),
+    bytes: bytes.len() as u64,
+  })
+}
+
+/// Remove a file as the resolution (the chosen side does not exist) and mark it resolved.
+#[tauri::command]
+pub fn git_delete_resolution(
+  root: String,
+  path: String,
+  locks: State<'_, GitLocks>,
+) -> Result<(), String> {
+  delete_resolution(&root, &path, &locks)
+}
+
+pub(crate) fn delete_resolution(
+  root: &str,
+  path: &str,
+  locks: &GitLocks,
+) -> Result<(), String> {
+  let opened = discover(root)?;
+  let _guard = locks.acquire(&opened.workdir)?;
+  let rel = rel_of(&opened.workdir, path)?;
+  let rel_text = git_path(&rel);
+  let abs = opened.workdir.join(&rel);
+  let repo = &opened.repo;
+  let mut index = repo.index().map_err(|e| fail("index", e))?;
+  if !conflict_entry(&index, &rel_text)? {
+    return Err("git_not_conflicted".into());
+  }
+  match fs::remove_file(&abs) {
+    Ok(()) => {}
+    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+    Err(error) => return Err(format!("git_resolve:{error}")),
+  }
+  index
+    .remove_path(Path::new(&rel_text))
+    .map_err(|e| fail("resolve", e))?;
+  index.write().map_err(|e| fail("resolve", e))?;
+  Ok(())
 }
 
 /// Write one side over the working copy and mark the path resolved in the index. `markers`
@@ -947,14 +1191,25 @@ pub(crate) fn resolve_conflict(
     return Err("git_not_conflicted".into());
   }
 
-  let bytes = match choice {
-    "ours" => ours.clone().unwrap_or_default(),
-    "theirs" => theirs.clone().unwrap_or_default(),
-    "markers" => markers(ours.as_deref(), theirs.as_deref()),
+  let both_missing = ours.is_none() && theirs.is_none();
+  let (bytes, remove) = match choice {
+    // A side that does not exist means the resolution is that the file is not there. Writing
+    // an empty file instead would turn "they deleted it" into "they emptied it".
+    "ours" => (ours.clone(), ours.is_none()),
+    "theirs" => (theirs.clone(), theirs.is_none()),
+    "markers" => (
+      if both_missing {
+        None
+      } else {
+        Some(markers(ours.as_deref(), theirs.as_deref()))
+      },
+      both_missing,
+    ),
     _ => return Err("git_resolve_unknown".into()),
   };
-  if ours.is_none() && theirs.is_none() {
-    // Both sides deleted the file: the resolution is the file not existing.
+  if remove {
+    // Both sides deleted the file, or the chosen side did: the resolution is the file not
+    // existing.
     match fs::remove_file(&abs) {
       Ok(()) => {}
       Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
@@ -964,7 +1219,7 @@ pub(crate) fn resolve_conflict(
       .remove_path(Path::new(&rel_text))
       .map_err(|e| fail("resolve", e))?;
   } else {
-    fs::write(&abs, &bytes).map_err(|e| format!("git_resolve:{e}"))?;
+    fs::write(&abs, bytes.unwrap_or_default()).map_err(|e| format!("git_resolve:{e}"))?;
     // add_path also drops the conflict stages for this path (libgit2 records the old stages in
     // its resolve-undo section), so there is no second index edit to forget.
     index

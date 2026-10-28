@@ -23,6 +23,7 @@ interface Props {
 export default function CloseConfirmDialog({ tab, onSave, onDiscard, onCancel }: Props) {
   const drag = useModalDrag<HTMLDivElement>();
   const scratch = isUntitled(tab.path);
+  const merging = !!tab.merge;
   return (
     <div className="modal-overlay">
       <div className="modal" ref={drag.ref}>
@@ -30,13 +31,17 @@ export default function CloseConfirmDialog({ tab, onSave, onDiscard, onCancel }:
           {t("close.title")}
         </h3>
         <p>{t("close.body", { name: tab.name })}</p>
-        <p className="muted">{t(scratch ? "close.untitledNote" : "close.draftNote")}</p>
+        <p className="muted">
+          {t(merging ? "close.mergeNote" : scratch ? "close.untitledNote" : "close.draftNote")}
+        </p>
         <div className="modal-actions">
-          <button className="btn primary" onClick={onSave} autoFocus>
-            {t("close.save")}
-          </button>
-          <button className="btn" onClick={onDiscard}>
-            {t(scratch ? "close.discardScratch" : "close.discard")}
+          {!merging && (
+            <button className="btn primary" onClick={onSave} autoFocus>
+              {t("close.save")}
+            </button>
+          )}
+          <button className={`btn${merging ? " primary" : ""}`} onClick={onDiscard}>
+            {t(merging ? "close.discardMerge" : scratch ? "close.discardScratch" : "close.discard")}
           </button>
           <button className="btn" onClick={onCancel}>
             {t("close.cancel")}

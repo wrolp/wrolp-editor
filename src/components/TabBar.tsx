@@ -401,7 +401,12 @@ export default function TabBar({
               <IconLock size={11} locked={!!tab.locked} />
             </span>
           )}
-          {tab.dirty && !tab.isSettings && (
+          {tab.dirty && tab.merge && (
+            <span className="tab-merge-dirty" title={t("merge.dirty")}>
+              ●
+            </span>
+          )}
+          {tab.dirty && !tab.isSettings && !tab.merge && (
             // A real button, on the same terms as the × next to it: a pointer press is settled
             // by the strip's `onPointerUp`, while a key-generated click still lands here. This
             // saves the tab it sits on and deliberately does not select it first.

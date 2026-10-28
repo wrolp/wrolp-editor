@@ -45,8 +45,8 @@ interface Props {
   onOpenFile: (path: string) => void;
   onDiff: (file: GitStatusEntry, scope: "workdir" | "index") => void;
   onCommitFileDiff: (commit: GitLogEntry, file: GitCommitFile) => void;
-  /** Ours versus theirs for one conflicted path, as a read-only comparison tab. */
-  onConflictDiff: (file: GitStatusEntry) => void;
+  /** Open the three-way merge editor for one conflicted path. */
+  onMergeConflict: (file: GitStatusEntry) => void;
   onError: (message: string) => void;
   /** A short sentence about something that succeeded, shown like an error but not as one. */
   onNotice: (message: string) => void;
@@ -125,7 +125,7 @@ export default function GitPanel({
   onOpenFile,
   onDiff,
   onCommitFileDiff,
-  onConflictDiff,
+  onMergeConflict,
   onError,
   onNotice,
 }: Props) {
@@ -731,7 +731,7 @@ export default function GitPanel({
                     key={`u:${file.path}`}
                     className="git-row conflict"
                     title={file.path}
-                    onClick={() => onConflictDiff(file)}
+                    onClick={() => onMergeConflict(file)}
                   >
                     <span className="git-badge conflict">U</span>
                     <span className="git-name">{name}</span>

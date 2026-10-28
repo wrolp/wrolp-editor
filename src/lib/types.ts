@@ -33,6 +33,9 @@ export interface Tab {
    * started: the pair has no model of its own, so it is never dirty and never carries a draft.
    */
   compare?: ComparePair;
+  /** A three-way merge of one conflicted path. Not a file tab: nothing here is saved by the
+   * editor's own save path, and it is never part of the group store. */
+  merge?: MergeTabData;
   /**
    * A whole-folder picture view rather than a file. `path` is `gallery://<folder>` and the
    * tab has no buffer, no draft and no save: everything that looks for a file has to skip it,
@@ -122,6 +125,27 @@ export interface ComparePair {
   right: CompareSide;
 }
 
+/** The three texts and the file metadata a three-way merge tab needs. */
+export interface MergeTabData {
+  /** Repository work tree, for the write-back commands. */
+  root: string;
+  /** Absolute path of the conflicted file. */
+  path: string;
+  base: string | null;
+  ours: string | null;
+  theirs: string | null;
+  /** Working-tree text with markers; never empty for a file that exists. This is the live
+   * snapshot the tab keeps across mounts. */
+  merged: string;
+  /** The text the file had when the tab opened, for the dirty comparison. */
+  originalMerged: string;
+  binary: boolean;
+  encoding: string;
+  bom: boolean;
+  eol: string;
+  tooLarge: boolean;
+}
+
 /**
  * What the sidebar shows. Three rather than two, and every place that used to ask
  * `view === "history" ? … : …` has to name the third one: a pair of ternaries would file
@@ -149,7 +173,7 @@ export interface GitMark {
  * skip them. Getting this wrong is silent — a comparison would try to save itself.
  */
 export function isFileTab(tab: Tab): boolean {
-  return !tab.isSettings && !tab.compare && !tab.gallery;
+  return !tab.isSettings && !tab.compare && !tab.gallery && !tab.merge;
 }
 
 /**

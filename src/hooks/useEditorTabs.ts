@@ -27,6 +27,7 @@ import {
   type CompareRef,
   type CompareSide,
   type EditorHandle,
+  type MergeTabData,
   type PendingRestore,
   type Tab,
 } from "../lib/types";
@@ -1319,6 +1320,63 @@ export function useEditorTabs({
     [activate]
   );
 
+  /**
+   * Open a three-way merge for one conflicted path. Like a comparison this is a snapshot: it
+   * never joins the group store and is never saved by the editor's own save path.
+   */
+  const openMerge = useCallback(
+    async (data: MergeTabData) => {
+      const existing = tabsRef.current.find(
+        (tab) =>
+          tab.merge &&
+          pathKey(tab.merge.path) === pathKey(data.path) &&
+          pathKey(tab.merge.root) === pathKey(data.root)
+      );
+      if (existing) {
+        await activate(existing.id);
+        return;
+      }
+      const tab: Tab = {
+        id: nextId(),
+        path: `merge://${pathKey(data.path)}`,
+        name: `${basename(data.path)} · ${t("merge.tab")}`,
+        language: langOf(data.path),
+        original: "",
+        dirty: false,
+        merge: data,
+        encoding: "UTF-8",
+        bom: false,
+        bytes: null,
+        fileSettings: EMPTY_FILE_SETTINGS,
+      };
+      setTabs((prev) => [...prev, tab]);
+      await activate(tab.id);
+    },
+    [activate]
+  );
+
+  /** Mark the merge tab dirty; the flag only drives the close confirmation. */
+  const setMergeDirty = useCallback((id: number, dirty: boolean) => {
+    setTabs((prev) =>
+      prev.map((tab) => (tab.id === id && tab.merge && tab.dirty !== dirty ? { ...tab, dirty } : tab))
+    );
+  }, []);
+
+  /**
+   * Keep the tab's snapshot in step with the middle editor. Switching tabs unmounts the merge
+   * view, so without this the next visit would seed itself from the file as it was first read
+   * and throw away every block decision made before.
+   */
+  const setMergeResult = useCallback((id: number, merged: string) => {
+    setTabs((prev) =>
+      prev.map((tab) =>
+        tab.id === id && tab.merge && tab.merge.merged !== merged
+          ? { ...tab, merge: { ...tab.merge, merged } }
+          : tab
+      )
+    );
+  }, []);
+
   const closeTab = useCallback(
     async (id: number) => {
       const list = tabsRef.current;
@@ -2498,6 +2556,9 @@ export function useEditorTabs({
     openUntitled,
     openSettings,
     openGallery,
+    openMerge,
+    setMergeDirty,
+    setMergeResult,
     closeTab,
     moveTab,
     clearAllTabs,

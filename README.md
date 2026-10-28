@@ -26,7 +26,7 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | Picture gallery | A whole folder in one tab, in natural order (`IMG_2` before `IMG_10`): stacked, one at a time, slideshow, or a grid. Subfolders are opt-in and walked four levels deep; one listing stops at 2,000 pictures and says so. Pictures are drawn through the asset protocol, so the editor's text-size limit does not apply. HEIC and TIFF are listed and marked as formats this renderer cannot draw |
 | Batch rename | Multi-select rows or rename a whole folder at once; one pattern (`{name}`, `{ext}`, `{n}`) or a regular expression with a replacement, a live preview, and an order — name, extension, modified time or manual — that `{n}` counts. See [Batch rename](#batch-rename) |
 | Version history | Off by default. On, every save by hand records what the file said, and any two of them — a version against a version, or either against what is open — can be compared side by side, folded down to the changes, or put back into the editor. One file's saves can be excluded, or forced in, from its tab menu. See [Version history](#version-history) |
-| Source control | Explorer rows carry their git letter — a dimmed `!` for paths git ignores, with the row and its icon stepped back — and folders the count of changes beneath them. A fourth sidebar view for the real repositories behind the group's folder — found in subdirectories up to a configurable depth, or added by hand — with staged and unstaged changes, per-file diffs, stage / unstage / discard, commits with history, branches, and conflict resolution. See [Source control](#source-control) |
+| Source control | Explorer rows carry their git letter — a dimmed `!` for paths git ignores, with the row and its icon stepped back — and folders the count of changes beneath them. A fourth sidebar view for the real repositories behind the group's folder — found in subdirectories up to a configurable depth, or added by hand — with staged and unstaged changes, per-file diffs, stage / unstage / discard, commits with history, branches, conflict resolution including a three-pane merge editor. See [Source control](#source-control) |
 | Remotes | Fetch, pull (fast-forward or merge) and push over HTTPS or SSH, with progress and a Cancel button. Credentials live in `state/git.json`, never in Settings or its backups |
 | Single instance | Launching a second time hands the path to the running window, adds a tab and focuses it |
 | Settings | Context-menu switch, editor font size, minimap, UI language; persisted and applied live. The context-menu page also shows the command the entry currently launches, and warns when it points at a different build or when this is a debug build |
@@ -208,7 +208,8 @@ history (`versioning_state`, `set_version_override`, `add_version`, `get_version
 `git_init`, `git_diff`, `git_stage`, `git_unstage`, `git_discard`, `git_commit`, `git_log`,
 `git_commit_files`, `git_branches`, `git_create_branch`, `git_switch_branch`, `git_delete_branch`,
 `git_remotes`, `git_fetch`, `git_pull`, `git_push`, `git_cancel`, `git_conflict_sides`,
-`git_resolve_conflict`, `git_merge_abort`, plus `git_auth_*` for the credential and host-key store).
+`git_resolve_conflict`, `git_write_resolution`, `git_delete_resolution`, `git_merge_abort`, plus
+`git_auth_*` for the credential and host-key store).
 
 File IO is deliberately **not** the `fs` plugin: the WebView only ever calls these fixed
 commands, so no broad disk scope is exposed to the frontend. Passwords cross IPC in one direction
@@ -418,7 +419,10 @@ private store per file and never touches the folders you edit.
 - **Remotes.** Fetch, pull and push use libgit2 over the system's WinHTTP stack for HTTPS and
   libssh2 for SSH. Progress is shown while it runs and can be cancelled. Pull fast-forwards when it
   can; otherwise it merges, and a conflict opens a `Conflicts` list where each path can be taken as
-  ours, as theirs, or written with conflict markers for hand editing. Committing the result records
+  ours, as theirs, or opened in a three-pane merge editor: ours on the left, theirs on the right,
+  and the result in the middle. Each marked block can take ours, theirs, or both, with undo; Apply
+  writes the result back in the file's own encoding, BOM and line endings and marks the path
+  resolved. Committing the result records
   the merge, and *Abort merge* puts the files back as they were before it started. Push sets the
   upstream on the first push and reports a rejected non-fast-forward in words rather than as a
   transport error.
@@ -435,7 +439,9 @@ private store per file and never touches the folders you edit.
   decorated, and the list says so. The status bar follows the selected repository, with its
   folder name in front when more than one is listed.
 - **What it deliberately does not do.** No stash, tags, rebase, cherry-pick, blame or clone wizard;
-  no three-way merge editor (ours/theirs/markers is the whole conflict UI); nested repositories and
+  no diff3 auto-merge, character-level or binary merge — the editor works on line-level two-way
+  markers, and a repository configured for diff3 markers is refused with the three quick actions
+  as the fallback; nested repositories and
   submodules are shown as single paths rather than aggregated; libgit2 does not run hooks, so
   `pre-commit`/`post-checkout` scripts and git-lfs are not applied. Status stops at 5,000 paths and
   a diff side over 2 MB is reported rather than rendered. The panel refreshes every five seconds
