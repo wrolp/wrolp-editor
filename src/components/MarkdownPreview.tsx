@@ -678,9 +678,9 @@ export default function MarkdownPreview({
 
   // The outline is a sibling of the scroller rather than a sticky child of it: the pane's own
   // scroll position is what tracks the editor, and a column inside it would move with that.
-  if (!showToc || outline.length === 0) return pane;
+  const showOutline = showToc && outline.length > 0;
 
-  const outlineColumn = (
+  const outlineColumn = showOutline ? (
     <nav className={`md-toc${tocOpen ? "" : " collapsed"}`} aria-label={t("preview.toc")} ref={tocRef}>
       <div className="md-toc-head">
         <span className="md-toc-title">{t("preview.toc")}</span>
@@ -716,8 +716,19 @@ export default function MarkdownPreview({
         ))}
       </ul>
     </nav>
-  );
+  ) : null;
 
+  /**
+   * The wrapper is here even when there is no outline to put in it, and that is load-bearing.
+   *
+   * Returning the bare pane instead made the pane the root of this subtree, so the switch to a
+   * layout that does have an outline re-rooted the same `div` type under a wrapper. React then
+   * paired the old children with the new ones by position and reused the `.md-tail` node as the
+   * pane — and the tail's height is written from `measureTail`, which React does not own and so
+   * never clears. The preview came back standing at the tail's old height, leaving a strip of
+   * unfilled row under it. Pinning the pane to one child slot keeps its node, and its scroll
+   * position, across every layout switch.
+   */
   return (
     <div className={`md-with-toc${tocSide === "right" ? " toc-right" : ""}`}>
       {tocSide === "left" ? outlineColumn : null}
