@@ -9,6 +9,11 @@ use super::{
   abs_of, discover, fail, git_path, repo_info, RepoInfo, MAX_STATUS_ENTRIES,
 };
 
+/// How many ignored paths are reported. They are decoration for the Explorer rather than a list to
+/// act on, and a project with a hand-written ignore file can have thousands; the changed paths
+/// must still fit in the same answer, so this is a separate, smaller ceiling.
+const MAX_IGNORED_ENTRIES: usize = 1000;
+
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct StatusEntry {
@@ -22,7 +27,7 @@ pub struct StatusEntry {
   pub index: Option<String>,
   /// One letter for the working-tree half: ?, M, D, R or T.
   pub workdir: Option<String>,
-  /// tracked | untracked | conflicted
+  /// tracked | untracked | conflicted | ignored
   pub kind: String,
   pub submodule: bool,
 }
@@ -53,7 +58,11 @@ pub(crate) fn status_of(root: &str) -> Result<StatusView, String> {
   let mut opts = StatusOptions::new();
   opts.include_untracked(true)
     .recurse_untracked_dirs(true)
-    .include_ignored(false)
+    // Ignored paths are wanted for the Explorer's decoration, not for the panel's two lists, and
+    // they are reported one entry per ignored *directory* rather than one per file inside it —
+    // `recurse_ignored_dirs` stays off, which is what keeps `node_modules` a single path.
+    .include_ignored(true)
+    .recurse_ignored_dirs(false)
     // A staged rename is cheap to detect and makes the staged list read like `git status`.
     // Working-tree renames are not asked for: they cost a full content comparison on every
     // refresh, and a delete plus an add is an honest answer for a change not staged yet.
@@ -69,6 +78,7 @@ pub(crate) fn status_of(root: &str) -> Result<StatusView, String> {
   let mut changed = 0;
   let mut untracked = 0;
   let mut conflicted = 0;
+  let mut ignored = 0;
   let mut truncated = false;
 
   for entry in statuses.iter() {
@@ -82,7 +92,10 @@ pub(crate) fn status_of(root: &str) -> Result<StatusView, String> {
     }
     let rel = String::from_utf8_lossy(entry.path_bytes()).replace('\\', "/");
     let conflicted_entry = flags.contains(GitStatus::CONFLICTED);
-    let kind = if conflicted_entry {
+    let kind = if flags.contains(GitStatus::IGNORED) {
+      ignored += 1;
+      "ignored"
+    } else if conflicted_entry {
       conflicted += 1;
       "conflicted"
     } else if flags.contains(GitStatus::WT_NEW) && !flags.contains(GitStatus::INDEX_NEW) {
@@ -91,6 +104,11 @@ pub(crate) fn status_of(root: &str) -> Result<StatusView, String> {
     } else {
       "tracked"
     };
+    if kind == "ignored" && ignored > MAX_IGNORED_ENTRIES {
+      // Counted but not carried: the ceiling exists so a large ignore file cannot crowd the
+      // changed paths out of the same answer.
+      continue;
+    }
     let index = index_letter(flags);
     let workdir = workdir_letter(flags);
     if index.is_some() {

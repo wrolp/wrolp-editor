@@ -376,11 +376,15 @@ function FileRow({
   const active = !!activePath && pathKey(activePath) === key;
   const editing = renaming === key;
   const mark = gitMarks.get(key);
+  // Ignored is not a change to act on, so the row reads as present but out of the project.
+  const ignored = mark?.tone === "ignored";
   const target: NodeTarget = { path: entry.path, name: entry.name, isDir: false };
   return (
     <TreeTooltip name={entry.name} detail={entry.path}>
       <div
-        className={`tree-row file${active ? " ctx-active" : ""}${selected.has(key) ? " sel" : ""}`}
+        className={`tree-row file${active ? " ctx-active" : ""}${selected.has(key) ? " sel" : ""}${
+          ignored ? " ctx-ignored" : ""
+        }`}
         style={indent(depth)}
         // A click inside the row is the edit taking or losing the focus, not a request to
         // open the file the row happens to name.
@@ -426,7 +430,13 @@ function FileRow({
             className={`tree-git ${mark.tone}`}
             title={t("git.markTitle", {
               letter: mark.letter,
-              state: t(mark.staged ? "git.markStaged" : "git.markUnstaged"),
+              state: t(
+                mark.tone === "ignored"
+                  ? "git.markIgnored"
+                  : mark.staged
+                    ? "git.markStaged"
+                    : "git.markUnstaged",
+              ),
             })}
           >
             {mark.letter}
@@ -474,6 +484,9 @@ function FolderNode({
   const editing = renaming === key;
   const naming = !!creating && pathKey(creating.dir) === key;
   const folderCount = handlers.gitDirs.get(key) ?? 0;
+  // An ignored directory is reported by git as one path ending in a slash, so the folder row
+  // itself is what dims — there is no file inside it to carry the mark.
+  const folderIgnored = handlers.gitMarks.get(key)?.tone === "ignored";
   const target: NodeTarget = { path: entry.path, name: entry.name, isDir: true };
 
   // A folder being added to has to be open: an input row created inside a collapsed folder
@@ -508,7 +521,9 @@ function FolderNode({
     <>
       <TreeTooltip name={entry.name.replace(/\/$/, "")} detail={entry.path}>
         <div
-          className={`tree-row folder${collapsed ? " collapsed" : ""}${selected.has(key) ? " sel" : ""}`}
+          className={`tree-row folder${collapsed ? " collapsed" : ""}${selected.has(key) ? " sel" : ""}${
+            folderIgnored ? " ctx-ignored" : ""
+          }`}
           style={indent(depth)}
           onClick={
             editing

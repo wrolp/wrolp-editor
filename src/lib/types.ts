@@ -129,8 +129,11 @@ export interface ComparePair {
  */
 export type SidebarView = "explorer" | "history" | "versions" | "git";
 
-/** How a git status letter is coloured in the Explorer. */
-export type GitMarkTone = "add" | "mod" | "del" | "ren" | "conflict" | "type";
+/**
+ * How a git status letter is coloured in the Explorer. `ignored` is not a change: it says the
+ * path is on disk but out of the repository's mind, and it is drawn as a dimmed `!`.
+ */
+export type GitMarkTone = "add" | "mod" | "del" | "ren" | "conflict" | "type" | "ignored";
 
 /** One changed path as the Explorer decorates it. */
 export interface GitMark {

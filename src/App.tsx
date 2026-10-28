@@ -106,6 +106,7 @@ import {
 
 /** The colour family of one `git status` letter, shared by the panel and the Explorer. */
 function gitTone(letter: string): GitMarkTone {
+  if (letter === "!") return "ignored";
   if (letter === "A" || letter === "?") return "add";
   if (letter === "D") return "del";
   if (letter === "R" || letter === "C") return "ren";
@@ -436,12 +437,17 @@ export default function App() {
 
   // Explorer decorations: a letter per changed file, and a count per folder above it. The
   // working-tree letter wins when there is one, because that is the change the file on disk
-  // has right now; a staged-only entry falls back to its index letter.
+  // has right now; a staged-only entry falls back to its index letter. An ignored path is not
+  // a change — it gets `!`, the letter `git status --ignored` uses, and the row is dimmed.
   const gitMarks = useMemo(() => {
     const marks = new Map<string, GitMark>();
     for (const file of git.status?.files ?? []) {
       const letter =
-        file.kind === "conflicted" ? "U" : (file.workdir ?? file.index ?? "?");
+        file.kind === "ignored"
+          ? "!"
+          : file.kind === "conflicted"
+            ? "U"
+            : (file.workdir ?? file.index ?? "?");
       marks.set(pathKey(file.abs), {
         letter,
         tone: gitTone(letter),
@@ -457,6 +463,8 @@ export default function App() {
     if (!git.status || !shownRoot) return counts;
     const rootKey = pathKey(shownRoot);
     for (const file of git.status.files) {
+      // An ignored path is not a change, so it does not count towards a folder's badge.
+      if (file.kind === "ignored") continue;
       let dir = dirname(file.abs);
       while (isUnder(dir, shownRoot) && pathKey(dir) !== rootKey) {
         const key = pathKey(dir);

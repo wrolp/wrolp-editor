@@ -356,6 +356,9 @@ const EN: Table = {
   "git.noCommits": "No commits yet",
   "git.noMessage": "(no message)",
   "git.loadMore": "Load more",
+  "git.loadAll": "Load all",
+  "git.pageSize": "Commits per load",
+  "git.logCapped": "Newest 5000 commits shown. Refresh to start over.",
   "git.deleteBranch": "Delete branch {name}",
   "git.confirmDelete": "Confirm",
   "git.branchUnmergedAsk": "Branch {name} has commits that are not merged anywhere. Delete it anyway?",
@@ -437,6 +440,7 @@ const EN: Table = {
   "git.markTitle": "{letter} · {state}",
   "git.markStaged": "Staged",
   "git.markUnstaged": "Working-tree change",
+  "git.markIgnored": "Ignored by git",
   "git.dirChanges": "{n} changed file(s) under this folder",
 
   "err.git_no_folder": "No folder is open",
@@ -896,6 +900,9 @@ const ZH: Table = {
   "git.noCommits": "还没有提交",
   "git.noMessage": "（无提交信息）",
   "git.loadMore": "加载更多",
+  "git.loadAll": "加载全部",
+  "git.pageSize": "每次加载条数",
+  "git.logCapped": "只显示最新的 5000 条提交，刷新可重新开始。",
   "git.deleteBranch": "删除分支 {name}",
   "git.confirmDelete": "确认删除",
   "git.branchUnmergedAsk": "分支 {name} 有未合并的提交。仍要删除吗？",
@@ -977,6 +984,7 @@ const ZH: Table = {
   "git.markTitle": "{letter} · {state}",
   "git.markStaged": "已暂存",
   "git.markUnstaged": "工作区改动",
+  "git.markIgnored": "被 git 忽略",
   "git.dirChanges": "此文件夹下 {n} 个改动",
 
   "err.git_no_folder": "尚未打开文件夹",
@@ -1694,4 +1702,18 @@ export function formatWhen(iso: string): string {
   return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())} ${two(
     date.getHours(),
   )}:${two(date.getMinutes())}:${two(date.getSeconds())}`;
+}
+
+/**
+ * Just the time of day, for a row too narrow to hold the whole date.
+ *
+ * A commit row in the sidebar spends its width on the graph, the subject and the names on the
+ * tip; the date is the part that can step aside, and the full timestamp stays in the row's
+ * tooltip either way.
+ */
+export function formatClock(iso: string): string {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return iso;
+  const two = (n: number) => String(n).padStart(2, "0");
+  return `${two(date.getHours())}:${two(date.getMinutes())}`;
 }

@@ -71,7 +71,9 @@ fn unborn_repository_reports_no_branch_commits_or_changes() {
   assert!(status.repo.head.unborn);
   assert!(status.repo.head.branch.is_some());
   assert!(status.files.is_empty());
-  assert!(log_page(&root(&fixture), None, None).unwrap().is_empty());
+  assert!(log_page(&root(&fixture), None, None, false)
+    .unwrap()
+    .is_empty());
   assert!(status.repo.state == "clean");
 }
 
@@ -94,7 +96,7 @@ fn stage_commit_and_log_a_new_file() {
   assert!(!status.repo.head.unborn);
   assert!(status.files.is_empty());
 
-  let log = log_page(&root(&fixture), None, None).unwrap();
+  let log = log_page(&root(&fixture), None, None, false).unwrap();
   assert_eq!(log.len(), 1);
   assert_eq!(log[0].summary, "first");
   assert_eq!(log[0].author, "Test");
@@ -191,9 +193,209 @@ fn log_lists_a_linear_history_newest_first() {
 "));
     commit_all(&repo, &format!("c{index}"));
   }
-  let log = log_page(&root(&fixture), None, None).unwrap();
+  let log = log_page(&root(&fixture), None, None, false).unwrap();
   let summaries: Vec<&str> = log.iter().map(|entry| entry.summary.as_str()).collect();
   assert_eq!(summaries, vec!["c5", "c4", "c3", "c2", "c1"]);
+}
+
+#[test]
+fn ignored_paths_are_reported_but_not_counted_as_changes() {
+  let fixture = fixture("status-ignored");
+  let repo = init(&fixture);
+  write(&fixture, ".gitignore", "*.log\nbuild/\n");
+  write(&fixture, "kept.txt", "one\n");
+  commit_all(&repo, "first");
+
+  write(&fixture, "debug.log", "x\n");
+  write(&fixture, "build/out.bin", "x\n");
+  write(&fixture, "new.txt", "x\n");
+
+  let status = status_of(&root(&fixture)).unwrap();
+  // The ignored file and the ignored directory are reported for the Explorer's decoration…
+  assert!(status
+    .files
+    .iter()
+    .any(|file| file.path == "debug.log" && file.kind == "ignored"));
+  assert!(status
+    .files
+    .iter()
+    .any(|file| file.path.starts_with("build") && file.kind == "ignored"));
+  // …and an ignored directory arrives as one path, not one per file inside it.
+  assert!(!status
+    .files
+    .iter()
+    .any(|file| file.path.contains("out.bin")));
+  // They are not changes: the counters and the untracked file are unaffected.
+  assert!(status
+    .files
+    .iter()
+    .any(|file| file.path == "new.txt" && file.kind == "untracked"));
+  assert_eq!(status.untracked, 1);
+  // `changed` counts the working-tree half, and a new file has one (`?`); the two ignored paths
+  // are still not part of it.
+  assert_eq!(status.changed, 1);
+  assert_eq!(status.staged, 0);
+}
+
+#[test]
+fn paging_walks_the_same_history_once() {
+  let fixture = fixture("log-pages");
+  let repo = init(&fixture);
+  for index in 1..=5 {
+    write(&fixture, "a.txt", &format!("{index}\n"));
+    commit_all(&repo, &format!("c{index}"));
+  }
+
+  let whole = log_page(&root(&fixture), None, None, false).unwrap();
+  let expected = vec!["c5", "c4", "c3", "c2", "c1"];
+  let summaries: Vec<&str> = whole.iter().map(|entry| entry.summary.as_str()).collect();
+  assert_eq!(summaries, expected);
+
+  // What "load all" leans on: skip counts rows already read, and the order does not depend on
+  // the page boundaries. Two rows at a time must concatenate to the same list.
+  let mut paged: Vec<String> = Vec::new();
+  let mut skip = 0u32;
+  while paged.len() < whole.len() {
+    let page = log_page(&root(&fixture), Some(2), Some(skip), false).unwrap();
+    if page.is_empty() {
+      break;
+    }
+    skip += page.len() as u32;
+    paged.extend(page.into_iter().map(|entry| entry.summary));
+  }
+  assert_eq!(paged, expected);
+}
+
+#[test]
+fn every_ref_can_be_walked_and_its_tip_is_labelled() {
+  let fixture = fixture("log-refs");
+  let repo = init(&fixture);
+  write(&fixture, "a.txt", "one\n");
+  commit_all(&repo, "first");
+  let base = repo.head().unwrap().shorthand().unwrap().to_string();
+  let first = repo.head().unwrap().peel_to_commit().unwrap();
+  let tree = first.tree().unwrap();
+  let signature = repo.signature().unwrap();
+  // Two branches off one commit, created without a checkout: the graph is about refs, not files.
+  repo
+    .commit(
+      Some("refs/heads/side"),
+      &signature,
+      &signature,
+      "side work",
+      &tree,
+      &[&first],
+    )
+    .unwrap();
+  repo
+    .commit(
+      Some("HEAD"),
+      &signature,
+      &signature,
+      "main work",
+      &tree,
+      &[&first],
+    )
+    .unwrap();
+
+  // HEAD alone still shows one branch, which is what the panel has always done.
+  let head_only = log_page(&root(&fixture), None, None, false).unwrap();
+  assert_eq!(head_only.len(), 2);
+  assert!(!head_only.iter().any(|entry| entry.summary == "side work"));
+
+  // Every ref: the other branch is in the list, and its tip carries the name.
+  let all = log_page(&root(&fixture), None, None, true).unwrap();
+  assert_eq!(all.len(), 3);
+  let side = all
+    .iter()
+    .find(|entry| entry.summary == "side work")
+    .unwrap();
+  assert!(side
+    .refs
+    .iter()
+    .any(|label| label.name == "side" && label.kind == "local"));
+  let tip = all
+    .iter()
+    .find(|entry| entry.summary == "main work")
+    .unwrap();
+  assert_eq!(
+    tip.refs.first().map(|label| label.kind.as_str()),
+    Some("head")
+  );
+  assert!(tip.refs.iter().any(|label| label.name == "HEAD"));
+  assert!(tip
+    .refs
+    .iter()
+    .any(|label| label.name == base && label.kind == "local"));
+  assert!(side.refs.iter().all(|label| label.kind != "head"));
+}
+
+#[test]
+fn a_merge_keeps_both_parents_and_tags_name_their_tip() {
+  let fixture = fixture("log-merge");
+  let repo = init(&fixture);
+  write(&fixture, "a.txt", "one\n");
+  commit_all(&repo, "first");
+  let first = repo.head().unwrap().peel_to_commit().unwrap();
+  let tree = first.tree().unwrap();
+  let signature = repo.signature().unwrap();
+  let side = repo
+    .commit(
+      Some("refs/heads/side"),
+      &signature,
+      &signature,
+      "side work",
+      &tree,
+      &[&first],
+    )
+    .unwrap();
+  let side = repo.find_commit(side).unwrap();
+  let main = repo
+    .commit(
+      Some("HEAD"),
+      &signature,
+      &signature,
+      "main work",
+      &tree,
+      &[&first],
+    )
+    .unwrap();
+  let main = repo.find_commit(main).unwrap();
+  repo
+    .commit(
+      Some("HEAD"),
+      &signature,
+      &signature,
+      "merge side",
+      &tree,
+      &[&main, &side],
+    )
+    .unwrap();
+
+  let tip = repo.head().unwrap().peel(git2::ObjectType::Any).unwrap();
+  repo.tag_lightweight("v1", &tip, false).unwrap();
+  repo
+    .tag("v2", &tip, &signature, "annotated", false)
+    .unwrap();
+
+  let all = log_page(&root(&fixture), None, None, true).unwrap();
+  assert_eq!(all.len(), 4);
+  let merge = all
+    .iter()
+    .find(|entry| entry.summary == "merge side")
+    .unwrap();
+  assert_eq!(merge.parents.len(), 2);
+  // Both tags point at the merge, lightweight and annotated alike.
+  assert!(merge
+    .refs
+    .iter()
+    .any(|label| label.name == "v1" && label.kind == "tag"));
+  assert!(merge
+    .refs
+    .iter()
+    .any(|label| label.name == "v2" && label.kind == "tag"));
+  // The branch that was only reachable through the merge is in the list.
+  assert!(all.iter().any(|entry| entry.summary == "side work"));
 }
 
 #[test]

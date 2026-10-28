@@ -358,7 +358,7 @@ export interface GitStatusEntry {
   index: string | null;
   /** One letter for the working-tree half: ?, M, D, R or T. */
   workdir: string | null;
-  kind: "tracked" | "untracked" | "conflicted";
+  kind: "tracked" | "untracked" | "conflicted" | "ignored";
   submodule: boolean;
 }
 
@@ -398,6 +398,12 @@ export interface GitBranchInfo {
   upstream: string | null;
 }
 
+/** A name pointing at a commit: HEAD, a branch, a remote-tracking branch or a tag. */
+export interface GitRefLabel {
+  name: string;
+  kind: "head" | "local" | "remote" | "tag";
+}
+
 export interface GitLogEntry {
   oid: string;
   short: string;
@@ -408,6 +414,8 @@ export interface GitLogEntry {
   /** ISO-8601 UTC. */
   time: string;
   parents: string[];
+  /** HEAD first, then local branches, remotes and tags. Empty is ordinary. */
+  refs: GitRefLabel[];
 }
 
 /** One path a commit changed, as the commit view lists it. */
@@ -837,8 +845,14 @@ export const api = {
   /** Commits what is staged. Nothing is added on the way. */
   gitCommit: (root: string, message: string) =>
     invoke<GitCommitResult>("git_commit", { root, message }),
-  gitLog: (root: string, limit?: number, skip?: number) =>
-    invoke<GitLogEntry[]>("git_log", { root, limit: limit ?? null, skip: skip ?? null }),
+  /** `all` walks every branch, tag and remote-tracking ref instead of HEAD alone. */
+  gitLog: (root: string, limit?: number, skip?: number, all = false) =>
+    invoke<GitLogEntry[]>("git_log", {
+      root,
+      limit: limit ?? null,
+      skip: skip ?? null,
+      all,
+    }),
   gitCommitFiles: (root: string, rev: string) =>
     invoke<GitCommitFile[]>("git_commit_files", { root, rev }),
   gitBranches: (root: string) => invoke<GitBranchInfo[]>("git_branches", { root }),

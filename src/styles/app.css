@@ -70,6 +70,17 @@
   /* Unsaved-changes indicator: shared by the tab marker and the status bar. */
   --dirty: #4ade80;
 
+  /* Commit-graph lanes. Eight hues that stay apart from each other on a dark surface, and get
+     their light-theme counterparts below rather than being reused as they are. */
+  --graph-0: #6aa9ff;
+  --graph-1: #4ec9a5;
+  --graph-2: #e0b155;
+  --graph-3: #c58cff;
+  --graph-4: #e06c75;
+  --graph-5: #56c8d8;
+  --graph-6: #f07fb3;
+  --graph-7: #9aa7b8;
+
   /* Kept because rules reference them by name; defined in terms of the scale above. */
   --titlebar: var(--surface);
   --tab: var(--surface-3);
@@ -123,6 +134,17 @@
   --add: #1a7f37;
   --del: #c62828;
   --dirty: #1a7f37;
+
+  /* The same eight lanes, darkened for a white surface: the dark palette turns into pastel
+     lines that are hard to tell apart at one pixel wide. */
+  --graph-0: #2f6fdc;
+  --graph-1: #1f9d74;
+  --graph-2: #b07600;
+  --graph-3: #8a4fd8;
+  --graph-4: #c93c48;
+  --graph-5: #0f8ba0;
+  --graph-6: #c2417f;
+  --graph-7: #5b6b7f;
 }
 
 * {
@@ -1538,6 +1560,17 @@ body.resizing .editor-host {
 .tree-git.type {
   color: var(--muted);
 }
+.tree-git.ignored {
+  color: var(--text-faint);
+}
+/* Ignored: the path is on disk and still opens; only the name and the icon step back, so a run of
+   them reads as "not part of the project" rather than as a list of changes. */
+.tree-row.ctx-ignored .tn {
+  color: var(--text-faint);
+}
+.tree-row.ctx-ignored .ti {
+  opacity: 0.55;
+}
 .tree-git-count {
   flex: 0 0 auto;
   min-width: 16px;
@@ -2213,8 +2246,19 @@ body.resizing .editor-host {
 }
 .git-bulk {
   display: flex;
+  align-items: center;
   gap: 6px;
   padding: 6px 12px;
+}
+/* The rows-per-load select: the buttons' height and corner, narrow because it holds a count. */
+.git-page-select {
+  padding: 2px 4px;
+  background: var(--sunken);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-dim);
+  font-size: 11px;
+  cursor: pointer;
 }
 .git-commit {
   padding: 8px 10px;
@@ -2272,21 +2316,31 @@ body.resizing .editor-host {
 }
 .git-log-row {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 6px;
-  padding: 4px 12px;
+  /* A fixed height rather than vertical padding: the graph cell spans the whole row, and a line
+     has to meet its neighbour exactly at the boundary. `GRAPH_ROW_HEIGHT` in GitGraphRow.tsx is
+     the same number. */
+  height: 22px;
+  padding: 0 12px;
   font-size: 11.5px;
   cursor: pointer;
+  /* The row is its own width container: what fits in it depends on the sidebar, not the window. */
+  container-type: inline-size;
 }
 .git-log-row:hover,
 .git-log-row.open {
   background: var(--surface-2);
 }
 .git-log-short {
+  flex: 0 0 auto;
   font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
   font-size: 10.5px;
   color: var(--link);
 }
+/* The subject is the only piece of a row that can lose characters and still read, so it is the
+   one that gives way: everything beside it refuses to shrink. That is what stops a narrow row
+   from squeezing `HEAD` and `main` into a letter each. */
 .git-log-summary {
   flex: 1 1 auto;
   min-width: 0;
@@ -2300,6 +2354,121 @@ body.resizing .editor-host {
   font-size: 10px;
   color: var(--text-faint);
   white-space: nowrap;
+}
+/* The same instant without the date. Hidden unless a narrow row asks for it below. */
+.git-log-clock {
+  display: none;
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+/* A row whose tip carries names runs out of width before one that does not. Only those rows ask
+   the date to step aside — first down to the time of day, then out of the row altogether — and
+   they ask by their own width, not the window's. The full timestamp stays in the row's title. */
+@container (max-width: 380px) {
+  .git-log-row:has(.git-refs) .git-log-time {
+    display: none;
+  }
+  .git-log-row:has(.git-refs) .git-log-clock {
+    display: inline;
+  }
+}
+@container (max-width: 300px) {
+  .git-log-row:has(.git-refs) .git-log-clock {
+    display: none;
+  }
+}
+/* The commit graph: one cell per row, sized and drawn by GitGraphRow.tsx. Lines are 1.5px so a
+   single lane reads at this width without turning into a blob at crossings. */
+.git-graph {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  height: 100%;
+}
+.git-graph svg {
+  display: block;
+  overflow: visible;
+}
+.g-line {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+}
+.g-dot {
+  fill: currentColor;
+  stroke: none;
+}
+.g-ring {
+  fill: none;
+  stroke: var(--text-strong);
+  stroke-width: 1;
+  opacity: 0.85;
+}
+.git-graph .lane-0 {
+  color: var(--graph-0);
+}
+.git-graph .lane-1 {
+  color: var(--graph-1);
+}
+.git-graph .lane-2 {
+  color: var(--graph-2);
+}
+.git-graph .lane-3 {
+  color: var(--graph-3);
+}
+.git-graph .lane-4 {
+  color: var(--graph-4);
+}
+.git-graph .lane-5 {
+  color: var(--graph-5);
+}
+.git-graph .lane-6 {
+  color: var(--graph-6);
+}
+.git-graph .lane-7 {
+  color: var(--graph-7);
+}
+/* Names on a tip: HEAD, its branch, a tag. Two of them fit a sidebar row; the rest are behind
+   `+N` with the full list in its tooltip. The group itself never shrinks — the subject beside it
+   does — and a pair of genuinely long names ellipsizes inside the 55% it is allowed. */
+.git-refs {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 3px;
+  min-width: 0;
+  max-width: 55%;
+  overflow: hidden;
+}
+.git-ref {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 96px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 9.5px;
+  line-height: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-ref.head {
+  border-color: transparent;
+  background: var(--accent-soft);
+  color: var(--on-accent);
+}
+.git-ref.local {
+  color: var(--link);
+}
+.git-ref.tag {
+  color: var(--warn);
+}
+.git-ref.more {
+  color: var(--text-faint);
 }
 .git-log-file {
   display: flex;

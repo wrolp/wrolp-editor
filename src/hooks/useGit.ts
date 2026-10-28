@@ -18,7 +18,18 @@ import {
  * external `git` runs, a save from another program and a terminal checkout all look the same from
  * here, and five seconds is short enough to notice without scanning a repository on every tick. */
 const POLL_MS = 5000;
-const LOG_PAGE = 50;
+/** Rows per load before the reader picks another number from the select. */
+const LOG_DEFAULT_PAGE = 100;
+/** What the page select offers. The backend caps one call at 200, so a larger page would be a lie. */
+export const LOG_PAGE_CHOICES = [50, 100, 200] as const;
+/** One request while "load all" walks: the backend's ceiling for a single page. */
+const LOG_ALL_PAGE = 200;
+/**
+ * How many rows the panel keeps. The graph is laid out over the whole array on every append and
+ * every row is real DOM, so "show me everything" stops being free somewhere; past this the list
+ * says so and a refresh starts over. The same number `git status` stops counting paths at.
+ */
+const LOG_MAX_ROWS = 5000;
 
 interface Options {
   rootDir: string | null;
@@ -41,6 +52,13 @@ export interface GitController {
   logLoading: boolean;
   /** The last page was full, so asking for another one may return more commits. */
   logHasMore: boolean;
+  /** The list stopped at its own ceiling rather than at the end of the history. */
+  logCapped: boolean;
+  /** How many commits one load asks for. Offered as a choice, not persisted. */
+  logPage: number;
+  setLogPage: (size: number) => void;
+  /** Walks the rest of the history, up to the ceiling, in one go. */
+  loadAllLog: () => Promise<void>;
   loading: boolean;
   error: string | null;
   /** The operation in flight, for disabling buttons; null when idle. */
@@ -90,6 +108,8 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
   const [log, setLog] = useState<GitLogEntry[]>([]);
   const [logLoading, setLogLoading] = useState(false);
   const [logHasMore, setLogHasMore] = useState(false);
+  const [logCapped, setLogCapped] = useState(false);
+  const [logPage, setLogPage] = useState<number>(LOG_DEFAULT_PAGE);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -184,14 +204,55 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
     }
   }, []);
 
+  const logPageRef = useRef(logPage);
+  logPageRef.current = logPage;
+
   const loadLog = useCallback(async (more = false) => {
+    const root = rootRef.current;
+    if (!root) return;
+    if (more && logRef.current.length >= LOG_MAX_ROWS) return;
+    setLogLoading(true);
+    try {
+      // Every ref, not just HEAD: a merge whose other side was never walked has a parent with
+      // no row to connect to, and the graph would draw a line into nothing.
+      const size = logPageRef.current;
+      const page = await api.gitLog(root, size, more ? logRef.current.length : 0, true);
+      const next = more ? [...logRef.current, ...page] : page;
+      setLog(next);
+      setLogHasMore(page.length >= size && next.length < LOG_MAX_ROWS);
+      setLogCapped(next.length >= LOG_MAX_ROWS);
+    } catch (e) {
+      onErrorRef.current(errorMessage(e));
+    } finally {
+      setLogLoading(false);
+    }
+  }, []);
+
+  /**
+   * Walk the rest of the history in one go.
+   *
+   * Pages are collected locally and written to state once: every append lays out the whole graph
+   * again, and a hundred of those in a row is what would make a large repository feel broken.
+   * The loop stops at `LOG_MAX_ROWS`, which is a rendering ceiling rather than a git one.
+   */
+  const loadAllLog = useCallback(async () => {
     const root = rootRef.current;
     if (!root) return;
     setLogLoading(true);
     try {
-      const page = await api.gitLog(root, LOG_PAGE, more ? logRef.current.length : 0);
-      setLog((prev) => (more ? [...prev, ...page] : page));
-      setLogHasMore(page.length >= LOG_PAGE);
+      let rows = logRef.current;
+      let done = false;
+      while (rows.length < LOG_MAX_ROWS) {
+        const page = await api.gitLog(root, LOG_ALL_PAGE, rows.length, true);
+        rows = [...rows, ...page];
+        if (page.length < LOG_ALL_PAGE) {
+          done = true;
+          break;
+        }
+      }
+      setLog(rows);
+      setLogHasMore(!done && rows.length < LOG_MAX_ROWS);
+      setLogCapped(rows.length >= LOG_MAX_ROWS);
     } catch (e) {
       onErrorRef.current(errorMessage(e));
     } finally {
@@ -207,6 +268,7 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
     setBranches([]);
     setLog([]);
     setLogHasMore(false);
+    setLogCapped(false);
     setRemotes([]);
     setProgress(null);
     setAuthAsk(null);
@@ -618,6 +680,10 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
     log,
     logLoading,
     logHasMore,
+    logCapped,
+    logPage,
+    setLogPage,
+    loadAllLog,
     loading,
     error,
     busy,

@@ -389,11 +389,21 @@ export function IconCheck({ size = 14 }: IconProps) {
   );
 }
 
+/**
+ * Fetch: ask the remote for its refs and bring them down into this repository.
+ *
+ * Not a circular arrow: `IconReload` owns that shape, and two of them side by side in the panel's
+ * toolbar read as the same button — which is exactly what happened before. Not the tray an
+ * ordinary download uses either: `IconPull` is already a downward arrow onto a line. A ring with
+ * an arrow coming into it stays legible at 13px and says "down into here" without borrowing
+ * either neighbour's shape.
+ */
 export function IconFetch({ size = 14 }: IconProps) {
   return (
-    <svg {...base(size)}>
-      <path d="M20 12a8 8 0 1 1-2.3-5.7" />
-      <polyline points="20 4 20 8.5 15.5 8.5" />
+    <svg {...base(size)} strokeWidth={1.7}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7.5v8" />
+      <polyline points="8.8 12.5 12 15.7 15.2 12.5" />
     </svg>
   );
 }

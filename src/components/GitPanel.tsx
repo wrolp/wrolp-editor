@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { formatWhen, t, translateError } from "../lib/i18n";
+import { formatClock, formatWhen, t, translateError } from "../lib/i18n";
 import { pathKey } from "../lib/types";
 import type { GitCommitFile, GitLogEntry, GitProgress, GitStatusEntry } from "../lib/tauri";
 import { api, errorMessage } from "../lib/tauri";
-import type { GitController } from "../hooks/useGit";
+import { LOG_PAGE_CHOICES, type GitController } from "../hooks/useGit";
+import { buildGraph } from "../lib/gitGraph";
 import GitAuthDialog from "./GitAuthDialog";
+import GraphCell from "./GitGraphRow";
 import {
   IconBranch,
   IconChevron,
@@ -110,7 +112,10 @@ export default function GitPanel({
   const [abortAsk, setAbortAsk] = useState(false);
   const [identityName, setIdentityName] = useState("");
   const [identityEmail, setIdentityEmail] = useState("");
-  const [logOpen, setLogOpen] = useState(false);
+  // Open by default: on a repository, the history is the thing the panel is opened to read, and
+  // the section only reads it once the view is actually on screen (`active` below), so a closed
+  // view still costs nothing.
+  const [logOpen, setLogOpen] = useState(true);
   const [logAsked, setLogAsked] = useState(false);
   const [deleteAsk, setDeleteAsk] = useState<string | null>(null);
   const [forceDeleteAsk, setForceDeleteAsk] = useState<string | null>(null);
@@ -124,7 +129,8 @@ export default function GitPanel({
     setMessage("");
     setBranchesOpen(false);
     setDiscardAsk(null);
-    setLogOpen(false);
+    // Back to the default for the new repository rather than to what the last one was left at.
+    setLogOpen(true);
     setLogAsked(false);
     setDeleteAsk(null);
     setForceDeleteAsk(null);
@@ -157,6 +163,21 @@ export default function GitPanel({
   const conflictedFiles = useMemo(
     () => status?.files.filter((f) => f.kind === "conflicted") ?? [],
     [status]
+  );
+
+  /**
+   * The graph for every commit the panel holds.
+   *
+   * Laid out over the whole array rather than page by page: the list is append-only and capped at
+   * a few hundred rows, so re-laying it out on each append is cheap, and it cannot drift from the
+   * array after a refresh the way a carried lane state could.
+   */
+  const graphRows = useMemo(
+    () =>
+      logOpen
+        ? buildGraph(git.log.map((entry) => ({ oid: entry.oid, parents: entry.parents }))).rows
+        : [],
+    [logOpen, git.log]
   );
 
   const head = status?.repo.head;
@@ -845,8 +866,9 @@ export default function GitPanel({
             </button>
             {logOpen && (
               <>
-                {git.log.map((entry) => {
+                {git.log.map((entry, index) => {
                   const open = commitOpen === entry.oid;
+                  const row = graphRows[index];
                   return (
                     <div key={entry.oid}>
                       <div
@@ -854,11 +876,43 @@ export default function GitPanel({
                         title={`${entry.oid}\n${entry.author} · ${formatWhen(entry.time)}`}
                         onClick={() => void openCommit(entry)}
                       >
+                        {row && (
+                          <GraphCell
+                            row={row}
+                            head={entry.refs.some((ref) => ref.kind === "head")}
+                            names={entry.refs.map((ref) => ref.name).join(", ")}
+                          />
+                        )}
                         <span className="git-log-short">{entry.short}</span>
                         <span className="git-log-summary">
                           {entry.summary || t("git.noMessage")}
                         </span>
+                        {entry.refs.length > 0 && (
+                          <span className="git-refs">
+                            {entry.refs.slice(0, 2).map((ref) => (
+                              <span
+                                key={`${ref.kind}:${ref.name}`}
+                                className={`git-ref ${ref.kind}`}
+                                title={ref.name}
+                              >
+                                {ref.name}
+                              </span>
+                            ))}
+                            {entry.refs.length > 2 && (
+                              <span
+                                className="git-ref more"
+                                title={entry.refs.map((ref) => ref.name).join(", ")}
+                              >
+                                +{entry.refs.length - 2}
+                              </span>
+                            )}
+                          </span>
+                        )}
                         <span className="git-log-time">{formatWhen(entry.time)}</span>
+                        {/* The same instant without the date, for a row whose tip carries names
+                            in a narrow sidebar. The full one above is hidden by a container
+                            query there; the row's title has it in any case. */}
+                        <span className="git-log-clock">{formatClock(entry.time)}</span>
                       </div>
                       {open &&
                         (commitFilesLoading ? (
@@ -887,6 +941,20 @@ export default function GitPanel({
                 })}
                 {git.logHasMore && (
                   <div className="git-bulk">
+                    <select
+                      className="git-page-select"
+                      value={git.logPage}
+                      disabled={git.logLoading}
+                      title={t("git.pageSize")}
+                      aria-label={t("git.pageSize")}
+                      onChange={(e) => git.setLogPage(Number(e.target.value))}
+                    >
+                      {LOG_PAGE_CHOICES.map((size) => (
+                        <option key={size} value={size}>
+                          {size}
+                        </option>
+                      ))}
+                    </select>
                     <button
                       className="git-small-btn"
                       disabled={git.logLoading}
@@ -894,8 +962,16 @@ export default function GitPanel({
                     >
                       {git.logLoading ? t("git.loading") : t("git.loadMore")}
                     </button>
+                    <button
+                      className="git-small-btn"
+                      disabled={git.logLoading}
+                      onClick={() => void git.loadAllLog()}
+                    >
+                      {git.logLoading ? t("git.loading") : t("git.loadAll")}
+                    </button>
                   </div>
                 )}
+                {git.logCapped && <div className="git-clean">{t("git.logCapped")}</div>}
                 {git.log.length === 0 && !git.logLoading && (
                   <div className="git-clean">{t("git.noCommits")}</div>
                 )}
