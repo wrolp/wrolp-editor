@@ -5,6 +5,8 @@ import { isFileTab, type DiffStats, type EditStats, type Tab } from "../lib/type
 
 /** The Source Control summary, shown whatever file is on screen. */
 export interface GitSummary {
+  /** The repository's folder name, shown only when more than one is listed. */
+  repo?: string;
   branch: string;
   ahead: number;
   behind: number;
@@ -88,6 +90,7 @@ export default function StatusBar({
           })}
         >
           <IconBranch size={11} />
+          {git.repo && <span className="sb-git-repo">{git.repo} ·</span>}
           <span className="sb-git-branch">{git.branch}</span>
           {git.ahead > 0 && (
             <span className="ahead">

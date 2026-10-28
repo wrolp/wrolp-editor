@@ -12,11 +12,12 @@ use super::index::{commit, discard, stage, unstage};
 use super::remote::{
   conflict_sides_of, fetch_core, merge_abort, pull_core, push_core, resolve_conflict, Sink,
 };
-use super::status::status_of;
+use super::repos::scan_repos;
+use super::status::{status_of, summary_of};
 use super::{rel_of, GitLocks};
 use git2::{IndexAddOption, Repository};
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 
@@ -629,6 +630,11 @@ fn add_remote(repo: &Repository, name: &str, url: &str) {
     .unwrap();
 }
 
+fn repo_in(dir: &Path) -> Repository {
+  fs::create_dir_all(dir).unwrap();
+  Repository::init(dir).unwrap()
+}
+
 fn commit_all(repo: &Repository, message: &str) {
   let mut index = repo.index().unwrap();
   index
@@ -858,4 +864,116 @@ fn local_remote_fetch_fast_forward_merge_conflict_and_push() {
     Err(error) => error,
   };
   assert!(error.starts_with("git_push_rejected"), "{error}");
+}
+
+#[test]
+fn scanning_reports_nested_repositories_up_to_the_depth() {
+  let workspace = fixture("scan-depth");
+  repo_in(&workspace.dir);
+  repo_in(&workspace.dir.join("x/repo-one"));
+  repo_in(&workspace.dir.join("x/y/repo-two"));
+
+  let shallow = scan_repos(&workspace.dir.to_string_lossy(), 2).unwrap();
+  let relatives: Vec<&str> = shallow
+    .repos
+    .iter()
+    .map(|entry| entry.relative.as_str())
+    .collect();
+  assert_eq!(relatives, vec![".", "x/repo-one"]);
+  assert_eq!(shallow.repos[0].source, "root");
+
+  let deep = scan_repos(&workspace.dir.to_string_lossy(), 3).unwrap();
+  let relatives: Vec<&str> = deep
+    .repos
+    .iter()
+    .map(|entry| entry.relative.as_str())
+    .collect();
+  assert_eq!(relatives, vec![".", "x/repo-one", "x/y/repo-two"]);
+}
+
+#[test]
+fn depth_zero_reports_only_the_folder_itself() {
+  let workspace = fixture("scan-zero");
+  repo_in(&workspace.dir.join("sub"));
+
+  let scan = scan_repos(&workspace.dir.to_string_lossy(), 0).unwrap();
+  assert!(scan.repos.is_empty());
+
+  repo_in(&workspace.dir);
+  let scan = scan_repos(&workspace.dir.to_string_lossy(), 0).unwrap();
+  assert_eq!(scan.repos.len(), 1);
+  assert_eq!(scan.repos[0].source, "root");
+}
+
+#[test]
+fn a_parent_repository_comes_before_nested_ones() {
+  let parent = fixture("scan-parent");
+  repo_in(&parent.dir);
+  let workspace = parent.dir.join("work/sub");
+  fs::create_dir_all(&workspace).unwrap();
+  repo_in(&workspace.join("inner"));
+
+  let scan = scan_repos(&workspace.to_string_lossy(), 2).unwrap();
+  let sources: Vec<&str> = scan.repos.iter().map(|entry| entry.source.as_str()).collect();
+  assert_eq!(sources, vec!["parent", "scan"]);
+  assert!(scan.repos[0].relative.starts_with("../"));
+  assert_eq!(scan.repos[1].relative, "inner");
+}
+
+#[test]
+fn ignored_bare_and_git_file_folders_are_not_listed() {
+  let workspace = fixture("scan-ignored");
+  repo_in(&workspace.dir.join("node_modules/pkg"));
+  repo_in(&workspace.dir.join("target/pkg"));
+  fs::create_dir_all(workspace.dir.join("bare.git")).unwrap();
+  Repository::init_bare(workspace.dir.join("bare.git")).unwrap();
+  let linked = workspace.dir.join("linked");
+  fs::create_dir_all(linked.join("inside")).unwrap();
+  fs::write(linked.join(".git"), "gitdir: elsewhere
+").unwrap();
+  repo_in(&linked.join("inside"));
+
+  let scan = scan_repos(&workspace.dir.to_string_lossy(), 2).unwrap();
+  assert!(scan.repos.is_empty(), "{:?}", scan.repos);
+}
+
+#[test]
+fn a_found_repository_is_a_boundary() {
+  let workspace = fixture("scan-boundary");
+  repo_in(&workspace.dir.join("repo"));
+  repo_in(&workspace.dir.join("repo/vendor"));
+
+  let scan = scan_repos(&workspace.dir.to_string_lossy(), 3).unwrap();
+  let relatives: Vec<&str> = scan
+    .repos
+    .iter()
+    .map(|entry| entry.relative.as_str())
+    .collect();
+  assert_eq!(relatives, vec!["repo"]);
+}
+
+#[test]
+fn the_summary_counts_the_same_changes_as_status() {
+  let fixture = fixture("summary-counts");
+  let _repo = init(&fixture);
+  let tracked = write(&fixture, "a.txt", "one
+");
+  stage(&root(&fixture), &[tracked.clone()], &locks()).unwrap();
+  commit(&root(&fixture), "first", None, &locks()).unwrap();
+  write(&fixture, "a.txt", "two
+");
+  write(&fixture, "staged.txt", "staged
+");
+  stage(&root(&fixture), &[write(&fixture, "staged.txt", "staged
+")], &locks()).unwrap();
+  write(&fixture, "new.txt", "new
+");
+
+  let status = status_of(&root(&fixture)).unwrap();
+  let summary = summary_of(&root(&fixture)).unwrap();
+  assert_eq!(summary.staged, status.staged);
+  assert_eq!(summary.changed, status.changed);
+  assert_eq!(summary.untracked, status.untracked);
+  assert_eq!(summary.conflicted, status.conflicted);
+  assert_eq!(summary.files, status.files.len());
 }

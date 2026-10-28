@@ -15,6 +15,7 @@ pub mod diff;
 pub mod history;
 pub mod index;
 pub mod remote;
+pub mod repos;
 pub mod status;
 
 #[cfg(test)]

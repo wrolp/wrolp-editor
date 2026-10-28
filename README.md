@@ -26,7 +26,7 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | Picture gallery | A whole folder in one tab, in natural order (`IMG_2` before `IMG_10`): stacked, one at a time, slideshow, or a grid. Subfolders are opt-in and walked four levels deep; one listing stops at 2,000 pictures and says so. Pictures are drawn through the asset protocol, so the editor's text-size limit does not apply. HEIC and TIFF are listed and marked as formats this renderer cannot draw |
 | Batch rename | Multi-select rows or rename a whole folder at once; one pattern (`{name}`, `{ext}`, `{n}`) or a regular expression with a replacement, a live preview, and an order — name, extension, modified time or manual — that `{n}` counts. See [Batch rename](#batch-rename) |
 | Version history | Off by default. On, every save by hand records what the file said, and any two of them — a version against a version, or either against what is open — can be compared side by side, folded down to the changes, or put back into the editor. One file's saves can be excluded, or forced in, from its tab menu. See [Version history](#version-history) |
-| Source control | Explorer rows carry their git letter — a dimmed `!` for paths git ignores, with the row and its icon stepped back — and folders the count of changes beneath them. A fourth sidebar view for the real git repository behind the group's folder: staged and unstaged changes, per-file diffs, stage / unstage / discard, commits with history, branches, and conflict resolution. See [Source control](#source-control) |
+| Source control | Explorer rows carry their git letter — a dimmed `!` for paths git ignores, with the row and its icon stepped back — and folders the count of changes beneath them. A fourth sidebar view for the real repositories behind the group's folder — found in subdirectories up to a configurable depth, or added by hand — with staged and unstaged changes, per-file diffs, stage / unstage / discard, commits with history, branches, and conflict resolution. See [Source control](#source-control) |
 | Remotes | Fetch, pull (fast-forward or merge) and push over HTTPS or SSH, with progress and a Cancel button. Credentials live in `state/git.json`, never in Settings or its backups |
 | Single instance | Launching a second time hands the path to the running window, adds a tab and focuses it |
 | Settings | Context-menu switch, editor font size, minimap, UI language; persisted and applied live. The context-menu page also shows the command the entry currently launches, and warns when it points at a different build or when this is a debug build |
@@ -380,12 +380,21 @@ this is not a repository you branch or push, and nothing about it reaches the fo
 
 ## Source control
 
-The fourth sidebar view is a real git repository: the one `git status` in a terminal would show
-for the group's folder. The repository is found by walking up from that folder, and the panel
-prints the work-tree root it landed on — a group folder inside a larger repository shows the larger
-repository, not a new one at the folder. This is the opposite of [Version history](#version-history),
-which is a private store per file and never touches the folders you edit.
+The fourth sidebar view is the set of real git repositories behind the group's folder: the one
+the folder sits in (possibly above it), the ones found in its subdirectories, and any added by
+hand. A compact list at the top switches between them; the panel below is the single-repository
+panel described here. This is the opposite of [Version history](#version-history), which is a
+private store per file and never touches the folders you edit.
 
+- **Repositories.** Settings → Git → *Subdirectory depth* bounds the scan (0–5, default 2). The
+  scan does not enter a repository it has found, skips `node_modules`, `target`, `dist`, bare
+  repositories and links/junctions, and leaves submodules and linked worktrees to *Add
+  repository*. A row shows the branch, ahead/behind and changed-file count; picking it switches
+  the panel and is remembered per group. Manual entries, including repositories outside the
+  folder, are stored in `groups.json` (so they come back with a configuration backup) and
+  removing one only forgets the listing. One scan returns at most 50 repositories from 5,000
+  directories. A parent repository is shown whole: its own changes list can include paths outside
+  the group folder and untracked content of nested repositories, exactly as git reports them.
 - **Changes.** Two lists, `Staged` and `Changes`, with the same one-letter badges `git status
   --short` uses. A path can be in both (staged text and further working-tree edits); each row acts
   on its own half. Clicking a row opens a read-only comparison tab — index against working tree, or
@@ -420,6 +429,11 @@ which is a private store per file and never touches the folders you edit.
   side never hands a stored secret back to the frontend. The first connection to an SSH host asks
   you to trust its SHA-256 fingerprint; later connections compare against what you approved and
   refuse a changed key. Settings → Git lists stored hosts and lets you forget them.
+- **Explorer marks and the status bar.** The Explorer collects marks from every listed
+  repository under the folder; when a path is reported by two of them, the nearest repository
+  owns it. Above 12 repositories only the selected one and the folder's own repository are
+  decorated, and the list says so. The status bar follows the selected repository, with its
+  folder name in front when more than one is listed.
 - **What it deliberately does not do.** No stash, tags, rebase, cherry-pick, blame or clone wizard;
   no three-way merge editor (ours/theirs/markers is the whole conflict UI); nested repositories and
   submodules are shown as single paths rather than aggregated; libgit2 does not run hooks, so

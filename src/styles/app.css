@@ -1738,6 +1738,124 @@ body.resizing .editor-host {
   flex-direction: column;
   min-height: 0;
 }
+.git-repos {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.git-repos-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 2px 4px;
+}
+.git-repos-title {
+  flex: 1 1 auto;
+  font-size: 10.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-faint);
+}
+.git-repo-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 6px;
+  border-radius: 5px;
+  color: var(--text-dim);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.git-repo-row:hover {
+  background: var(--surface-hover);
+}
+.git-repo-row.current {
+  background: var(--surface-active);
+  color: var(--text-strong);
+}
+.git-repo-row.unavailable {
+  color: var(--text-faint);
+}
+.git-repo-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-repo-rel {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+  font-size: 10.5px;
+  direction: rtl;
+  text-align: left;
+}
+.git-repo-branch {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 84px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 10.5px;
+}
+.git-repo-sync {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 10px;
+}
+.git-repo-count {
+  flex: 0 0 auto;
+  min-width: 16px;
+  margin-left: auto;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--chip);
+  color: var(--text-dim);
+  font-size: 10px;
+  text-align: center;
+}
+.git-repo-state {
+  flex: 0 0 auto;
+  color: var(--warn);
+  font-size: 9px;
+}
+.git-repo-badge {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--del);
+  font-size: 10px;
+}
+.git-repo-remove {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.git-repo-remove:hover {
+  background: var(--border-strong);
+  color: var(--del);
+}
+.git-repos-note {
+  padding: 3px 6px;
+  color: var(--text-faint);
+  font-size: 10px;
+}
+.git-add-repo {
+  font-size: 16px;
+  line-height: 1;
+}
 .git-head {
   padding: 4px 10px 6px;
   border-bottom: 1px solid var(--border-soft);
@@ -3591,6 +3709,9 @@ body.resizing .editor-host {
   background: var(--surface-hover);
   color: var(--text-strong);
 }
+.sb-git-repo {
+  color: var(--text-faint);
+}
 .sb-git-branch {
   color: var(--text-dim);
 }
@@ -4307,6 +4428,9 @@ body.resizing .editor-host {
   padding: 5px 14px;
 }
 .app[data-density="compact"] .git-row {
+  padding-block: 1px;
+}
+.app[data-density="compact"] .git-repo-row {
   padding-block: 1px;
 }
 .app[data-density="compact"] .git-section {

@@ -4,6 +4,7 @@ import { pathKey } from "../lib/types";
 import type { GitCommitFile, GitLogEntry, GitProgress, GitStatusEntry } from "../lib/tauri";
 import { api, errorMessage } from "../lib/tauri";
 import { LOG_PAGE_CHOICES, type GitController } from "../hooks/useGit";
+import type { GitRepoRow } from "../hooks/useGitRepos";
 import { buildGraph } from "../lib/gitGraph";
 import GitAuthDialog from "./GitAuthDialog";
 import GraphCell from "./GitGraphRow";
@@ -22,7 +23,21 @@ import {
 } from "./icons";
 
 interface Props {
-  rootDir: string | null;
+  /** The group folder: what the scan started from and what "initialize repository" acts on. */
+  workspaceRoot: string | null;
+  /** The repository currently shown below the list. */
+  repoRoot: string | null;
+  repoRows: GitRepoRow[];
+  repoScanning: boolean;
+  repoTruncated: boolean;
+  /** More repositories than the Explorer decoration limit. */
+  decorateCapped: boolean;
+  repoScanError: string | null;
+  onSelectRepo: (root: string) => void;
+  onAddRepo: () => void;
+  onRemoveRepo: (root: string) => void;
+  onRescanRepos: () => void;
+  onInitWorkspace: () => Promise<void>;
   git: GitController;
   active: boolean;
   /** `pathKey` of open tabs holding unsaved edits: the disk text is not what the editor shows. */
@@ -92,7 +107,18 @@ function progressText(progress: GitProgress): string {
 }
 
 export default function GitPanel({
-  rootDir,
+  workspaceRoot,
+  repoRoot,
+  repoRows,
+  repoScanning,
+  repoTruncated,
+  decorateCapped,
+  repoScanError,
+  onSelectRepo,
+  onAddRepo,
+  onRemoveRepo,
+  onRescanRepos,
+  onInitWorkspace,
   git,
   active,
   dirtyPaths,
@@ -140,7 +166,7 @@ export default function GitPanel({
     setIdentityName("");
     setIdentityEmail("");
     setRemote(null);
-  }, [rootDir]);
+  }, [repoRoot]);
 
   useEffect(() => {
     if (logOpen && active && git.status && !logAsked) {
@@ -235,8 +261,8 @@ export default function GitPanel({
     setCommitFiles([]);
     setCommitFilesLoading(true);
     try {
-      if (!rootDir) return;
-      const files = await api.gitCommitFiles(rootDir, entry.oid);
+      if (!repoRoot) return;
+      const files = await api.gitCommitFiles(repoRoot, entry.oid);
       setCommitFiles(files);
     } catch (e) {
       onError(errorMessage(e));
@@ -267,12 +293,103 @@ export default function GitPanel({
 
   const errorCode = git.error ? git.error.split(":")[0] : "";
 
-  if (!rootDir) {
+  if (!workspaceRoot && repoRows.length === 0) {
     return <div className="empty">{t("git.noFolder")}</div>;
   }
 
   return (
     <div className="git-panel">
+      {repoRows.length > 1 && (
+        <div className="git-repos">
+          <div className="git-repos-head">
+            <span className="git-repos-title">{t("git.repos.heading")}</span>
+            <button
+              className="git-icon-btn"
+              title={t("git.repos.rescan")}
+              aria-label={t("git.repos.rescan")}
+              disabled={repoScanning}
+              onClick={onRescanRepos}
+            >
+              <IconReload size={12} />
+            </button>
+          </div>
+          {repoRows.map((row) => (
+            <div
+              key={row.root}
+              className={`git-repo-row${row.root === repoRoot ? " current" : ""}${row.unavailable ? " unavailable" : ""}`}
+              title={row.manual ? t("git.repos.manualTitle", { path: row.root }) : row.root}
+              onClick={() => onSelectRepo(row.root)}
+            >
+              <span className="git-repo-name">{row.name}</span>
+              {row.relative && row.relative !== "." && (
+                <span className="git-repo-rel">{row.relative}</span>
+              )}
+              {row.unavailable ? (
+                <span className="git-repo-badge">{t("git.repos.unavailable")}</span>
+              ) : (
+                <>
+                  {row.state !== "clean" && (
+                    <span
+                      className="git-repo-state"
+                      title={t(`git.state.${row.state}`)}
+                    >
+                      ●
+                    </span>
+                  )}
+                  {row.branch && <span className="git-repo-branch">{row.branch}</span>}
+                  {row.ahead > 0 && <span className="git-repo-sync">↑{row.ahead}</span>}
+                  {row.behind > 0 && <span className="git-repo-sync">↓{row.behind}</span>}
+                  {row.changed > 0 && <span className="git-repo-count">{row.changed}</span>}
+                </>
+              )}
+              {row.manual && (
+                <button
+                  className="git-repo-remove"
+                  title={t("git.repos.remove")}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onRemoveRepo(row.root);
+                  }}
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          ))}
+          {repoTruncated && (
+            <div className="git-repos-note">{t("git.repos.truncated")}</div>
+          )}
+          {decorateCapped && (
+            <div className="git-repos-note">{t("git.repos.decorateLimited")}</div>
+          )}
+        </div>
+      )}
+
+      {!repoRoot ? (
+        repoScanning || repoRows.length > 0 ? (
+          <div className="empty">{t("git.loading")}</div>
+        ) : (
+          <div className="git-empty">
+            {repoScanError && (
+              <div className="git-empty-title">{translateError(repoScanError)}</div>
+            )}
+            {!repoScanError && (
+              <div className="git-empty-title">{t("git.repos.empty")}</div>
+            )}
+            <div className="git-bulk">
+              <button className="git-small-btn" onClick={onAddRepo}>
+                {t("git.repos.add")}
+              </button>
+              {workspaceRoot && (
+                <button className="git-small-btn" onClick={() => void onInitWorkspace()}>
+                  {t("git.init")}
+                </button>
+              )}
+            </div>
+          </div>
+        )
+      ) : (
+        <>
       <div className="git-head">
         <div className="git-head-row">
           <button
@@ -344,6 +461,14 @@ export default function GitPanel({
             onClick={() => void git.refresh()}
           >
             <IconReload size={13} />
+          </button>
+          <button
+            className="git-icon-btn git-add-repo"
+            title={t("git.repos.add")}
+            aria-label={t("git.repos.add")}
+            onClick={onAddRepo}
+          >
+            ＋
           </button>
         </div>
         {status && (
@@ -518,10 +643,14 @@ export default function GitPanel({
       {git.error && errorCode === "git_not_repo" && (
         <div className="git-empty">
           <div className="git-empty-title">{t("git.notRepo")}</div>
-          <div className="git-empty-path" title={rootDir}>
-            {rootDir}
+          <div className="git-empty-path" title={repoRoot ?? undefined}>
+            {repoRoot}
           </div>
-          <button className="side-btn" disabled={busy} onClick={() => void git.init()}>
+          <button
+            className="side-btn"
+            disabled={busy}
+            onClick={() => void onInitWorkspace()}
+          >
             {t("git.init")}
           </button>
         </div>
@@ -991,6 +1120,8 @@ export default function GitPanel({
               </>
             )}
           </section>
+        </>
+      )}
         </>
       )}
 

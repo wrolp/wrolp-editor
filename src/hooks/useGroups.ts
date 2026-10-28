@@ -24,6 +24,10 @@ export interface GroupStoreCommitter {
   replace(next: GroupStore): void;
   /** Record the folder the Explorer is showing in the group on screen. */
   setRoot(root: string): void;
+  /** Replace the hand-added repository list of one group. */
+  setGitRoots(id: string, roots: string[]): void;
+  /** Remember which repository the Source Control panel shows in one group. */
+  setGitSelected(id: string, root: string): void;
   /** Give every group that has no folder the one an older install kept globally. */
   adoptRoot(root: string): void;
   create(name: string, root: string): { group: Group | null; problem: NameProblem };
@@ -135,6 +139,8 @@ export function useGroups({ onError }: Options): GroupStoreCommitter {
         // A new group starts where the window already is: creating a group is about splitting
         // tabs, not about sending the Explorer somewhere blank. It can move on its own after.
         root,
+        gitRoots: [],
+        gitSelected: "",
         updatedAt: "",
       };
       schedule({ ...s, active: group.id, items: [...s.items, group] });
@@ -161,6 +167,38 @@ export function useGroups({ onError }: Options): GroupStoreCommitter {
         ...s,
         items: s.items.map((item) =>
           item.id === s.active ? { ...item, root } : item
+        ),
+      });
+    },
+    [schedule]
+  );
+
+  const setGitRoots = useCallback(
+    (id: string, roots: string[]) => {
+      const s = storeRef.current;
+      const current = s.items.find((item) => item.id === id);
+      if (!current) return;
+      const same =
+        current.gitRoots.length === roots.length &&
+        current.gitRoots.every((root, index) => root === roots[index]);
+      if (same) return;
+      schedule({
+        ...s,
+        items: s.items.map((item) => (item.id === id ? { ...item, gitRoots: roots } : item)),
+      });
+    },
+    [schedule]
+  );
+
+  const setGitSelected = useCallback(
+    (id: string, root: string) => {
+      const s = storeRef.current;
+      const current = s.items.find((item) => item.id === id);
+      if (!current || current.gitSelected === root) return;
+      schedule({
+        ...s,
+        items: s.items.map((item) =>
+          item.id === id ? { ...item, gitSelected: root } : item
         ),
       });
     },
@@ -276,6 +314,8 @@ export function useGroups({ onError }: Options): GroupStoreCommitter {
     create,
     select,
     setRoot,
+    setGitRoots,
+    setGitSelected,
     adoptRoot,
     rename,
     isNameTaken,

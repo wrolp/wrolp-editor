@@ -834,6 +834,23 @@ export default function SettingsPanel({
             <h2>{t("git.settingsHeading")}</h2>
             <p className="muted">{t("git.settingsHint")}</p>
             <div className="setting-group">
+              <h3>{t("git.settingsScan")}</h3>
+              <p className="muted">{t("git.settingsScanDesc")}</p>
+              <SettingField label={t("git.settingsScanDepth")}>
+                <input
+                  type="number"
+                  min={0}
+                  max={5}
+                  value={settings.gitScanDepth}
+                  onChange={(e) => {
+                    const depth = Number(e.target.value);
+                    if (Number.isNaN(depth)) return;
+                    onSaveSettings({ gitScanDepth: Math.min(Math.max(depth, 0), 5) });
+                  }}
+                />
+              </SettingField>
+            </div>
+            <div className="setting-group">
               <h3>{t("git.settingsIdentity")}</h3>
               <p className="muted">{t("git.settingsIdentityDesc")}</p>
               <SettingField label={t("git.identityName")}>

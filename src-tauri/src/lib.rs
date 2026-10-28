@@ -111,6 +111,8 @@ pub fn run() {
       git::git_repo_info,
       git::git_init,
       git::status::git_status,
+      git::status::git_repo_summary,
+      git::repos::git_scan_repos,
       git::diff::git_diff,
       git::index::git_stage,
       git::index::git_unstage,

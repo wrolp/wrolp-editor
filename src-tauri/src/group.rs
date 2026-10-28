@@ -2,13 +2,16 @@
 //! while that group is on screen. Switching groups therefore switches both; a group may hold
 //! files from several folders, and the one it sits on is where the next file is picked from.
 
-use crate::draft::normalize_path;
+use crate::draft::{normalize_path, normalize_path_preserved};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 
 /// Bounded so the state file stays cheap to read and diff.
 const MAX_GROUPS: usize = 32;
 const MAX_TABS: usize = 200;
+/// Hand-added repositories kept per group. A project list, not an inventory: more than this is
+/// a sign the folder should have been the group itself.
+const MAX_GIT_ROOTS: usize = 20;
 /// Scratch text lives in the state file (an untitled tab has no draft key), so cap it.
 const MAX_UNTITLED_BYTES: usize = 64 * 1024;
 
@@ -55,6 +58,11 @@ pub struct Group {
   /// group has never shown one. Files the group holds may live elsewhere: this is where the
   /// next one is picked from, not where the open ones came from.
   pub root: String,
+  /// Repositories added by hand to the Source Control panel, outside the scan depth. Display
+  /// spelling is kept; identity is compared case-insensitively like every other path.
+  pub git_roots: Vec<String>,
+  /// The repository the Source Control panel was showing. Empty means "pick the usual one".
+  pub git_selected: String,
   pub updated_at: String,
 }
 
@@ -129,12 +137,26 @@ impl GroupStore {
         item.name.trim().to_string()
       };
 
+      let mut git_roots: Vec<String> = Vec::new();
+      for raw in item.git_roots {
+        let path = normalize_path_preserved(&raw);
+        if path.is_empty() || git_roots.iter().any(|existing| keys_equal(existing, &path)) {
+          continue;
+        }
+        if git_roots.len() >= MAX_GIT_ROOTS {
+          break;
+        }
+        git_roots.push(path);
+      }
+
       items.push(Group {
         id: item.id,
         name,
         tabs,
         active,
         root: normalize_path(&item.root),
+        git_roots,
+        git_selected: normalize_path_preserved(&item.git_selected),
         updated_at: if item.updated_at.is_empty() {
           Utc::now().to_rfc3339()
         } else {
@@ -530,6 +552,35 @@ mod tests {
     )])
     .filled();
     assert_eq!(filled.items[0].tabs.len(), 2);
+  }
+
+  #[test]
+  fn hand_added_repositories_are_normalized_deduped_and_capped() {
+    let group = Group {
+      git_roots: vec![
+        "C:/repos/a".into(),
+        "c:/REPOS/A".into(),
+        String::new(),
+      ],
+      git_selected: "C:/repos/pick".into(),
+      ..grp("a", "notes", vec![])
+    };
+    let filled = store(vec![group]).filled();
+    assert_eq!(filled.items[0].git_roots.len(), 1);
+    assert_eq!(
+      filled.items[0].git_selected,
+      normalize_path_preserved("C:/repos/pick")
+    );
+
+    let many: Vec<String> = (0..MAX_GIT_ROOTS + 5)
+      .map(|index| format!("C:/repos/r{index}"))
+      .collect();
+    let filled = store(vec![Group {
+      git_roots: many,
+      ..grp("a", "notes", vec![])
+    }])
+    .filled();
+    assert_eq!(filled.items[0].git_roots.len(), MAX_GIT_ROOTS);
   }
 
   #[test]

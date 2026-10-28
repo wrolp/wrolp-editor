@@ -222,6 +222,8 @@ export interface Settings {
   versioningShowLimit: number;
   /** Files bigger than this are left out of versioning, in bytes. 0 is read as the default. */
   versioningMaxFileSize: number;
+  /** Directory levels below the group folder scanned for repositories (0..=5). */
+  gitScanDepth: number;
   /**
    * Whether a write made by the automatic save also records a version. Off by default: the timer
    * runs whether or not anybody is at the keyboard, and recording it fills the timeline with
@@ -432,6 +434,35 @@ export interface GitCommitResult {
   summary: string;
 }
 
+/** One repository the Source Control panel lists. Manual entries are added by the frontend. */
+export interface GitRepoEntry {
+  /** Work tree, in the spelling the filesystem uses. */
+  root: string;
+  gitDir: string;
+  name: string;
+  /** `.`, `../name`, `packages/app`, or an absolute path for a manual repository. */
+  relative: string;
+  source: "root" | "parent" | "scan" | "manual";
+}
+
+export interface GitScanView {
+  repos: GitRepoEntry[];
+  /** The walk hit a directory or repository limit before finishing. */
+  truncated: boolean;
+  scannedDirs: number;
+  skipped: number;
+}
+
+/** One repository row's counts, without the file list. */
+export interface GitRepoSummary {
+  repo: GitRepoInfo;
+  staged: number;
+  changed: number;
+  untracked: number;
+  conflicted: number;
+  files: number;
+}
+
 /** What a diff is comparing: index → working tree, HEAD → index, or a commit's parent → it. */
 export type GitScope = "workdir" | "index" | "commit";
 
@@ -516,6 +547,10 @@ export interface Group {
   active: string;
   /** Folder the Explorer shows while this group is on screen; empty when it has none. */
   root: string;
+  /** Repositories added by hand to the Source Control panel, outside the scan depth. */
+  gitRoots: string[];
+  /** Repository the Source Control panel was showing; empty means "pick the usual one". */
+  gitSelected: string;
   updatedAt: string;
 }
 
@@ -820,6 +855,9 @@ export const api = {
   clearVersions: () => invoke<void>("clear_versions"),
   gitStatus: (root: string) => invoke<GitStatusView>("git_status", { root }),
   gitRepoInfo: (root: string) => invoke<GitRepoInfo>("git_repo_info", { root }),
+  gitScanRepos: (root: string, depth: number) =>
+    invoke<GitScanView>("git_scan_repos", { root, depth }),
+  gitRepoSummary: (root: string) => invoke<GitRepoSummary>("git_repo_summary", { root }),
   gitInit: (root: string) => invoke<void>("git_init", { root }),
   /**
    * A file's two texts for the diff editor. `scope` picks the pair; `oldPath` is the repository

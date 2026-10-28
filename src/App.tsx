@@ -46,6 +46,7 @@ import {
 import { useDraft } from "./hooks/useDraft";
 import { useEditorTabs } from "./hooks/useEditorTabs";
 import { useGit } from "./hooks/useGit";
+import { useGitRepos } from "./hooks/useGitRepos";
 import { useGroups } from "./hooks/useGroups";
 import { useVersions } from "./hooks/useVersions";
 import { useWindowFrame } from "./hooks/useWindowFrame";
@@ -95,6 +96,7 @@ import {
   type GitDiffText,
   type GitLogEntry,
   type GitStatusEntry,
+  type GitStatusView,
   type HistoryEntry,
   type MenuTarget,
   type RenameInput,
@@ -113,6 +115,36 @@ function gitTone(letter: string): GitMarkTone {
   if (letter === "U") return "conflict";
   if (letter === "T") return "type";
   return "mod";
+}
+
+/**
+ * The files every repository's status reports, one entry per path, with the nearest repository
+ * winning when two of them cover the same file. The Explorer can only draw one mark per row.
+ */
+function gatheredGitFiles(
+  repos: { root: string; status: GitStatusView }[],
+  repoRoots: string[],
+  shownRoot: string
+): GitStatusEntry[] {
+  const byPath = new Map<string, GitStatusEntry>();
+  // A parent repository can report files that belong to a nested repository as untracked.
+  // Those files are the nested repository's business: keep only what the nearest listed
+  // repository reports, so a clean nested repository does not colour its files in the Explorer.
+  const nearestRoot = (path: string): string => {
+    let best = "";
+    for (const root of repoRoots) {
+      if (isUnder(path, root) && root.length > best.length) best = root;
+    }
+    return best;
+  };
+  for (const { root, status } of repos) {
+    for (const file of status.files) {
+      if (!isUnder(file.abs, shownRoot)) continue;
+      if (pathKey(nearestRoot(file.abs)) !== pathKey(root)) continue;
+      byPath.set(pathKey(file.abs), file);
+    }
+  }
+  return [...byPath.values()];
 }
 
 const DEFAULT_SETTINGS: Settings = {
@@ -185,6 +217,7 @@ const DEFAULT_SETTINGS: Settings = {
   versioningEnabled: false,
   versioningShowLimit: 30,
   versioningMaxFileSize: 524288,
+  gitScanDepth: 2,
   autoSaveVersions: false,
   askNoteOnSave: false,
   // Empty is `wrolp/backups`, one folder away from the state it protects. Twenty snapshots is a
@@ -403,10 +436,27 @@ export default function App() {
     autoSaveVersions: settings.autoSaveVersions,
   });
   const groups = useGroups({ onError: toast });
-  const git = useGit({
+  const activeGroup = useMemo(
+    () => groups.store.items.find((item) => item.id === groups.store.active) ?? null,
+    [groups.store]
+  );
+  const manualRoots = useMemo(() => activeGroup?.gitRoots ?? [], [activeGroup]);
+  const repos = useGitRepos({
     rootDir,
-    // The Explorer decorates rows with the same status, so it keeps the panel's reads warm
-    // too; the history and versions views do not need them.
+    manualRoots,
+    savedSelected: activeGroup?.gitSelected ?? "",
+    depth: settings.gitScanDepth,
+    // Both views need the list: the Source panel shows it, the Explorer decorates from it.
+    active: sidebarVisible && (sidebarView === "git" || sidebarView === "explorer"),
+    decorating: sidebarVisible && sidebarView === "explorer",
+    onError: toast,
+    onSelect: (root) => groups.setGitSelected(groups.store.active, root),
+  });
+  const selectedRepo = repos.selectedRoot;
+  const git = useGit({
+    rootDir: selectedRepo,
+    // The Explorer decorates rows with the selected repository's status, so it keeps this
+    // controller polling too; the other repositories are read by useGitRepos.
     active:
       sidebarVisible && (sidebarView === "git" || sidebarView === "explorer"),
     onError: toast,
@@ -435,13 +485,26 @@ export default function App() {
     dirtyWas.current = dirtyCount;
   }, [dirtyCount, sidebarView, git.refresh]);
 
-  // Explorer decorations: a letter per changed file, and a count per folder above it. The
-  // working-tree letter wins when there is one, because that is the change the file on disk
-  // has right now; a staged-only entry falls back to its index letter. An ignored path is not
-  // a change — it gets `!`, the letter `git status --ignored` uses, and the row is dimmed.
+  // Explorer decorations: a letter per changed file, and a count per folder above it. Every
+  // repository under the group folder contributes; the nearest one wins when two cover a path.
+  const repoStatuses = useMemo(() => {
+    const list: { root: string; status: GitStatusView }[] = [];
+    for (const status of repos.statusByRepo.values()) {
+      list.push({ root: status.repo.root, status });
+    }
+    if (git.status && selectedRepo) {
+      const key = pathKey(selectedRepo);
+      const index = list.findIndex((item) => pathKey(item.root) === key);
+      if (index >= 0) list[index] = { root: git.status.repo.root, status: git.status };
+      else list.push({ root: git.status.repo.root, status: git.status });
+    }
+    return list;
+  }, [repos.statusByRepo, selectedRepo, git.status]);
+
   const gitMarks = useMemo(() => {
     const marks = new Map<string, GitMark>();
-    for (const file of git.status?.files ?? []) {
+    if (!rootDir) return marks;
+    for (const file of gatheredGitFiles(repoStatuses, repos.rows.map((row) => row.root), rootDir)) {
       const letter =
         file.kind === "ignored"
           ? "!"
@@ -455,18 +518,17 @@ export default function App() {
       });
     }
     return marks;
-  }, [git.status]);
+  }, [repoStatuses, rootDir]);
 
   const gitDirs = useMemo(() => {
     const counts = new Map<string, number>();
-    const shownRoot = rootDir ?? git.status?.repo.root ?? null;
-    if (!git.status || !shownRoot) return counts;
-    const rootKey = pathKey(shownRoot);
-    for (const file of git.status.files) {
+    if (!rootDir) return counts;
+    const rootKey = pathKey(rootDir);
+    for (const file of gatheredGitFiles(repoStatuses, repos.rows.map((row) => row.root), rootDir)) {
       // An ignored path is not a change, so it does not count towards a folder's badge.
       if (file.kind === "ignored") continue;
       let dir = dirname(file.abs);
-      while (isUnder(dir, shownRoot) && pathKey(dir) !== rootKey) {
+      while (isUnder(dir, rootDir) && pathKey(dir) !== rootKey) {
         const key = pathKey(dir);
         counts.set(key, (counts.get(key) ?? 0) + 1);
         const parent = dirname(dir);
@@ -475,7 +537,64 @@ export default function App() {
       }
     }
     return counts;
-  }, [git.status, rootDir]);
+  }, [repoStatuses, rootDir]);
+  const addGitRepository = useCallback(async () => {
+    const chosen = await pickFolder();
+    if (!chosen) return;
+    try {
+      const info = await api.gitRepoInfo(chosen);
+      const existing = repos.rows.find(
+        (row) => pathKey(row.root) === pathKey(info.root)
+      );
+      if (existing) {
+        repos.select(info.root);
+        return;
+      }
+      if (manualRoots.length >= 20) {
+        toast(t("git.repos.tooMany"));
+        return;
+      }
+      groups.setGitRoots(groups.store.active, [...manualRoots, info.root]);
+      repos.select(info.root);
+    } catch (e) {
+      toast(errorMessage(e));
+    }
+  }, [groups, manualRoots, repos, toast]);
+
+  const removeGitRepository = useCallback(
+    (root: string) => {
+      groups.setGitRoots(
+        groups.store.active,
+        manualRoots.filter((item) => pathKey(item) !== pathKey(root))
+      );
+    },
+    [groups, manualRoots]
+  );
+
+  const initGitWorkspace = useCallback(async () => {
+    if (!rootDir) return;
+    try {
+      await api.gitInit(rootDir);
+      await repos.rescan();
+    } catch (e) {
+      toast(errorMessage(e));
+    }
+  }, [repos, rootDir, toast]);
+
+  // What the status bar says: the live status of the selected repository when the panel has
+  // one, otherwise its summary (it keeps the last answer while the panel is not polling).
+  const selectedSummary = selectedRepo
+    ? repos.summaries.get(pathKey(selectedRepo))
+    : undefined;
+  const statusBarHead = git.status?.repo.head ?? selectedSummary?.repo.head ?? null;
+  const statusBarChanged = git.status
+    ? git.status.files.filter((file) => file.kind !== "ignored").length
+    : (selectedSummary?.files ?? 0);
+  const statusBarRepo =
+    repos.rows.length > 1
+      ? repos.rows.find((row) => pathKey(row.root) === pathKey(selectedRepo ?? ""))?.name
+      : undefined;
+
   // The window goes back where it was before anything else measures it.
   const frame = useWindowFrame({ onError: toast, onNotice: toast });
   /** Startup must finish before the live state is mirrored into the store. */
@@ -2141,7 +2260,18 @@ const defaultModeFor = useCallback(
           gitDirs={gitDirs}
           gitPanel={
             <GitPanel
-              rootDir={rootDir}
+              workspaceRoot={rootDir}
+              repoRoot={selectedRepo}
+              repoRows={repos.rows}
+              repoScanning={repos.scanning}
+              repoTruncated={repos.truncated}
+              decorateCapped={repos.decorationsCapped}
+              repoScanError={repos.scanError}
+              onSelectRepo={repos.select}
+              onAddRepo={() => void addGitRepository()}
+              onRemoveRepo={removeGitRepository}
+              onRescanRepos={() => void repos.rescan()}
+              onInitWorkspace={initGitWorkspace}
               git={git}
               active={sidebarView === "git" && sidebarVisible}
               dirtyPaths={dirtyPaths}
@@ -2355,15 +2485,16 @@ const defaultModeFor = useCallback(
         eol={shownEol}
         diff={diffStats}
         git={
-          git.status
+          statusBarHead
             ? {
+                repo: statusBarRepo,
                 branch:
-                  git.status.repo.head.branch ??
-                  git.status.repo.head.short ??
+                  statusBarHead.branch ??
+                  statusBarHead.short ??
                   t("git.unborn"),
-                ahead: git.status.repo.head.ahead,
-                behind: git.status.repo.head.behind,
-                changed: git.status.files.length,
+                ahead: statusBarHead.ahead,
+                behind: statusBarHead.behind,
+                changed: statusBarChanged,
               }
             : null
         }

@@ -230,6 +230,10 @@ pub struct Settings {
   /// default: a box in the way of `Ctrl+S` is only tolerable when somebody chose it, which is why
   /// this is a separate switch rather than part of versioning itself.
   pub ask_note_on_save: bool,
+  /// How many directory levels below the group folder the Source Control panel scans for
+  /// repositories. 0 means only the folder itself; 2 is the default. The panel never enters a
+  /// repository it has already found, so this bounds the walk rather than the project layout.
+  pub git_scan_depth: u32,
   /// Where configuration backups are written. Empty means `wrolp/backups`, beside the state
   /// folder; a path the user picked is kept as given. The folder is created when a backup is
   /// taken or the list is read, so a choice that cannot be reached yet is still remembered.
@@ -287,6 +291,7 @@ impl Default for Settings {
       ask_note_on_save: false,
       // Empty means `wrolp/backups`, a sibling of the state folder: next to the configuration,
       // without mixing snapshots into the files the app reads as its current state.
+      git_scan_depth: 2,
       backup_dir: String::new(),
       backup_retain: crate::backup::DEFAULT_RETAIN,
     }
@@ -510,6 +515,7 @@ impl Settings {
       },
       auto_save_versions: self.auto_save_versions,
       ask_note_on_save: self.ask_note_on_save,
+      git_scan_depth: self.git_scan_depth.min(5),
       backup_dir: self.backup_dir.trim().to_string(),
       // A zero would leave no snapshot at all after the next write, and a hundred is already more
       // history than a configuration needs.

@@ -47,14 +47,84 @@ pub struct StatusView {
   pub truncated: bool,
 }
 
+/// What one repository row in the multi-repository list needs: the same counts as
+/// [`StatusView`], without the file list that would dominate a scan of many repositories.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SummaryView {
+  pub repo: RepoInfo,
+  pub staged: usize,
+  pub changed: usize,
+  pub untracked: usize,
+  pub conflicted: usize,
+  /// Non-ignored entries counted before the entry ceiling.
+  pub files: usize,
+}
+
+#[tauri::command]
+pub fn git_repo_summary(root: String) -> Result<SummaryView, String> {
+  summary_of(&root)
+}
+
+pub(crate) fn summary_of(root: &str) -> Result<SummaryView, String> {
+  let opened = discover(root)?;
+  let info = repo_info(&opened, root);
+  let mut opts = status_options();
+  let statuses = opened
+    .repo
+    .statuses(Some(&mut opts))
+    .map_err(|e| fail("status", e))?;
+
+  let mut files = 0usize;
+  let mut staged = 0usize;
+  let mut changed = 0usize;
+  let mut untracked = 0usize;
+  let mut conflicted = 0usize;
+  for entry in statuses.iter() {
+    let flags = entry.status();
+    if flags.is_empty() {
+      continue;
+    }
+    if files >= MAX_STATUS_ENTRIES {
+      break;
+    }
+    // Ignored paths decorate the Explorer; they are not changes and do not belong in a count
+    // that decides whether a repository looks busy.
+    if flags.contains(GitStatus::IGNORED) {
+      continue;
+    }
+    let conflicted_entry = flags.contains(GitStatus::CONFLICTED);
+    if conflicted_entry {
+      conflicted += 1;
+    } else if flags.contains(GitStatus::WT_NEW) && !flags.contains(GitStatus::INDEX_NEW) {
+      untracked += 1;
+    }
+    if index_letter(flags).is_some() {
+      staged += 1;
+    }
+    if workdir_letter(flags).is_some() && !conflicted_entry {
+      changed += 1;
+    }
+    files += 1;
+  }
+  Ok(SummaryView {
+    repo: info,
+    staged,
+    changed,
+    untracked,
+    conflicted,
+    files,
+  })
+}
+
 #[tauri::command]
 pub fn git_status(root: String) -> Result<StatusView, String> {
   status_of(&root)
 }
 
-pub(crate) fn status_of(root: &str) -> Result<StatusView, String> {
-  let opened = discover(root)?;
-  let info = repo_info(&opened, root);
+/// The status options both the panel and the multi-repository summary use. Kept in one place so
+/// the two cannot disagree about what counts as a change.
+fn status_options() -> StatusOptions {
   let mut opts = StatusOptions::new();
   opts.include_untracked(true)
     .recurse_untracked_dirs(true)
@@ -68,6 +138,13 @@ pub(crate) fn status_of(root: &str) -> Result<StatusView, String> {
     // refresh, and a delete plus an add is an honest answer for a change not staged yet.
     .renames_head_to_index(true)
     .renames_index_to_workdir(false);
+  opts
+}
+
+pub(crate) fn status_of(root: &str) -> Result<StatusView, String> {
+  let opened = discover(root)?;
+  let info = repo_info(&opened, root);
+  let mut opts = status_options();
   let statuses = opened
     .repo
     .statuses(Some(&mut opts))
