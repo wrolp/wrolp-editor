@@ -65,7 +65,7 @@ export default function Editor({
   const dirtyMarks = useRef<editor.IEditorDecorationsCollection | null>(null);
   const dirtyTimer = useRef<number | undefined>(undefined);
   const savedText = useRef("");
-  const savedLines = useRef<string[]>([]);
+  const savedLines = useRef<string[]>([""]);
 
   /** Read the counters straight off the model; both numbers are O(1) lookups. */
   const report = useCallback(() => {
@@ -114,7 +114,7 @@ export default function Editor({
     // while the buffer is walked on every pause between keystrokes.
     if (savedText.current !== shown.original) {
       savedText.current = shown.original;
-      savedLines.current = shown.original.split("\n");
+      savedLines.current = shown.original.split(/\r\n|\r|\n/);
     }
     marks.set(
       dirtyRanges(savedLines.current, model.getLineCount(), (index) =>
