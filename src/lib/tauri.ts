@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { openPath, openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
@@ -321,6 +321,176 @@ export interface VersionBaseline {
   at: number | null;
 }
 
+/** What HEAD points at, as the Source Control panel reads it. */
+export interface GitHeadInfo {
+  /** `main` for a branch; null when detached. */
+  branch: string | null;
+  oid: string | null;
+  short: string | null;
+  detached: boolean;
+  /** A branch with no commit yet: a repository right after `git init`. */
+  unborn: boolean;
+  /** `origin/main` when the current branch tracks a remote one. */
+  upstream: string | null;
+  ahead: number;
+  behind: number;
+}
+
+/** Where the repository is and what state it is in. */
+export interface GitRepoInfo {
+  /** The work tree, which may sit above the group's folder. */
+  root: string;
+  gitDir: string;
+  /** The folder the panel asked about. */
+  requested: string;
+  head: GitHeadInfo;
+  /** clean | merge | revert | cherry-pick | bisect | rebase | apply-mailbox */
+  state: string;
+}
+
+export interface GitStatusEntry {
+  /** Repository-relative, forward slashes. */
+  path: string;
+  /** Absolute path for opening, revealing and diffing. */
+  abs: string;
+  oldPath: string | null;
+  /** One letter for the index half: A, M, D, R or T. */
+  index: string | null;
+  /** One letter for the working-tree half: ?, M, D, R or T. */
+  workdir: string | null;
+  kind: "tracked" | "untracked" | "conflicted";
+  submodule: boolean;
+}
+
+export interface GitStatusView {
+  repo: GitRepoInfo;
+  files: GitStatusEntry[];
+  staged: number;
+  changed: number;
+  untracked: number;
+  conflicted: number;
+  /** The repository had more changed paths than this answer carried. */
+  truncated: boolean;
+}
+
+export interface GitDiffSide {
+  path: string;
+  name: string;
+  text: string;
+  oid: string | null;
+  missing: boolean;
+}
+
+export interface GitDiffText {
+  left: GitDiffSide;
+  right: GitDiffSide;
+  binary: boolean;
+  tooLarge: boolean;
+  submodule: boolean;
+  encrypted: boolean;
+}
+
+export interface GitBranchInfo {
+  name: string;
+  remote: boolean;
+  current: boolean;
+  short: string | null;
+  upstream: string | null;
+}
+
+export interface GitLogEntry {
+  oid: string;
+  short: string;
+  summary: string;
+  message: string;
+  author: string;
+  email: string;
+  /** ISO-8601 UTC. */
+  time: string;
+  parents: string[];
+}
+
+/** One path a commit changed, as the commit view lists it. */
+export interface GitCommitFile {
+  path: string;
+  oldPath: string | null;
+  status: string;
+  abs: string;
+}
+
+export interface GitCommitResult {
+  oid: string;
+  short: string;
+  summary: string;
+}
+
+/** What a diff is comparing: index → working tree, HEAD → index, or a commit's parent → it. */
+export type GitScope = "workdir" | "index" | "commit";
+
+/** One step of a network operation, streamed while it runs. */
+export interface GitProgress {
+  /** starting | receiving | message | merging | writing | done */
+  phase: string;
+  received: number;
+  total: number;
+  bytes: number;
+  percent: number;
+  /** A line of server output (sideband), when there is one. */
+  text: string | null;
+}
+
+export interface GitRemote {
+  name: string;
+  /** With any user info stripped. */
+  url: string;
+  host: string | null;
+}
+
+export interface GitPullOutcome {
+  result: "up_to_date" | "fast_forward" | "merged" | "conflicted";
+  conflicted: string[];
+  repo: GitRepoInfo;
+}
+
+export interface GitPushOutcome {
+  repo: GitRepoInfo;
+  upstream: string | null;
+}
+
+/** The three versions of a conflicted path the index holds; missing sides are null. */
+export interface GitConflictSides {
+  path: string;
+  base: string | null;
+  ours: string | null;
+  theirs: string | null;
+}
+
+export interface GitIdentity {
+  name: string;
+  email: string;
+}
+
+/** A stored credential, without the secret itself. */
+export interface GitCredentialView {
+  host: string;
+  kind: "https" | "ssh";
+  username: string | null;
+  keyPath: string | null;
+  hasSecret: boolean;
+  hasPassphrase: boolean;
+}
+
+export interface GitKnownHostView {
+  host: string;
+  fingerprint: string;
+}
+
+export interface GitAuthView {
+  identity: GitIdentity | null;
+  credentials: GitCredentialView[];
+  knownHosts: GitKnownHostView[];
+}
+
 /** One restored tab: either a file (path + cursor) or scratch text (untitled + content). */
 export interface GroupTab {
   path: string;
@@ -640,6 +810,114 @@ export const api = {
     invoke<string>("get_version_content", { path, oid }),
   listVersions: () => invoke<VersionSummary[]>("list_versions"),
   clearVersions: () => invoke<void>("clear_versions"),
+  gitStatus: (root: string) => invoke<GitStatusView>("git_status", { root }),
+  gitRepoInfo: (root: string) => invoke<GitRepoInfo>("git_repo_info", { root }),
+  gitInit: (root: string) => invoke<void>("git_init", { root }),
+  /**
+   * A file's two texts for the diff editor. `scope` picks the pair; `oldPath` is the repository
+   * path a rename came from, used only for the left-hand lookup.
+   */
+  gitDiff: (
+    root: string,
+    path: string,
+    scope: GitScope,
+    oldPath?: string | null,
+    rev?: string | null
+  ) =>
+    invoke<GitDiffText>("git_diff", {
+      root,
+      path,
+      oldPath: oldPath ?? null,
+      scope,
+      rev: rev ?? null,
+    }),
+  gitStage: (root: string, paths: string[]) => invoke<void>("git_stage", { root, paths }),
+  gitUnstage: (root: string, paths: string[]) => invoke<void>("git_unstage", { root, paths }),
+  gitDiscard: (root: string, paths: string[]) => invoke<void>("git_discard", { root, paths }),
+  /** Commits what is staged. Nothing is added on the way. */
+  gitCommit: (root: string, message: string) =>
+    invoke<GitCommitResult>("git_commit", { root, message }),
+  gitLog: (root: string, limit?: number, skip?: number) =>
+    invoke<GitLogEntry[]>("git_log", { root, limit: limit ?? null, skip: skip ?? null }),
+  gitCommitFiles: (root: string, rev: string) =>
+    invoke<GitCommitFile[]>("git_commit_files", { root, rev }),
+  gitBranches: (root: string) => invoke<GitBranchInfo[]>("git_branches", { root }),
+  gitCreateBranch: (root: string, name: string, checkout: boolean) =>
+    invoke<void>("git_create_branch", { root, name, checkout }),
+  gitSwitchBranch: (root: string, name: string) =>
+    invoke<void>("git_switch_branch", { root, name }),
+  gitDeleteBranch: (root: string, name: string, force = false) =>
+    invoke<void>("git_delete_branch", { root, name, force }),
+  gitRemotes: (root: string) => invoke<GitRemote[]>("git_remotes", { root }),
+  /** Long operations take an `opId` so `git_cancel` can stop them, and stream progress. */
+  gitFetch: (
+    root: string,
+    remote: string | null,
+    opId: string,
+    onProgress: (progress: GitProgress) => void
+  ) => {
+    const channel = new Channel<GitProgress>();
+    channel.onmessage = onProgress;
+    return invoke<GitRepoInfo>("git_fetch", {
+      root,
+      remote,
+      opId,
+      onProgress: channel,
+    });
+  },
+  gitPull: (
+    root: string,
+    remote: string | null,
+    opId: string,
+    onProgress: (progress: GitProgress) => void
+  ) => {
+    const channel = new Channel<GitProgress>();
+    channel.onmessage = onProgress;
+    return invoke<GitPullOutcome>("git_pull", {
+      root,
+      remote,
+      opId,
+      onProgress: channel,
+    });
+  },
+  gitPush: (
+    root: string,
+    remote: string | null,
+    opId: string,
+    onProgress: (progress: GitProgress) => void
+  ) => {
+    const channel = new Channel<GitProgress>();
+    channel.onmessage = onProgress;
+    return invoke<GitPushOutcome>("git_push", {
+      root,
+      remote,
+      opId,
+      onProgress: channel,
+    });
+  },
+  gitCancel: (opId: string) => invoke<void>("git_cancel", { opId }),
+  gitConflictSides: (root: string, path: string) =>
+    invoke<GitConflictSides>("git_conflict_sides", { root, path }),
+  /** `choice` is `ours`, `theirs` or `markers`. */
+  gitResolveConflict: (root: string, path: string, choice: string) =>
+    invoke<void>("git_resolve_conflict", { root, path, choice }),
+  gitMergeAbort: (root: string) => invoke<void>("git_merge_abort", { root }),
+  gitAuthView: () => invoke<GitAuthView>("git_auth_view"),
+  gitSaveHttps: (host: string, username: string, secret: string) =>
+    invoke<void>("git_save_https", { host, username, secret }),
+  gitSaveSsh: (
+    host: string,
+    keyPath: string,
+    passphrase: string | null,
+    rememberPassphrase: boolean
+  ) => invoke<void>("git_save_ssh", { host, keyPath, passphrase, rememberPassphrase }),
+  gitForgetCredential: (host: string) => invoke<void>("git_forget_credential", { host }),
+  gitSaveIdentity: (name: string, email: string) =>
+    invoke<void>("git_save_identity", { name, email }),
+  gitClearIdentity: () => invoke<void>("git_clear_identity"),
+  gitTrustHost: (host: string, fingerprint: string) =>
+    invoke<void>("git_trust_host", { host, fingerprint }),
+  gitForgetHost: (host: string) => invoke<void>("git_forget_host", { host }),
   getGroups: () => invoke<GroupStore>("get_groups"),
   saveGroups: (store: GroupStore) => invoke<GroupStore>("save_groups", { store }),
   transferTabs: (store: GroupStore, transfer: TabTransfer) =>

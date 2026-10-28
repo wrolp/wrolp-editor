@@ -352,6 +352,80 @@ export function IconMinimap({ size = 14 }: IconProps) {
  * document is encrypted *and* nobody here can read it yet", which is one distinction worth
  * carrying in the one glyph that has room for it in a tab.
  */
+export function IconBranch({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <circle cx="6" cy="5" r="2.2" />
+      <circle cx="6" cy="19" r="2.2" />
+      <circle cx="18" cy="9" r="2.2" />
+      <path d="M6 7.2v9.6" />
+      <path d="M18 11.2c0 3.4-3.6 4.4-7 4.9" />
+    </svg>
+  );
+}
+
+export function IconStage({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={2}>
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  );
+}
+
+export function IconUnstage({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={2}>
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  );
+}
+
+export function IconCheck({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={2.2}>
+      <polyline points="5 12.5 9.5 17 19 7" />
+    </svg>
+  );
+}
+
+export function IconFetch({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <path d="M20 12a8 8 0 1 1-2.3-5.7" />
+      <polyline points="20 4 20 8.5 15.5 8.5" />
+    </svg>
+  );
+}
+
+export function IconPull({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <line x1="12" y1="4" x2="12" y2="15" />
+      <polyline points="7.5 10.5 12 15 16.5 10.5" />
+      <line x1="5" y1="20" x2="19" y2="20" />
+    </svg>
+  );
+}
+
+export function IconPush({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <line x1="12" y1="20" x2="12" y2="9" />
+      <polyline points="7.5 13.5 12 9 16.5 13.5" />
+      <line x1="5" y1="4" x2="19" y2="4" />
+    </svg>
+  );
+}
+
+export function IconStop({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <rect x="6" y="6" width="12" height="12" rx="1.5" />
+    </svg>
+  );
+}
+
 export function IconLock({ size = 14, locked = true }: IconProps & { locked?: boolean }) {
   return (
     <svg {...base(size)} strokeWidth={1.8}>

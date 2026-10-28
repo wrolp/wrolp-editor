@@ -22,10 +22,12 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | Drafts | Debounced ~500 ms after each edit; also flushed on tab switch, tab close and window blur |
 | Auto-save | Off by default. On, the file **on screen** is written once it has gone N seconds without an edit — typing restarts that file's countdown, so the write lands on a pause rather than mid-sentence. A tab you are not looking at neither starts a countdown nor loses one already running, and its unsaved text stays held by its draft. Untitled buffers, locked files, pictures, and anything the disk check already has a question about are left alone. Its writes record no version unless Settings → Versions says otherwise |
 | Restore | On open, disk content is compared with the draft; a differing draft is loaded back and the tab stays marked unsaved. Settings can switch this to a per-file Restore / Discard dialog |
-| Sidebar | Explorer file tree (lazy folders, refresh button, folders first and names in natural order — `2.txt` before `10.txt`), a History list of recently opened files, and a Versions view. Drag the divider to resize (180–640 px, double-click resets); the width is persisted. The tree's text size is a setting, 11–20 px |
+| Sidebar | Explorer file tree (lazy folders, refresh button, folders first and names in natural order — `2.txt` before `10.txt`), a History list of recently opened files, a Versions view, and a Source Control view. Drag the divider to resize (180–640 px, double-click resets); the width is persisted. The tree's text size is a setting, 11–20 px |
 | Picture gallery | A whole folder in one tab, in natural order (`IMG_2` before `IMG_10`): stacked, one at a time, slideshow, or a grid. Subfolders are opt-in and walked four levels deep; one listing stops at 2,000 pictures and says so. Pictures are drawn through the asset protocol, so the editor's text-size limit does not apply. HEIC and TIFF are listed and marked as formats this renderer cannot draw |
 | Batch rename | Multi-select rows or rename a whole folder at once; one pattern (`{name}`, `{ext}`, `{n}`) or a regular expression with a replacement, a live preview, and an order — name, extension, modified time or manual — that `{n}` counts. See [Batch rename](#batch-rename) |
 | Version history | Off by default. On, every save by hand records what the file said, and any two of them — a version against a version, or either against what is open — can be compared side by side, folded down to the changes, or put back into the editor. One file's saves can be excluded, or forced in, from its tab menu. See [Version history](#version-history) |
+| Source control | Explorer rows carry their git letter and folders the count beneath them. A fourth sidebar view for the real git repository behind the group's folder: staged and unstaged changes, per-file diffs, stage / unstage / discard, commits with history, branches, and conflict resolution. See [Source control](#source-control) |
+| Remotes | Fetch, pull (fast-forward or merge) and push over HTTPS or SSH, with progress and a Cancel button. Credentials live in `state/git.json`, never in Settings or its backups |
 | Single instance | Launching a second time hands the path to the running window, adds a tab and focuses it |
 | Settings | Context-menu switch, editor font size, minimap, UI language; persisted and applied live. The context-menu page also shows the command the entry currently launches, and warns when it points at a different build or when this is a debug build |
 | Language | English by default, switchable to 中文 from a dropdown in Settings. All strings, including messages coming from the Rust side, resolve through one key table |
@@ -168,6 +170,8 @@ wrolp/
     │                         encryptIdleMinutes
     ├── file-settings.json    per-file overrides: encoding, line ending, view settings, versioning
     ├── groups.json           the tab groups: name, tabs, caret positions and the Explorer folder
+    ├── git.json              git credentials, commit identity fallback, trusted SSH host keys
+    │                         (plain text; deliberately not part of configuration backups)
     └── window.json           x, y, width, height in physical pixels, plus the maximized flag
 ```
 
@@ -200,7 +204,11 @@ history (`versioning_state`, `set_version_override`, `add_version`, `get_version
 `get_version_content`, `list_versions`, `clear_versions`), and encryption
 (`unlock_file`, `lock_file`, `lock_all`, `save_file_as_encrypted`, `create_encrypted`,
 `change_password`, `remove_encryption`, `remember_password`, `forget_password`, `recall_password`,
-`remembered_password_count`, `clear_remembered_passwords`).
+`remembered_password_count`, `clear_remembered_passwords`), and git (`git_status`, `git_repo_info`,
+`git_init`, `git_diff`, `git_stage`, `git_unstage`, `git_discard`, `git_commit`, `git_log`,
+`git_commit_files`, `git_branches`, `git_create_branch`, `git_switch_branch`, `git_delete_branch`,
+`git_remotes`, `git_fetch`, `git_pull`, `git_push`, `git_cancel`, `git_conflict_sides`,
+`git_resolve_conflict`, `git_merge_abort`, plus `git_auth_*` for the credential and host-key store).
 
 File IO is deliberately **not** the `fs` plugin: the WebView only ever calls these fixed
 commands, so no broad disk scope is exposed to the frontend. Passwords cross IPC in one direction
@@ -369,6 +377,55 @@ this is not a repository you branch or push, and nothing about it reaches the fo
   the other one where it is; two histories are never merged.
 - **Messages keep the language they were written in.** The label on a version is stored with it, so a
   history recorded in 中文 still says 初始版本 after you switch the interface to English.
+
+## Source control
+
+The fourth sidebar view is a real git repository: the one `git status` in a terminal would show
+for the group's folder. The repository is found by walking up from that folder, and the panel
+prints the work-tree root it landed on — a group folder inside a larger repository shows the larger
+repository, not a new one at the folder. This is the opposite of [Version history](#version-history),
+which is a private store per file and never touches the folders you edit.
+
+- **Changes.** Two lists, `Staged` and `Changes`, with the same one-letter badges `git status
+  --short` uses. A path can be in both (staged text and further working-tree edits); each row acts
+  on its own half. Clicking a row opens a read-only comparison tab — index against working tree, or
+  HEAD against index — using the same diff viewer as every other comparison. A row with unsaved
+  editor text says so; staging and committing always use the file on disk.
+- **Actions.** Stage, unstage, discard one file or all of them. Discarding a tracked file checks the
+  index version back out; discarding an untracked file deletes it, after a confirmation that names
+  the count. A conflicted path is never discarded here — it is resolved through the merge flow.
+- **Commit.** Only what is staged is committed, so the two lists mean what they say. The identity is
+  the repository's own `user.name`/`user.email`; when those are missing, Settings → Git can supply a
+  fallback, and with neither the commit is refused rather than signed by an invented person. The
+  History section lists commits and the paths each one changed, and a changed path opens the same
+  comparison against its first parent. A merge in progress takes no extra staging and commits with
+  two parents.
+- **Branches.** The branch button lists local and remote-tracking branches, creates one from the
+  current commit, switches and deletes with confirmation — a branch whose commits are not merged
+  anywhere asks a second, explicit question before it is deleted. Picking a remote-tracking branch
+  makes the local branch of the same name and sets it to track that remote one. Switching is refused while the index or
+  the working tree has changes: a branch switch that half-succeeds is worse than one that asks you
+  to commit or discard first.
+- **Remotes.** Fetch, pull and push use libgit2 over the system's WinHTTP stack for HTTPS and
+  libssh2 for SSH. Progress is shown while it runs and can be cancelled. Pull fast-forwards when it
+  can; otherwise it merges, and a conflict opens a `Conflicts` list where each path can be taken as
+  ours, as theirs, or written with conflict markers for hand editing. Committing the result records
+  the merge, and *Abort merge* puts the files back as they were before it started. Push sets the
+  upstream on the first push and reports a rejected non-fast-forward in words rather than as a
+  transport error.
+- **Credentials.** HTTPS takes a username and a personal access token; SSH takes a private key and
+  an optional passphrase. They are kept in `state/git.json` in plain text, like the rest of this
+  app's state, and are **not** included in configuration backups, so a token is not copied into
+  every safety snapshot. The credential dialog masks the secret with a reveal button, and the Rust
+  side never hands a stored secret back to the frontend. The first connection to an SSH host asks
+  you to trust its SHA-256 fingerprint; later connections compare against what you approved and
+  refuse a changed key. Settings → Git lists stored hosts and lets you forget them.
+- **What it deliberately does not do.** No stash, tags, rebase, cherry-pick, blame or clone wizard;
+  no three-way merge editor (ours/theirs/markers is the whole conflict UI); nested repositories and
+  submodules are shown as single paths rather than aggregated; libgit2 does not run hooks, so
+  `pre-commit`/`post-checkout` scripts and git-lfs are not applied. Status stops at 5,000 paths and
+  a diff side over 2 MB is reported rather than rendered. The panel refreshes every five seconds
+  while it is visible, after a save, and when the window regains focus.
 
 ## Encrypted files
 

@@ -33,7 +33,10 @@ keyring-core = "1.0.1"
 tauri-plugin-clipboard-manager = "2"
 tauri-plugin-updater = "2"
 arboard = "3.6"
-git2 = { version = "0.21.0", default-features = false, features = ["vendored-libgit2"] }
+# `https` and `ssh` are the transports the Source Control panel needs. On Windows `https` is
+# served by libgit2's WinHTTP backend (system TLS, proxy and certificate store), so it pulls in no
+# OpenSSL; `ssh` does add libssh2, which is the one dependency that has to be watched at build time.
+git2 = { version = "0.21.0", default-features = false, features = ["vendored-libgit2", "https", "ssh"] }
 
 [target.'cfg(windows)'.dependencies]
 tauri-plugin-single-instance = "2"

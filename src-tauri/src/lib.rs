@@ -7,6 +7,7 @@ mod encoding;
 mod entry;
 mod file_settings;
 mod gallery;
+mod git;
 mod group;
 mod name_order;
 mod rename;
@@ -28,6 +29,8 @@ pub fn run() {
     .plugin(tauri_plugin_updater::Builder::new().build())
     .manage(commands::PendingFiles::default())
     .manage(unlock::UnlockStore::default())
+    .manage(git::GitLocks::default())
+    .manage(git::GitOps::default())
     .setup(|app| {
       // "Open with WROLP" hands the file path over as argv[1..].
       for path in commands::paths_from_args(std::env::args()) {
@@ -104,7 +107,37 @@ pub fn run() {
       commands::plan_window_placement,
       commands::context_menu_target,
       commands::install_context_menu,
-      commands::uninstall_context_menu
+      commands::uninstall_context_menu,
+      git::git_repo_info,
+      git::git_init,
+      git::status::git_status,
+      git::diff::git_diff,
+      git::index::git_stage,
+      git::index::git_unstage,
+      git::index::git_discard,
+      git::index::git_commit,
+      git::history::git_log,
+      git::history::git_commit_files,
+      git::branch::git_branches,
+      git::branch::git_create_branch,
+      git::branch::git_switch_branch,
+      git::branch::git_delete_branch,
+      git::git_cancel,
+      git::auth::git_auth_view,
+      git::auth::git_save_https,
+      git::auth::git_save_ssh,
+      git::auth::git_forget_credential,
+      git::auth::git_save_identity,
+      git::auth::git_clear_identity,
+      git::auth::git_trust_host,
+      git::auth::git_forget_host,
+      git::remote::git_remotes,
+      git::remote::git_fetch,
+      git::remote::git_pull,
+      git::remote::git_push,
+      git::remote::git_conflict_sides,
+      git::remote::git_resolve_conflict,
+      git::remote::git_merge_abort
     ]);
 
   #[cfg(windows)]

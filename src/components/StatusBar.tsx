@@ -1,7 +1,15 @@
 import { t } from "../lib/i18n";
 import { isBitmapImage } from "../lib/path";
-import { IconLock } from "./icons";
+import { IconBranch, IconLock } from "./icons";
 import { isFileTab, type DiffStats, type EditStats, type Tab } from "../lib/types";
+
+/** The Source Control summary, shown whatever file is on screen. */
+export interface GitSummary {
+  branch: string;
+  ahead: number;
+  behind: number;
+  changed: number;
+}
 
 interface Props {
   tab: Tab | null;
@@ -15,6 +23,10 @@ interface Props {
   eol: string;
   /** Added/removed lines of a comparison tab; null while any other tab is showing. */
   diff: DiffStats | null;
+  /** Branch, divergence and changed-file count; null when there is no repository. */
+  git: GitSummary | null;
+  /** Opens the Source Control view when the git summary is clicked. */
+  onGitClick?: () => void;
 }
 
 /**
@@ -33,7 +45,16 @@ function formatBytes(bytes: number): string {
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
 }
 
-export default function StatusBar({ tab, line, column, stats, eol, diff }: Props) {
+export default function StatusBar({
+  tab,
+  line,
+  column,
+  stats,
+  eol,
+  diff,
+  git,
+  onGitClick,
+}: Props) {
   // A comparison tab shows two files, so the file counters (selection, size, dirty) and
   // the single caret readout do not apply to it; it gets the diff totals instead.
   const file = tab && isFileTab(tab);
@@ -54,6 +75,25 @@ export default function StatusBar({ tab, line, column, stats, eol, diff }: Props
           : t("status.noFile")}
       </span>
       <span className="sb-spacer" />
+      {git && (
+        <button
+          type="button"
+          className="sb-git"
+          onClick={onGitClick}
+          title={t("git.statusTitle", {
+            branch: git.branch,
+            ahead: git.ahead,
+            behind: git.behind,
+            changed: git.changed,
+          })}
+        >
+          <IconBranch size={11} />
+          <span className="sb-git-branch">{git.branch}</span>
+          {git.ahead > 0 && <span>↑{git.ahead}</span>}
+          {git.behind > 0 && <span>↓{git.behind}</span>}
+          {git.changed > 0 && <span className="sb-git-changes">{git.changed}</span>}
+        </button>
+      )}
       {counters && stats.selectionChars > 0 && (
         <span className="sb-selection">
           {stats.selectionLines > 1

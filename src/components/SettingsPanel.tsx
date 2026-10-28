@@ -15,12 +15,13 @@ import {
   pickFolder,
   type BackupInfo,
   type BackupList,
+  type GitAuthView,
   type MenuTarget,
   type Settings,
   type StoreDirs,
 } from "../lib/tauri";
 
-type Category = "context" | "general" | "versions" | "backups" | "encryption" | "about";
+type Category = "context" | "general" | "versions" | "git" | "backups" | "encryption" | "about";
 
 interface Props {
   settings: Settings;
@@ -40,6 +41,7 @@ const NAV: { cat: Category; key: string }[] = [
   { cat: "general", key: "settings.catGeneral" },
   { cat: "context", key: "settings.catContext" },
   { cat: "versions", key: "ver.category" },
+  { cat: "git", key: "settings.catGit" },
   { cat: "backups", key: "settings.catBackups" },
   { cat: "encryption", key: "enc.category" },
   { cat: "about", key: "settings.catAbout" },
@@ -151,6 +153,10 @@ export default function SettingsPanel({
   const [backups, setBackups] = useState<BackupList | null>(null);
   const [backupError, setBackupError] = useState<string | null>(null);
   const [backupBusy, setBackupBusy] = useState(false);
+  const [gitAuth, setGitAuth] = useState<GitAuthView | null>(null);
+  const [gitName, setGitName] = useState("");
+  const [gitEmail, setGitEmail] = useState("");
+  const [gitBusy, setGitBusy] = useState(false);
   /** The snapshot a second, explicit click would restore. */
   const [restoreTarget, setRestoreTarget] = useState<BackupInfo | null>(null);
   // The exclusion list is typed as free text, so what is being edited and what is stored
@@ -323,6 +329,61 @@ export default function SettingsPanel({
         if (picked) saveBackupDir(picked);
       })
       .catch((e) => onToast(errorMessage(e)));
+  };
+
+  const loadGitAuth = useCallback(() => {
+    api
+      .gitAuthView()
+      .then((view) => {
+        setGitAuth(view);
+        setGitName(view.identity?.name ?? "");
+        setGitEmail(view.identity?.email ?? "");
+      })
+      .catch((e) => onToast(errorMessage(e)));
+  }, [onToast]);
+
+  useEffect(() => {
+    if (category === "git" && !gitAuth) loadGitAuth();
+  }, [category, gitAuth, loadGitAuth]);
+
+  const saveGitIdentity = async () => {
+    if (gitBusy || !gitName.trim() || !gitEmail.trim()) return;
+    setGitBusy(true);
+    try {
+      await api.gitSaveIdentity(gitName.trim(), gitEmail.trim());
+      loadGitAuth();
+    } catch (e) {
+      onToast(errorMessage(e));
+    } finally {
+      setGitBusy(false);
+    }
+  };
+
+  const clearGitIdentity = async () => {
+    try {
+      await api.gitClearIdentity();
+      loadGitAuth();
+    } catch (e) {
+      onToast(errorMessage(e));
+    }
+  };
+
+  const forgetGitCredential = async (host: string) => {
+    try {
+      await api.gitForgetCredential(host);
+      loadGitAuth();
+    } catch (e) {
+      onToast(errorMessage(e));
+    }
+  };
+
+  const forgetGitHost = async (host: string) => {
+    try {
+      await api.gitForgetHost(host);
+      loadGitAuth();
+    } catch (e) {
+      onToast(errorMessage(e));
+    }
   };
 
   const backupNow = () => {
@@ -764,6 +825,73 @@ export default function SettingsPanel({
                 </select>
               </SettingField>
               <p className="muted">{t("settings.persisted")}</p>
+            </div>
+          </div>
+        )}
+
+        {category === "git" && (
+          <div className="settings-cat git-settings">
+            <h2>{t("git.settingsHeading")}</h2>
+            <p className="muted">{t("git.settingsHint")}</p>
+            <div className="setting-group">
+              <h3>{t("git.settingsIdentity")}</h3>
+              <p className="muted">{t("git.settingsIdentityDesc")}</p>
+              <SettingField label={t("git.identityName")}>
+                <input className="settings-text" value={gitName} onChange={(e) => setGitName(e.target.value)} />
+              </SettingField>
+              <SettingField label={t("git.identityEmail")}>
+                <input className="settings-text" value={gitEmail} onChange={(e) => setGitEmail(e.target.value)} />
+              </SettingField>
+              <div className="git-setting-actions">
+                <button
+                  className="btn"
+                  disabled={gitBusy || !gitName.trim() || !gitEmail.trim()}
+                  onClick={() => void saveGitIdentity()}
+                >
+                  {t("git.identitySave")}
+                </button>
+                {gitAuth?.identity && (
+                  <button className="btn" disabled={gitBusy} onClick={() => void clearGitIdentity()}>
+                    {t("git.identityClear")}
+                  </button>
+                )}
+              </div>
+            </div>
+            <div className="setting-group">
+              <h3>{t("git.settingsCredentials")}</h3>
+              {(gitAuth?.credentials.length ?? 0) === 0 ? (
+                <p className="muted">{t("git.settingsNoCredentials")}</p>
+              ) : (
+                gitAuth!.credentials.map((credential) => (
+                  <div key={`${credential.kind}:${credential.host}`} className="git-setting-row">
+                    <span className="git-setting-name">
+                      {credential.host} · {credential.kind}
+                      {credential.username ? ` · ${credential.username}` : ""}
+                      {credential.keyPath ? ` · ${credential.keyPath}` : ""}
+                    </span>
+                    <button className="btn" onClick={() => void forgetGitCredential(credential.host)}>
+                      {t("git.settingsForget")}
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="setting-group">
+              <h3>{t("git.settingsHosts")}</h3>
+              {(gitAuth?.knownHosts.length ?? 0) === 0 ? (
+                <p className="muted">{t("git.settingsNoHosts")}</p>
+              ) : (
+                gitAuth!.knownHosts.map((host) => (
+                  <div key={host.host} className="git-setting-row">
+                    <span className="git-setting-name" title={host.fingerprint}>
+                      {host.host} · {host.fingerprint.slice(0, 16)}…
+                    </span>
+                    <button className="btn" onClick={() => void forgetGitHost(host.host)}>
+                      {t("git.settingsForget")}
+                    </button>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         )}

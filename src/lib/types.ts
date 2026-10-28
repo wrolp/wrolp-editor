@@ -98,7 +98,7 @@ export interface CompareSide {
    * content is a snapshot the file no longer holds, and two versions of one file have to land on
    * two different diff models.
    */
-  kind: "buffer" | "disk" | "version";
+  kind: "buffer" | "disk" | "version" | "git";
   /** The version this side was read from, present when `kind` is `version`. */
   oid?: string;
 }
@@ -127,7 +127,18 @@ export interface ComparePair {
  * `view === "history" ? … : …` has to name the third one: a pair of ternaries would file
  * versions under explorer and say nothing about it.
  */
-export type SidebarView = "explorer" | "history" | "versions";
+export type SidebarView = "explorer" | "history" | "versions" | "git";
+
+/** How a git status letter is coloured in the Explorer. */
+export type GitMarkTone = "add" | "mod" | "del" | "ren" | "conflict" | "type";
+
+/** One changed path as the Explorer decorates it. */
+export interface GitMark {
+  letter: string;
+  tone: GitMarkTone;
+  /** True when that letter comes from the index rather than the working tree. */
+  staged: boolean;
+}
 
 /**
  * A tab backed by a real file the user can edit. Settings, comparison and gallery tabs are

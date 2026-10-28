@@ -1510,6 +1510,44 @@ body.resizing .editor-host {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Git decorations: a letter on the file, a count on the folder that holds changes. The name
+   keeps its flex box, so the badge sits at the right edge and never pushes the text. */
+.tree-git {
+  flex: 0 0 auto;
+  margin-left: 4px;
+  font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+.tree-git.add {
+  color: var(--add);
+}
+.tree-git.mod {
+  color: var(--warn);
+}
+.tree-git.del {
+  color: var(--del);
+}
+.tree-git.ren {
+  color: var(--link);
+}
+.tree-git.conflict {
+  color: var(--danger);
+}
+.tree-git.type {
+  color: var(--muted);
+}
+.tree-git-count {
+  flex: 0 0 auto;
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--chip);
+  color: var(--muted);
+  font-size: 10px;
+  text-align: center;
+}
 /* The field that stands in for a row's name while it is renamed. It takes the label's own
    flex box, so the row keeps its width and the tree does not shift under the edit. */
 .tree-row .tree-rename {
@@ -1659,6 +1697,626 @@ body.resizing .editor-host {
   color: var(--text-strong);
 }
 
+/* ---------- Source Control panel ----------
+   Reuses the sidebar's column, scroll area and button/row rhythm; only the pieces git needs —
+   two status columns, a commit box, a branch picker and a commit list — are new. */
+.git-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.git-head {
+  padding: 4px 10px 6px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.git-head-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.git-branch-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.git-branch-btn:hover,
+.git-branch-btn.active {
+  background: var(--surface-hover);
+}
+.git-branch-btn:disabled {
+  cursor: default;
+  color: var(--text-faint);
+}
+.git-branch-name {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-counter {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.git-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.git-icon-btn:hover {
+  background: var(--border-strong);
+  color: var(--text-strong);
+}
+.git-icon-btn:disabled {
+  color: var(--text-disabled);
+  cursor: default;
+}
+.git-sync {
+  display: flex;
+  gap: 1px;
+  margin-left: auto;
+}
+.git-remote {
+  margin-top: 4px;
+  width: 100%;
+  padding: 2px 4px;
+  background: var(--sunken);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+.git-root {
+  margin-top: 3px;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  direction: rtl;
+  text-align: left;
+}
+.git-state {
+  margin-top: 5px;
+  padding: 5px 7px;
+  border-radius: 5px;
+  background: var(--danger-bg);
+  color: var(--warn-text);
+  font-size: 11px;
+}
+.git-progress {
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--surface-2);
+}
+.git-progress-text {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.git-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+.git-progress-bar {
+  flex: 1 1 auto;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--sunken);
+  overflow: hidden;
+}
+.git-progress-bar span {
+  display: block;
+  height: 100%;
+  background: var(--accent-soft);
+  transition: width 0.12s linear;
+}
+.git-progress-percent {
+  flex: 0 0 auto;
+  min-width: 30px;
+  text-align: right;
+  font-size: 10px;
+  color: var(--text-faint);
+}
+.git-merge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--warn);
+  border-radius: 6px;
+  background: var(--danger-bg);
+  font-size: 11px;
+  color: var(--warn-text);
+}
+.git-merge span {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.git-branches {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--surface-2);
+}
+.git-branch-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.git-branch-pick {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 6px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.git-branch-pick:hover {
+  background: var(--surface-2-hover);
+}
+.git-branch-row.current .git-branch-pick {
+  color: var(--text-faint);
+  cursor: default;
+}
+/* A remote branch is an offer to check it out locally, so it keeps the hover and pointer. */
+.git-branch-row.remote .git-branch-pick {
+  color: var(--text-faint);
+}
+.git-branch-row.current .git-branch-pick {
+  color: var(--accent-soft);
+  font-weight: 600;
+}
+.git-branch-del:hover {
+  color: var(--del);
+}
+.git-branch-note {
+  padding: 6px 6px 2px;
+  font-size: 10.5px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.git-new-branch {
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+}
+.git-new-branch input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 6px;
+  background: var(--sunken);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+}
+.git-small-btn {
+  padding: 3px 8px;
+  background: var(--surface-active);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-dim);
+  font-size: 11px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.git-small-btn:hover {
+  background: var(--surface-2-hover);
+  color: var(--text);
+}
+.git-small-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.git-small-btn.danger {
+  background: transparent;
+  border-color: var(--danger-bg-2);
+  color: var(--del);
+}
+.git-small-btn.danger:hover {
+  background: var(--danger-bg);
+}
+.git-empty {
+  padding: 14px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.git-empty-title {
+  margin-bottom: 6px;
+  color: var(--text-dim);
+}
+.git-empty-path {
+  margin-bottom: 10px;
+  font-size: 11px;
+  color: var(--text-faint);
+  word-break: break-all;
+}
+.git-empty .side-btn {
+  display: inline-block;
+  width: auto;
+  margin: 0;
+}
+.git-note {
+  padding: 6px 14px;
+  font-size: 11px;
+  color: var(--warn-text);
+}
+.git-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 10px;
+  padding: 6px 8px;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-bg-2);
+  border-radius: 6px;
+}
+.git-confirm-text {
+  flex: 1 1 100%;
+  font-size: 11px;
+  color: var(--text);
+}
+.git-section-block {
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.git-section {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 6px 12px;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-align: left;
+  cursor: pointer;
+}
+.git-section:hover {
+  color: var(--text-dim);
+}
+.git-chev {
+  display: inline-flex;
+  transition: transform 0.12s ease;
+}
+.git-chev.rot {
+  transform: rotate(-90deg);
+}
+.git-count {
+  margin-left: auto;
+  font-size: 10.5px;
+  color: var(--text-faint);
+}
+.git-clean {
+  padding: 6px 14px 8px;
+  font-size: 11.5px;
+  color: var(--text-faint);
+}
+.git-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 12px;
+  font-size: var(--sidebar-font, 12px);
+  cursor: pointer;
+}
+.git-row:hover {
+  background: var(--surface-2);
+}
+.git-badge {
+  flex: 0 0 14px;
+  width: 14px;
+  text-align: center;
+  font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.git-badge.add {
+  color: var(--add);
+}
+.git-badge.mod {
+  color: var(--warn);
+}
+.git-badge.del {
+  color: var(--del);
+}
+.git-badge.ren {
+  color: var(--link);
+}
+.git-badge.conflict {
+  color: var(--danger);
+}
+.git-badge.type {
+  color: var(--muted);
+}
+.git-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+.git-dir {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+  font-size: 11px;
+  direction: rtl;
+  text-align: left;
+}
+.git-dirty {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--dirty);
+}
+.git-actions {
+  display: flex;
+  gap: 1px;
+  flex: 0 0 auto;
+  margin-left: auto;
+  opacity: 0;
+}
+.git-row:hover .git-actions,
+.git-row:focus-within .git-actions {
+  opacity: 1;
+}
+.git-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.git-action:hover {
+  background: var(--border-strong);
+  color: var(--text-strong);
+}
+/* A conflict row is an action surface, not a row whose buttons wait for a hover: the three
+   resolutions are the reason the row exists. */
+.git-row.conflict {
+  flex-wrap: wrap;
+}
+.git-row.conflict .git-actions {
+  flex-wrap: wrap;
+  opacity: 1;
+}
+.git-action-text {
+  padding: 1px 5px;
+  background: var(--surface-active);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-dim);
+  font-size: 10.5px;
+  line-height: 1.5;
+  cursor: pointer;
+}
+.git-action-text:hover {
+  background: var(--surface-2-hover);
+  color: var(--text-strong);
+}
+.git-identity {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.git-identity-title {
+  margin-bottom: 6px;
+  font-size: 11px;
+  color: var(--warn-text);
+}
+.git-identity .grp-input {
+  width: 100%;
+  margin-bottom: 6px;
+  box-sizing: border-box;
+}
+.git-auth-modal {
+  width: 380px;
+  max-width: calc(100vw - 40px);
+}
+.git-auth-hint {
+  margin: 0 0 8px;
+  font-size: 11.5px;
+  line-height: 1.45;
+  color: var(--muted);
+}
+.git-auth-field {
+  display: block;
+  margin-bottom: 8px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+.git-auth-field > span:first-child {
+  display: block;
+  margin-bottom: 3px;
+}
+.git-auth-field .grp-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+.git-auth-secret {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.git-auth-secret .grp-input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* The dialog has its own reveal button; WebView2's built-in eye would be a second, unlabeled
+   control in the same field. */
+.git-auth-secret input::-ms-reveal,
+.git-auth-secret input::-ms-clear {
+  display: none;
+}
+.git-auth-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+.git-fingerprint {
+  display: block;
+  padding: 4px 6px;
+  background: var(--sunken);
+  border: 1px solid var(--border-soft);
+  border-radius: 5px;
+  color: var(--text);
+  font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+  font-size: 10.5px;
+  word-break: break-all;
+}
+.git-bulk {
+  display: flex;
+  gap: 6px;
+  padding: 6px 12px;
+}
+.git-commit {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.git-commit textarea {
+  width: 100%;
+  min-height: 52px;
+  max-height: 160px;
+  padding: 6px 8px;
+  background: var(--sunken);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  resize: vertical;
+  box-sizing: border-box;
+}
+/* Without this the box was the one field in the app still showing the platform's own focus
+   ring: `outline: auto` in near-black, drawn outside the radius on a dark surface, so focusing
+   it looked like a second, dirty border. The accent border is what every other input here does
+   (`.grp-input`, `.settings-text`, `.batch-input`). */
+.git-commit textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.git-commit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.git-commit-count {
+  font-size: 11px;
+  color: var(--text-faint);
+}
+.git-commit-btn {
+  margin-left: auto;
+  padding: 5px 12px;
+  background: var(--accent-soft);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  color: var(--on-accent);
+  font-size: 12px;
+  cursor: pointer;
+}
+.git-commit-btn:hover {
+  background: var(--accent);
+}
+.git-commit-btn:disabled {
+  background: var(--surface-active);
+  color: var(--text-disabled);
+  cursor: default;
+}
+.git-log-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 4px 12px;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.git-log-row:hover,
+.git-log-row.open {
+  background: var(--surface-2);
+}
+.git-log-short {
+  font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+  font-size: 10.5px;
+  color: var(--link);
+}
+.git-log-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-dim);
+}
+.git-log-time {
+  flex: 0 0 auto;
+  font-size: 10px;
+  color: var(--text-faint);
+  white-space: nowrap;
+}
+.git-log-file {
+  display: flex;
+  gap: 6px;
+  padding: 2px 12px 2px 24px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.git-log-file:hover {
+  background: var(--surface-hover);
+}
+.git-log-file.muted {
+  color: var(--text-faint);
+  cursor: default;
+}
+
 .editor-wrap {
   flex: 1 1 auto;
   min-width: 0;
@@ -1674,6 +2332,12 @@ body.resizing .editor-host {
 .editor-wrap.split .editor-host {
   position: relative;
   inset: auto;
+  flex: 1 1 50%;
+  min-width: 0;
+}
+/* The markdown pane always sits inside its outline wrapper, so in split mode it is the
+   wrapper that takes the half of the row. */
+.editor-wrap.split > .md-with-toc {
   flex: 1 1 50%;
   min-width: 0;
 }
@@ -2499,6 +3163,36 @@ body.resizing .editor-host {
   border-radius: 10px;
   padding: 16px 18px;
 }
+.settings-cat h3 {
+  margin: 2px 0 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+.git-settings .setting-group + .setting-group {
+  margin-top: 12px;
+}
+.git-setting-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+.git-setting-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border-soft);
+}
+.git-setting-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
 .about-logo {
   display: block;
   width: 76px;
@@ -2694,6 +3388,35 @@ body.resizing .editor-host {
 }
 
 /* ---------- Status bar ---------- */
+.sb-git {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: 8px;
+  padding: 0 4px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.sb-git:hover {
+  background: var(--surface-hover);
+  color: var(--text-strong);
+}
+.sb-git-branch {
+  color: var(--text-dim);
+}
+.sb-git-changes {
+  min-width: 15px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--chip);
+  color: var(--text-dim);
+  text-align: center;
+}
 .statusbar {
   flex: 0 0 26px;
   height: 26px;
@@ -3398,6 +4121,18 @@ body.resizing .editor-host {
 .app[data-density="compact"] .hist-item {
   padding: 5px 14px;
 }
+.app[data-density="compact"] .git-row {
+  padding-block: 1px;
+}
+.app[data-density="compact"] .git-section {
+  padding-block: 4px;
+}
+.app[data-density="compact"] .git-commit textarea {
+  min-height: 44px;
+}
+.app[data-density="compact"] .git-branch-btn {
+  padding-block: 2px;
+}
 .app[data-density="compact"] .statusbar {
   flex-basis: 22px;
   height: 22px;
@@ -3478,10 +4213,6 @@ body.resizing .editor-host {
   background: var(--bg);
   color: var(--text);
 }
-/* Preview-only mode: the pane is the whole area, so drop the divider. */
-.editor-wrap.preview-only > .md-preview {
-  border-left: none;
-}
 /* The width setting, chosen by `data-md-width` on the pane. An unrecognised value matches
    nothing and leaves the narrow measure above, which is the same fallback the backend
    applies to a hand-edited settings file. */
@@ -3507,9 +4238,14 @@ body.resizing .editor-host {
 }
 .md-with-toc > .md-preview {
   flex: 1 1 auto;
-  /* The outline already draws the divider, and `.editor-wrap.preview-only > .md-preview` does
-     not reach a pane nested this deep. */
+  /* Preview-only: the outline already draws the divider, so a border here would put a second
+     line between the pane and it. */
   border-left: none;
+}
+/* Split: no outline is on screen, so the line between the two panes has to come from the pane
+   itself now that the wrapper sits between it and `.editor-wrap`. */
+.editor-wrap.split > .md-with-toc > .md-preview {
+  border-left: 1px solid var(--border);
 }
 .md-toc {
   flex: 0 0 216px;

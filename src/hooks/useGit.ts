@@ -1,0 +1,668 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  api,
+  errorMessage,
+  type GitAuthView,
+  type GitBranchInfo,
+  type GitCommitResult,
+  type GitConflictSides,
+  type GitLogEntry,
+  type GitProgress,
+  type GitPullOutcome,
+  type GitRemote,
+  type GitStatusEntry,
+  type GitStatusView,
+} from "../lib/tauri";
+
+/** How often the panel re-reads status while it is on screen. No file watcher is involved:
+ * external `git` runs, a save from another program and a terminal checkout all look the same from
+ * here, and five seconds is short enough to notice without scanning a repository on every tick. */
+const POLL_MS = 5000;
+const LOG_PAGE = 50;
+
+interface Options {
+  rootDir: string | null;
+  /** False while another sidebar view is showing; the panel does no work then. */
+  active: boolean;
+  onError: (message: string) => void;
+  /** Called after an operation that changes files on disk (discard, branch switch). */
+  onFilesChanged?: () => void;
+}
+
+/** What the credential dialog is being opened for. */
+export type GitAuthAsk =
+  | { kind: "https" | "ssh"; host: string; failed: boolean }
+  | { kind: "host"; host: string; fingerprint: string; changed: boolean };
+
+export interface GitController {
+  status: GitStatusView | null;
+  branches: GitBranchInfo[];
+  log: GitLogEntry[];
+  logLoading: boolean;
+  /** The last page was full, so asking for another one may return more commits. */
+  logHasMore: boolean;
+  loading: boolean;
+  error: string | null;
+  /** The operation in flight, for disabling buttons; null when idle. */
+  busy: string | null;
+  remotes: GitRemote[];
+  /** The last progress event while a network operation runs; null otherwise. */
+  progress: GitProgress | null;
+  auth: GitAuthView | null;
+  authAsk: GitAuthAsk | null;
+  /** The repository has no identity and a commit asked for one. */
+  identityAsk: boolean;
+  refresh: () => Promise<void>;
+  loadBranches: () => Promise<void>;
+  loadLog: (more?: boolean) => Promise<void>;
+  stage: (files: GitStatusEntry[]) => Promise<boolean>;
+  unstage: (files: GitStatusEntry[]) => Promise<boolean>;
+  discard: (files: GitStatusEntry[]) => Promise<boolean>;
+  commit: (message: string) => Promise<GitCommitResult | null>;
+  createBranch: (name: string, checkout: boolean) => Promise<boolean>;
+  switchBranch: (name: string) => Promise<boolean>;
+  deleteBranch: (name: string, force?: boolean) => Promise<{ ok: boolean; unmerged: boolean }>;
+  init: () => Promise<void>;
+  fetchRemote: (remote?: string | null) => Promise<void>;
+  pullRemote: (remote?: string | null) => Promise<GitPullOutcome | null>;
+  pushRemote: (remote?: string | null) => Promise<boolean>;
+  cancelNetwork: () => void;
+  closeAuthAsk: () => void;
+  saveHttpsCredential: (host: string, username: string, secret: string) => Promise<boolean>;
+  saveSshCredential: (
+    host: string,
+    keyPath: string,
+    passphrase: string | null,
+    remember: boolean
+  ) => Promise<boolean>;
+  trustHost: (host: string, fingerprint: string) => Promise<boolean>;
+  loadAuth: () => Promise<void>;
+  saveIdentity: (name: string, email: string) => Promise<boolean>;
+  dismissIdentityAsk: () => void;
+  conflictSides: (path: string) => Promise<GitConflictSides | null>;
+  resolveConflict: (file: GitStatusEntry, choice: "ours" | "theirs" | "markers") => Promise<boolean>;
+  abortMerge: () => Promise<boolean>;
+}
+
+export function useGit({ rootDir, active, onError, onFilesChanged }: Options): GitController {
+  const [status, setStatus] = useState<GitStatusView | null>(null);
+  const [branches, setBranches] = useState<GitBranchInfo[]>([]);
+  const [log, setLog] = useState<GitLogEntry[]>([]);
+  const [logLoading, setLogLoading] = useState(false);
+  const [logHasMore, setLogHasMore] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [remotes, setRemotes] = useState<GitRemote[]>([]);
+  const [progress, setProgress] = useState<GitProgress | null>(null);
+  const [auth, setAuth] = useState<GitAuthView | null>(null);
+  const [authAsk, setAuthAsk] = useState<GitAuthAsk | null>(null);
+  const [identityAsk, setIdentityAsk] = useState(false);
+  const opIdRef = useRef<string | null>(null);
+  const retryRef = useRef<(() => void) | null>(null);
+  /** The host of the remote this network operation talks to, for the failed-credential dialog. */
+  const networkHostRef = useRef<string | null>(null);
+
+  const rootRef = useRef(rootDir);
+  rootRef.current = rootDir;
+  const statusRef = useRef<GitStatusView | null>(null);
+  const logRef = useRef<GitLogEntry[]>([]);
+  logRef.current = log;
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
+  const onFilesChangedRef = useRef(onFilesChanged);
+  onFilesChangedRef.current = onFilesChanged;
+  const remotesRef = useRef(remotes);
+  remotesRef.current = remotes;
+  /** Answers from an older root or an older refresh must not overwrite a newer one. */
+  const seq = useRef(0);
+
+  const applyStatus = useCallback((next: GitStatusView | null) => {
+    statusRef.current = next;
+    setStatus(next);
+  }, []);
+
+  const refresh = useCallback(async () => {
+    const root = rootRef.current;
+    const mine = ++seq.current;
+    if (!root) {
+      applyStatus(null);
+      setError(null);
+      setLoading(false);
+      return;
+    }
+    setLoading(statusRef.current === null);
+    try {
+      const next = await api.gitStatus(root);
+      if (mine !== seq.current) return;
+      applyStatus(next);
+      setError(null);
+    } catch (e) {
+      if (mine !== seq.current) return;
+      applyStatus(null);
+      setError(typeof e === "string" ? e : errorMessage(e));
+    } finally {
+      if (mine === seq.current) setLoading(false);
+    }
+  }, [applyStatus]);
+
+  const loadBranches = useCallback(async () => {
+    const root = rootRef.current;
+    if (!root) {
+      setBranches([]);
+      return;
+    }
+    try {
+      const list = await api.gitBranches(root);
+      setBranches(list);
+    } catch {
+      // A repository with no branches yet (unborn HEAD) has nothing to list; the panel still
+      // works, and a real failure will surface on the next status refresh.
+      setBranches([]);
+    }
+  }, []);
+
+  const loadRemotes = useCallback(async () => {
+    const root = rootRef.current;
+    if (!root) {
+      setRemotes([]);
+      return;
+    }
+    try {
+      setRemotes(await api.gitRemotes(root));
+    } catch {
+      setRemotes([]);
+    }
+  }, []);
+
+  const loadAuth = useCallback(async () => {
+    try {
+      setAuth(await api.gitAuthView());
+    } catch {
+      // The credential store is optional; an unreadable one must not stop the panel working.
+      setAuth(null);
+    }
+  }, []);
+
+  const loadLog = useCallback(async (more = false) => {
+    const root = rootRef.current;
+    if (!root) return;
+    setLogLoading(true);
+    try {
+      const page = await api.gitLog(root, LOG_PAGE, more ? logRef.current.length : 0);
+      setLog((prev) => (more ? [...prev, ...page] : page));
+      setLogHasMore(page.length >= LOG_PAGE);
+    } catch (e) {
+      onErrorRef.current(errorMessage(e));
+    } finally {
+      setLogLoading(false);
+    }
+  }, []);
+
+  // A different folder is a different repository. Everything read from the old one goes.
+  useEffect(() => {
+    seq.current += 1;
+    applyStatus(null);
+    setError(null);
+    setBranches([]);
+    setLog([]);
+    setLogHasMore(false);
+    setRemotes([]);
+    setProgress(null);
+    setAuthAsk(null);
+    setIdentityAsk(false);
+    setLoading(false);
+  }, [rootDir, applyStatus]);
+
+  // Poll only while the panel is actually on screen and the window is visible.
+  useEffect(() => {
+    if (!active || !rootDir) return;
+    void refresh();
+    void loadBranches();
+    void loadRemotes();
+    void loadAuth();
+    const timer = window.setInterval(() => {
+      if (!document.hidden) void refresh();
+    }, POLL_MS);
+    const onFocus = () => void refresh();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [active, rootDir, refresh, loadBranches, loadRemotes, loadAuth]);
+
+  // Explorer operations (create, rename, delete, paste) already announce themselves.
+  useEffect(() => {
+    if (!active) return;
+    const onChange = () => void refresh();
+    window.addEventListener("wrolp:folder-changed", onChange);
+    return () => window.removeEventListener("wrolp:folder-changed", onChange);
+  }, [active, refresh]);
+
+  const run = useCallback(
+    async (
+      label: string,
+      action: () => Promise<unknown>,
+      options?: { filesChanged?: boolean }
+    ): Promise<boolean> => {
+      if (!rootRef.current) return false;
+      setBusy(label);
+      try {
+        await action();
+        await refresh();
+        if (options?.filesChanged) onFilesChangedRef.current?.();
+        return true;
+      } catch (e) {
+        onErrorRef.current(errorMessage(e));
+        // A switch that failed partway still needs the panel to show what is really on disk.
+        void refresh();
+        return false;
+      } finally {
+        setBusy(null);
+      }
+    },
+    [refresh]
+  );
+
+  const stage = useCallback(
+    (files: GitStatusEntry[]) => {
+      const root = rootRef.current;
+      if (!root) return Promise.resolve(false);
+      return run("stage", () => api.gitStage(root, files.map((f) => f.abs)));
+    },
+    [run]
+  );
+
+  const unstage = useCallback(
+    (files: GitStatusEntry[]) => {
+      const root = rootRef.current;
+      if (!root) return Promise.resolve(false);
+      return run("unstage", () => api.gitUnstage(root, files.map((f) => f.abs)));
+    },
+    [run]
+  );
+
+  const discard = useCallback(
+    (files: GitStatusEntry[]) => {
+      const root = rootRef.current;
+      if (!root) return Promise.resolve(false);
+      return run("discard", () => api.gitDiscard(root, files.map((f) => f.abs)), {
+        filesChanged: true,
+      });
+    },
+    [run]
+  );
+
+  const commit = useCallback(
+    async (message: string): Promise<GitCommitResult | null> => {
+      const root = rootRef.current;
+      if (!root) return null;
+      setBusy("commit");
+      try {
+        const result = await api.gitCommit(root, message);
+        await refresh();
+        void loadBranches();
+        // The log the panel holds is now missing a row at the top.
+        if (logRef.current.length > 0) void loadLog();
+        return result;
+      } catch (e) {
+        onErrorRef.current(errorMessage(e));
+        return null;
+      } finally {
+        setBusy(null);
+      }
+    },
+    [refresh, loadBranches, loadLog]
+  );
+
+  const createBranch = useCallback(
+    (name: string, checkout: boolean) => {
+      const root = rootRef.current;
+      if (!root) return Promise.resolve(false);
+      return run(
+        "branch",
+        async () => {
+          await api.gitCreateBranch(root, name, checkout);
+          await loadBranches();
+        },
+        { filesChanged: checkout }
+      );
+    },
+    [run, loadBranches]
+  );
+
+  const switchBranch = useCallback(
+    (name: string) => {
+      const root = rootRef.current;
+      if (!root) return Promise.resolve(false);
+      return run(
+        "switch",
+        async () => {
+          await api.gitSwitchBranch(root, name);
+          await loadBranches();
+          setLog([]);
+        },
+        { filesChanged: true }
+      );
+    },
+    [run, loadBranches]
+  );
+
+  const deleteBranch = useCallback(
+    async (name: string, force = false): Promise<{ ok: boolean; unmerged: boolean }> => {
+      const root = rootRef.current;
+      if (!root) return { ok: false, unmerged: false };
+      setBusy("delete-branch");
+      try {
+        await api.gitDeleteBranch(root, name, force);
+        await loadBranches();
+        await refresh();
+        return { ok: true, unmerged: false };
+      } catch (e) {
+        const raw = typeof e === "string" ? e : errorMessage(e);
+        // Not a failure to report as a toast: the branch is simply not merged, and the panel
+        // asks a second, explicit question.
+        if (raw.startsWith("git_branch_unmerged")) {
+          return { ok: false, unmerged: true };
+        }
+        onErrorRef.current(errorMessage(e));
+        return { ok: false, unmerged: false };
+      } finally {
+        setBusy(null);
+      }
+    },
+    [refresh, loadBranches]
+  );
+
+  const init = useCallback(async () => {
+    const root = rootRef.current;
+    if (!root) return;
+    setBusy("init");
+    try {
+      await api.gitInit(root);
+      await refresh();
+      await loadBranches();
+    } catch (e) {
+      onErrorRef.current(errorMessage(e));
+    } finally {
+      setBusy(null);
+    }
+  }, [refresh, loadBranches]);
+
+  const hostForRemote = (name: string | null): string | null => {
+    const list = remotesRef.current;
+    const chosen =
+      (name ? list.find((remote) => remote.name === name) : undefined) ??
+      list.find((remote) => remote.name === "origin") ??
+      list[0];
+    return chosen?.host ?? null;
+  };
+
+  const handleAuthError = useCallback((raw: string): boolean => {
+    if (raw.startsWith("git_auth_required:")) {
+      const host = raw.slice("git_auth_required:".length).trim();
+      setAuthAsk({ kind: hostKind(host, remotesRef.current), host, failed: false });
+      return true;
+    }
+    if (raw.startsWith("git_auth_failed")) {
+      const host =
+        networkHostRef.current ??
+        remotesRef.current.find((remote) => remote.host)?.host ??
+        "";
+      setAuthAsk({ kind: hostKind(host, remotesRef.current), host, failed: true });
+      return true;
+    }
+    if (raw.startsWith("git_host_untrusted:") || raw.startsWith("git_host_changed:")) {
+      const payload = raw.slice(raw.indexOf(":") + 1);
+      const [host, fingerprint] = payload.split("|");
+      if (host && fingerprint) {
+        setAuthAsk({
+          kind: "host",
+          host,
+          fingerprint,
+          changed: raw.startsWith("git_host_changed:"),
+        });
+        return true;
+      }
+    }
+    if (raw.startsWith("git_no_identity")) {
+      setIdentityAsk(true);
+      return true;
+    }
+    return false;
+  }, []);
+
+  const runNetwork = useCallback(
+    async <T,>(
+      kind: "fetch" | "pull" | "push",
+      action: (opId: string) => Promise<T>,
+      retry: () => void
+    ): Promise<T | null> => {
+      if (!rootRef.current || opIdRef.current) return null;
+      const opId = crypto.randomUUID();
+      opIdRef.current = opId;
+      retryRef.current = retry;
+      setBusy(kind);
+      setProgress({ phase: "starting", received: 0, total: 0, bytes: 0, percent: 0, text: null });
+      try {
+        const result = await action(opId);
+        await refresh();
+        await loadBranches();
+        void loadRemotes();
+        return result;
+      } catch (e) {
+        const raw = typeof e === "string" ? e : errorMessage(e);
+        if (!handleAuthError(raw)) onErrorRef.current(errorMessage(e));
+        return null;
+      } finally {
+        opIdRef.current = null;
+        setBusy(null);
+        setProgress(null);
+      }
+    },
+    [refresh, loadBranches, loadRemotes, handleAuthError]
+  );
+
+  const fetchRemote = useCallback(
+    async (remote: string | null = null) => {
+      const root = rootRef.current;
+      if (!root) return;
+      networkHostRef.current = hostForRemote(remote);
+      await runNetwork(
+        "fetch",
+        (opId) => api.gitFetch(root, remote, opId, setProgress),
+        () => void fetchRemote(remote)
+      );
+    },
+    [runNetwork]
+  );
+
+  const pullRemote = useCallback(
+    async (remote: string | null = null) => {
+      const root = rootRef.current;
+      if (!root) return null;
+      networkHostRef.current = hostForRemote(remote);
+      return runNetwork(
+        "pull",
+        (opId) => api.gitPull(root, remote, opId, setProgress),
+        () => void pullRemote(remote)
+      );
+    },
+    [runNetwork]
+  );
+
+  const pushRemote = useCallback(
+    async (remote: string | null = null) => {
+      const root = rootRef.current;
+      if (!root) return false;
+      networkHostRef.current = hostForRemote(remote);
+      const result = await runNetwork(
+        "push",
+        (opId) => api.gitPush(root, remote, opId, setProgress),
+        () => void pushRemote(remote)
+      );
+      return result !== null;
+    },
+    [runNetwork]
+  );
+
+  const cancelNetwork = useCallback(() => {
+    if (!opIdRef.current) return;
+    void api.gitCancel(opIdRef.current);
+    // Cancellation is cooperative: say so, rather than leaving the same "Connecting…" line
+    // looking as if the click did nothing.
+    setProgress((current) =>
+      current ? { ...current, phase: "canceling", text: null } : current
+    );
+  }, []);
+
+  const closeAuthAsk = useCallback(() => setAuthAsk(null), []);
+
+  const saveHttpsCredential = useCallback(
+    async (host: string, username: string, secret: string) => {
+      try {
+        await api.gitSaveHttps(host, username, secret);
+        await loadAuth();
+        setAuthAsk(null);
+        retryRef.current?.();
+        return true;
+      } catch (e) {
+        onErrorRef.current(errorMessage(e));
+        return false;
+      }
+    },
+    [loadAuth]
+  );
+
+  const saveSshCredential = useCallback(
+    async (host: string, keyPath: string, passphrase: string | null, remember: boolean) => {
+      try {
+        await api.gitSaveSsh(host, keyPath, passphrase, remember);
+        await loadAuth();
+        setAuthAsk(null);
+        retryRef.current?.();
+        return true;
+      } catch (e) {
+        onErrorRef.current(errorMessage(e));
+        return false;
+      }
+    },
+    [loadAuth]
+  );
+
+  const trustHost = useCallback(
+    async (host: string, fingerprint: string) => {
+      try {
+        await api.gitTrustHost(host, fingerprint);
+        await loadAuth();
+        setAuthAsk(null);
+        retryRef.current?.();
+        return true;
+      } catch (e) {
+        onErrorRef.current(errorMessage(e));
+        return false;
+      }
+    },
+    [loadAuth]
+  );
+
+  const saveIdentity = useCallback(
+    async (name: string, email: string) => {
+      try {
+        await api.gitSaveIdentity(name, email);
+        setIdentityAsk(false);
+        await loadAuth();
+        return true;
+      } catch (e) {
+        onErrorRef.current(errorMessage(e));
+        return false;
+      }
+    },
+    [loadAuth]
+  );
+
+  const dismissIdentityAsk = useCallback(() => setIdentityAsk(false), []);
+
+  const conflictSides = useCallback(async (path: string) => {
+    const root = rootRef.current;
+    if (!root) return null;
+    try {
+      return await api.gitConflictSides(root, path);
+    } catch (e) {
+      onErrorRef.current(errorMessage(e));
+      return null;
+    }
+  }, []);
+
+  const resolveConflict = useCallback(
+    (file: GitStatusEntry, choice: "ours" | "theirs" | "markers") => {
+      const root = rootRef.current;
+      if (!root) return Promise.resolve(false);
+      return run("resolve", () => api.gitResolveConflict(root, file.abs, choice), {
+        filesChanged: true,
+      });
+    },
+    [run]
+  );
+
+  const abortMerge = useCallback(() => {
+    const root = rootRef.current;
+    if (!root) return Promise.resolve(false);
+    return run("abort-merge", () => api.gitMergeAbort(root), { filesChanged: true });
+  }, [run]);
+
+  return {
+    status,
+    branches,
+    log,
+    logLoading,
+    logHasMore,
+    loading,
+    error,
+    busy,
+    refresh,
+    loadBranches,
+    loadLog,
+    stage,
+    unstage,
+    discard,
+    commit,
+    createBranch,
+    switchBranch,
+    deleteBranch,
+    init,
+    remotes,
+    progress,
+    auth,
+    authAsk,
+    identityAsk,
+    fetchRemote,
+    pullRemote,
+    pushRemote,
+    cancelNetwork,
+    closeAuthAsk,
+    saveHttpsCredential,
+    saveSshCredential,
+    trustHost,
+    loadAuth,
+    saveIdentity,
+    dismissIdentityAsk,
+    conflictSides,
+    resolveConflict,
+    abortMerge,
+  };
+}
+
+function hostKind(host: string, remotes: GitRemote[]): "https" | "ssh" {
+  const wanted = host.toLowerCase();
+  const bare = (value: string | null | undefined) =>
+    (value ?? "").toLowerCase().split(":")[0];
+  const remote = remotes.find(
+    (item) => item.host?.toLowerCase() === wanted || bare(item.host) === bare(wanted)
+  );
+  const url = remote?.url ?? "";
+  return url.startsWith("http://") || url.startsWith("https://") || !url
+    ? "https"
+    : "ssh";
+}

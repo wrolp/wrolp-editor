@@ -36,7 +36,7 @@ import {
   type VersionSummary,
 } from "../lib/tauri";
 import { basename, isUnder, isUntitled } from "../lib/path";
-import { pathKey, type SidebarView } from "../lib/types";
+import { pathKey, type GitMark, type SidebarView } from "../lib/types";
 import { useMenuPlacement } from "../hooks/useMenuPlacement";
 
 /** A tree node an action is aimed at. `name` keeps the folder's trailing separator. */
@@ -297,6 +297,10 @@ interface TreeHandlers {
    * sends another one back to the disk.
    */
   refresh: RefreshRequest | null;
+  /** Changed paths by `pathKey`, drawn as a one-letter badge on the row. */
+  gitMarks: ReadonlyMap<string, GitMark>;
+  /** How many changed paths sit under each folder, by `pathKey`. */
+  gitDirs: ReadonlyMap<string, number>;
 }
 
 interface NodeProps extends TreeHandlers {
@@ -366,10 +370,12 @@ function FileRow({
   onToggleSelect,
   onSelectRange,
   siblings,
+  gitMarks,
 }: NodeProps & { entry: FsEntry; siblings: NodeTarget[] }) {
   const key = pathKey(entry.path);
   const active = !!activePath && pathKey(activePath) === key;
   const editing = renaming === key;
+  const mark = gitMarks.get(key);
   const target: NodeTarget = { path: entry.path, name: entry.name, isDir: false };
   return (
     <TreeTooltip name={entry.name} detail={entry.path}>
@@ -415,6 +421,17 @@ function FileRow({
           }
           onCancel={onRenameEnd}
         />
+        {mark && (
+          <span
+            className={`tree-git ${mark.tone}`}
+            title={t("git.markTitle", {
+              letter: mark.letter,
+              state: t(mark.staged ? "git.markStaged" : "git.markUnstaged"),
+            })}
+          >
+            {mark.letter}
+          </span>
+        )}
       </div>
     </TreeTooltip>
   );
@@ -456,6 +473,7 @@ function FolderNode({
   const key = pathKey(entry.path);
   const editing = renaming === key;
   const naming = !!creating && pathKey(creating.dir) === key;
+  const folderCount = handlers.gitDirs.get(key) ?? 0;
   const target: NodeTarget = { path: entry.path, name: entry.name, isDir: true };
 
   // A folder being added to has to be open: an input row created inside a collapsed folder
@@ -531,6 +549,14 @@ function FolderNode({
             }
             onCancel={onRenameEnd}
           />
+          {folderCount > 0 && (
+            <span
+              className="tree-git-count"
+              title={t("git.dirChanges", { n: folderCount })}
+            >
+              {folderCount}
+            </span>
+          )}
         </div>
       </TreeTooltip>
       {!collapsed && (
@@ -690,6 +716,15 @@ interface Props extends Omit<
    * keeps the dialog up with the names the user typed.
    */
   onBatchRename: (items: { path: string; name: string }[]) => Promise<boolean>;
+  /** Explorer decorations for the active repository's changed paths. */
+  gitMarks: ReadonlyMap<string, GitMark>;
+  gitDirs: ReadonlyMap<string, number>;
+  /**
+   * The Source Control panel, mounted here so it shares the sidebar's width and scroll area.
+   * It is passed as a node rather than as a dozen props: every one of its decisions is the
+   * panel's own, and Sidebar only owns the column it sits in.
+   */
+  gitPanel: ReactNode;
 }
 
 export default function Sidebar(props: Props) {
@@ -1106,6 +1141,12 @@ export default function Sidebar(props: Props) {
         >
           {t("side.versions")}
         </button>
+        <button
+          className={`side-tab${view === "git" ? " active" : ""}`}
+          onClick={() => onSetView("git")}
+        >
+          {t("side.git")}
+        </button>
       </div>
 
       <div
@@ -1275,6 +1316,8 @@ export default function Sidebar(props: Props) {
                 onCreateEnd={() => setCreating(null)}
                 refreshed={refreshed}
                 refresh={refresh}
+                gitMarks={props.gitMarks}
+                gitDirs={props.gitDirs}
                 selected={new Set(selected.keys())}
                 onToggleSelect={toggleSelect}
                 onSelectRange={selectRange}
@@ -1396,6 +1439,8 @@ export default function Sidebar(props: Props) {
           </>
         )}
       </div>
+
+      <div className={`side-view${view === "git" ? " active" : ""}`}>{props.gitPanel}</div>
 
       {menu && (
         <div

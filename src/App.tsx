@@ -16,6 +16,7 @@ import StatusBar from "./components/StatusBar";
 import TitleBar, { type PreviewMode } from "./components/TitleBar";
 import Toast from "./components/Toast";
 import GroupChip from "./components/GroupChip";
+import GitPanel from "./components/GitPanel";
 import DraftRestoreSummary from "./components/DraftRestoreSummary";
 import ComparePickerDialog from "./components/ComparePickerDialog";
 import CloseConfirmDialog from "./components/CloseConfirmDialog";
@@ -44,6 +45,7 @@ import {
 } from "./components/icons";
 import { useDraft } from "./hooks/useDraft";
 import { useEditorTabs } from "./hooks/useEditorTabs";
+import { useGit } from "./hooks/useGit";
 import { useGroups } from "./hooks/useGroups";
 import { useVersions } from "./hooks/useVersions";
 import { useWindowFrame } from "./hooks/useWindowFrame";
@@ -59,6 +61,7 @@ import {
   isSvg,
   isUnder,
   isUntitled,
+  langOf,
   modelUri,
   openableExtensions,
   rekeyPath,
@@ -71,6 +74,8 @@ import {
   sideKey,
   type CompareRef,
   type DiffStats,
+  type GitMark,
+  type GitMarkTone,
   type EditStats,
   type EditorHandle,
   type SidebarView,
@@ -86,6 +91,10 @@ import {
   pickFolder,
   revealItemInDir,
   type FolderHistoryEntry,
+  type GitCommitFile,
+  type GitDiffText,
+  type GitLogEntry,
+  type GitStatusEntry,
   type HistoryEntry,
   type MenuTarget,
   type RenameInput,
@@ -94,6 +103,16 @@ import {
   type VersionState,
   type VersionSummary,
 } from "./lib/tauri";
+
+/** The colour family of one `git status` letter, shared by the panel and the Explorer. */
+function gitTone(letter: string): GitMarkTone {
+  if (letter === "A" || letter === "?") return "add";
+  if (letter === "D") return "del";
+  if (letter === "R" || letter === "C") return "ren";
+  if (letter === "U") return "conflict";
+  if (letter === "T") return "type";
+  return "mod";
+}
 
 const DEFAULT_SETTINGS: Settings = {
   fontSize: 14,
@@ -383,6 +402,72 @@ export default function App() {
     autoSaveVersions: settings.autoSaveVersions,
   });
   const groups = useGroups({ onError: toast });
+  const git = useGit({
+    rootDir,
+    // The Explorer decorates rows with the same status, so it keeps the panel's reads warm
+    // too; the history and versions views do not need them.
+    active:
+      sidebarVisible && (sidebarView === "git" || sidebarView === "explorer"),
+    onError: toast,
+    onFilesChanged: () => void tabs.checkDisk(),
+  });
+  const dirtyPaths = useMemo(
+    () =>
+      new Set(
+        tabs.tabs
+          .filter((tab) => isFileTab(tab) && tab.dirty)
+          .map((tab) => pathKey(tab.path))
+      ),
+    [tabs.tabs]
+  );
+  // A save is not a folder event, so the panel would otherwise wait for its next poll to notice
+  // that the working tree just changed. Only a shrinking dirty set is a save; typing is not.
+  const dirtyCount = dirtyPaths.size;
+  const dirtyWas = useRef(dirtyCount);
+  useEffect(() => {
+    if (
+      dirtyWas.current > dirtyCount &&
+      (sidebarView === "git" || sidebarView === "explorer")
+    ) {
+      void git.refresh();
+    }
+    dirtyWas.current = dirtyCount;
+  }, [dirtyCount, sidebarView, git.refresh]);
+
+  // Explorer decorations: a letter per changed file, and a count per folder above it. The
+  // working-tree letter wins when there is one, because that is the change the file on disk
+  // has right now; a staged-only entry falls back to its index letter.
+  const gitMarks = useMemo(() => {
+    const marks = new Map<string, GitMark>();
+    for (const file of git.status?.files ?? []) {
+      const letter =
+        file.kind === "conflicted" ? "U" : (file.workdir ?? file.index ?? "?");
+      marks.set(pathKey(file.abs), {
+        letter,
+        tone: gitTone(letter),
+        staged: file.index !== null,
+      });
+    }
+    return marks;
+  }, [git.status]);
+
+  const gitDirs = useMemo(() => {
+    const counts = new Map<string, number>();
+    const shownRoot = rootDir ?? git.status?.repo.root ?? null;
+    if (!git.status || !shownRoot) return counts;
+    const rootKey = pathKey(shownRoot);
+    for (const file of git.status.files) {
+      let dir = dirname(file.abs);
+      while (isUnder(dir, shownRoot) && pathKey(dir) !== rootKey) {
+        const key = pathKey(dir);
+        counts.set(key, (counts.get(key) ?? 0) + 1);
+        const parent = dirname(dir);
+        if (parent === dir) break;
+        dir = parent;
+      }
+    }
+    return counts;
+  }, [git.status, rootDir]);
   // The window goes back where it was before anything else measures it.
   const frame = useWindowFrame({ onError: toast, onNotice: toast });
   /** Startup must finish before the live state is mirrored into the store. */
@@ -475,7 +560,9 @@ export default function App() {
           ? "history"
           : loadedSettings.sidebarView === "versions"
             ? "versions"
-            : "explorer"
+            : loadedSettings.sidebarView === "git"
+              ? "git"
+              : "explorer"
       );
       setSidebarWidth(loadedSettings.sidebarWidth);
 
@@ -1703,6 +1790,121 @@ export default function App() {
     },
     [tabs, toast, versions]
   );
+
+  /** Why a diff cannot be shown as text, or null when it can. */
+  const diffBlocked = (diff: GitDiffText): string | null => {
+    if (diff.binary) return "git.diffBinary";
+    if (diff.tooLarge) return "git.diffTooLarge";
+    if (diff.submodule) return "git.diffSubmodule";
+    if (diff.encrypted) return "git.diffEncrypted";
+    return null;
+  };
+
+  const openGitDiff = useCallback(
+    async (file: GitStatusEntry, scope: "workdir" | "index") => {
+      if (!rootDir) return;
+      try {
+        const diff = await api.gitDiff(rootDir, file.abs, scope, file.oldPath);
+        const blocked = diffBlocked(diff);
+        if (blocked) {
+          toast(t(blocked));
+          return;
+        }
+        const name = basename(file.abs);
+        const language = langOf(file.abs);
+        const [leftLabel, rightLabel] =
+          scope === "index"
+            ? [t("git.sideHead"), t("git.sideIndex")]
+            : [t("git.sideIndex"), t("git.sideWorktree")];
+        await tabs.openSnapshotCompare(
+          {
+            path: diff.left.path,
+            name: `${name} · ${leftLabel}`,
+            content: diff.left.text,
+            language,
+            kind: "git",
+            oid: `${scope}:l:${diff.left.oid ?? "missing"}`,
+          },
+          {
+            path: diff.right.path,
+            name: `${name} · ${rightLabel}`,
+            content: diff.right.text,
+            language,
+            kind: "git",
+            oid: `${scope}:r:${diff.right.oid ?? "worktree"}`,
+          }
+        );
+      } catch (e) {
+        toast(errorMessage(e));
+      }
+    },
+    [rootDir, tabs, toast]
+  );
+
+  const openGitConflictDiff = useCallback(
+    async (file: GitStatusEntry) => {
+      const sides = await git.conflictSides(file.abs);
+      if (!sides) return;
+      const name = basename(file.abs);
+      const language = langOf(file.abs);
+      await tabs.openSnapshotCompare(
+        {
+          path: file.abs,
+          name: `${name} · ${t("git.ours")}`,
+          content: sides.ours ?? "",
+          language,
+          kind: "git",
+          oid: `conflict:${file.path}:ours`,
+        },
+        {
+          path: file.abs,
+          name: `${name} · ${t("git.theirs")}`,
+          content: sides.theirs ?? "",
+          language,
+          kind: "git",
+          oid: `conflict:${file.path}:theirs`,
+        }
+      );
+    },
+    [git, tabs]
+  );
+
+  const openGitCommitDiff = useCallback(
+    async (commit: GitLogEntry, file: GitCommitFile) => {
+      if (!rootDir) return;
+      try {
+        const diff = await api.gitDiff(rootDir, file.abs, "commit", file.oldPath, commit.oid);
+        const blocked = diffBlocked(diff);
+        if (blocked) {
+          toast(t(blocked));
+          return;
+        }
+        const name = basename(file.abs);
+        const language = langOf(file.abs);
+        await tabs.openSnapshotCompare(
+          {
+            path: diff.left.path,
+            name: `${name} · ${t("git.sideParent")}`,
+            content: diff.left.text,
+            language,
+            kind: "git",
+            oid: `${commit.oid}:l:${diff.left.oid ?? "missing"}`,
+          },
+          {
+            path: diff.right.path,
+            name: `${name} · ${commit.short}`,
+            content: diff.right.text,
+            language,
+            kind: "git",
+            oid: `${commit.oid}:r:${diff.right.oid ?? "missing"}`,
+          }
+        );
+      } catch (e) {
+        toast(errorMessage(e));
+      }
+    },
+    [rootDir, tabs, toast]
+  );
   const menuMinimapOn = menuTab?.fileSettings.minimap ?? settings.minimap;
   const wordWrap = editorTab?.fileSettings.wordWrap ?? settings.wordWrap;
   const stickyScroll = editorTab?.fileSettings.stickyScroll ?? settings.stickyScroll;
@@ -1927,6 +2129,22 @@ const defaultModeFor = useCallback(
           onRestoreVersion={(path, oid) => void restoreFromList(path, oid)}
           onRename={(target, name) => renameEntry(target.path, name)}
           onBatchRename={renameMany}
+          gitMarks={gitMarks}
+          gitDirs={gitDirs}
+          gitPanel={
+            <GitPanel
+              rootDir={rootDir}
+              git={git}
+              active={sidebarView === "git" && sidebarVisible}
+              dirtyPaths={dirtyPaths}
+              onOpenFile={(path) => void tabs.openPath(path)}
+              onDiff={(file, scope) => void openGitDiff(file, scope)}
+              onCommitFileDiff={(commit, file) => void openGitCommitDiff(commit, file)}
+              onConflictDiff={(file) => void openGitConflictDiff(file)}
+              onError={toast}
+              onNotice={toast}
+            />
+          }
           onRemoveHistory={(path) =>
             api
               .removeHistory(path)
@@ -2128,6 +2346,20 @@ const defaultModeFor = useCallback(
         stats={stats}
         eol={shownEol}
         diff={diffStats}
+        git={
+          git.status
+            ? {
+                branch:
+                  git.status.repo.head.branch ??
+                  git.status.repo.head.short ??
+                  t("git.unborn"),
+                ahead: git.status.repo.head.ahead,
+                behind: git.status.repo.head.behind,
+                changed: git.status.files.length,
+              }
+            : null
+        }
+        onGitClick={() => changeView("git")}
       />
 
       {tabMenu && menuTabPath && (

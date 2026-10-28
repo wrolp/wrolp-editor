@@ -772,6 +772,81 @@ export function useEditorTabs({
    * one: it embeds whatever the sides were named (an `untitled://` key included), and
    * `isFileTab` keeps it out of every path lookup. Nothing may try to parse it.
    */
+  /**
+   * Show two already-resolved sides as a comparison tab. The sources in `openCompare` are read
+   * here; a caller that already holds the text (a git blob, the index, a commit) goes straight to
+   * this. The pair is also not part of the group store, so it never comes back on the next start.
+   */
+  const showCompare = useCallback(
+    async (leftIn: CompareSide, rightIn: CompareSide) => {
+      let left = leftIn;
+      let right = rightIn;
+      const leftKey = sideKey(left.kind, left.path, left.oid);
+      const rightKey = sideKey(right.kind, right.path, right.oid);
+      if (leftKey === rightKey) {
+        toast(t("cmp.same"));
+        return;
+      }
+      // The same path on both sides is the same-file comparison, and the kind is all
+      // that tells the two apart — so the disk side says so, the way the conflict prompt
+      // labels its two versions. The buffer side already carries its own "unsaved"
+      // marker when it holds edits, and a clean buffer needs no marker of its own.
+      if (pathKey(left.path) === pathKey(right.path)) {
+        const labelDisk = (side: CompareSide): CompareSide =>
+          side.kind === "disk"
+            ? { ...side, name: t("stale.diskSide", { name: side.name }) }
+            : side;
+        left = labelDisk(left);
+        right = labelDisk(right);
+      }
+      // Same pair in the same order is the same question: refresh it in place rather
+      // than stacking duplicates. Re-running a comparison is how a snapshot gets
+      // refreshed — either source may have moved on since it was opened. Mirrors
+      // openPath, which reuses an already-open file.
+      const existing = tabsRef.current.find(
+        (tab) =>
+          !!tab.compare &&
+          sideKey(tab.compare.left.kind, tab.compare.left.path, tab.compare.left.oid) ===
+            leftKey &&
+          sideKey(tab.compare.right.kind, tab.compare.right.path, tab.compare.right.oid) ===
+            rightKey
+      );
+      if (existing) {
+        setTabs((prev) =>
+          prev.map((tab) =>
+            tab.id === existing.id
+              ? {
+                  ...tab,
+                  name: t("cmp.label", { left: left.name, right: right.name }),
+                  compare: { left, right },
+                }
+              : tab
+          )
+        );
+        await activate(existing.id);
+        return;
+      }
+      const tab: Tab = {
+        id: nextId(),
+        // Not a real path, and never treated as one: it is only a key for React and for
+        // telling this tab apart from a file. `isFileTab` keeps it out of every path lookup.
+        path: `compare://${leftKey}|${rightKey}`,
+        name: t("cmp.label", { left: left.name, right: right.name }),
+        language: right.language,
+        original: "",
+        dirty: false,
+        compare: { left, right },
+        encoding: "UTF-8",
+        bom: false,
+        bytes: null,
+        fileSettings: EMPTY_FILE_SETTINGS,
+      };
+      setTabs((prev) => [...prev, tab]);
+      await activate(tab.id);
+    },
+    [activate, toast]
+  );
+
   const openCompare = useCallback(
     async (leftRef: CompareRef, rightRef: CompareRef) => {
       if (sideKey(leftRef.kind, leftRef.path) === sideKey(rightRef.kind, rightRef.path)) {
@@ -830,64 +905,9 @@ export function useEditorTabs({
         toast(errorMessage(e));
         return;
       }
-      const leftKey = sideKey(left.kind, left.path);
-      const rightKey = sideKey(right.kind, right.path);
-      // The same path on both sides is the same-file comparison, and the kind is all
-      // that tells the two apart — so the disk side says so, the way the conflict prompt
-      // labels its two versions. The buffer side already carries its own "unsaved"
-      // marker when it holds edits, and a clean buffer needs no marker of its own.
-      if (pathKey(left.path) === pathKey(right.path)) {
-        const labelDisk = (side: CompareSide): CompareSide =>
-          side.kind === "disk"
-            ? { ...side, name: t("stale.diskSide", { name: side.name }) }
-            : side;
-        left = labelDisk(left);
-        right = labelDisk(right);
-      }
-      // Same pair in the same order is the same question: refresh it in place rather
-      // than stacking duplicates. Re-running a comparison is how a snapshot gets
-      // refreshed — either source may have moved on since it was opened. Mirrors
-      // openPath, which reuses an already-open file.
-      const existing = tabsRef.current.find(
-        (tab) =>
-          !!tab.compare &&
-          sideKey(tab.compare.left.kind, tab.compare.left.path) === leftKey &&
-          sideKey(tab.compare.right.kind, tab.compare.right.path) === rightKey
-      );
-      if (existing) {
-        setTabs((prev) =>
-          prev.map((tab) =>
-            tab.id === existing.id
-              ? {
-                  ...tab,
-                  name: t("cmp.label", { left: left.name, right: right.name }),
-                  compare: { left, right },
-                }
-              : tab
-          )
-        );
-        await activate(existing.id);
-        return;
-      }
-      const tab: Tab = {
-        id: nextId(),
-        // Not a real path, and never treated as one: it is only a key for React and for
-        // telling this tab apart from a file. `isFileTab` keeps it out of every path lookup.
-        path: `compare://${leftKey}|${rightKey}`,
-        name: t("cmp.label", { left: left.name, right: right.name }),
-        language: right.language,
-        original: "",
-        dirty: false,
-        compare: { left, right },
-        encoding: "UTF-8",
-        bom: false,
-        bytes: null,
-        fileSettings: EMPTY_FILE_SETTINGS,
-      };
-      setTabs((prev) => [...prev, tab]);
-      await activate(tab.id);
+      await showCompare(left, right);
     },
-    [activate, liveContent, toast]
+    [liveContent, showCompare, toast]
   );
 
   /**
@@ -2470,6 +2490,8 @@ export function useEditorTabs({
     answerStale,
     openPath,
     openCompare,
+    /** A comparison from two sides whose text the caller already holds (git means this). */
+    openSnapshotCompare: showCompare,
     /** The text a tab holds now, for a caller that only has its id. */
     tabText,
     swapCompare,
