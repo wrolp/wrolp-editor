@@ -290,9 +290,22 @@ export default function GitPanel({
             <IconChevron size={11} />
           </button>
           {head && (head.ahead > 0 || head.behind > 0) && (
-            <span className="git-counter" title={t("git.aheadBehind", { ahead: head.ahead, behind: head.behind })}>
-              {head.ahead > 0 ? `↑${head.ahead}` : ""}
-              {head.behind > 0 ? `↓${head.behind}` : ""}
+            <span
+              className="git-counter"
+              title={t("git.aheadBehind", { ahead: head.ahead, behind: head.behind })}
+            >
+              {head.ahead > 0 && (
+                <span className="ahead">
+                  <span className="git-arrow">↑</span>
+                  {head.ahead}
+                </span>
+              )}
+              {head.behind > 0 && (
+                <span className="behind">
+                  <span className="git-arrow">↓</span>
+                  {head.behind}
+                </span>
+              )}
             </span>
           )}
           <span className="git-sync">

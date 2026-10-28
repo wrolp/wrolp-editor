@@ -392,18 +392,22 @@ export function IconCheck({ size = 14 }: IconProps) {
 /**
  * Fetch: ask the remote for its refs and bring them down into this repository.
  *
- * Not a circular arrow: `IconReload` owns that shape, and two of them side by side in the panel's
- * toolbar read as the same button — which is exactly what happened before. Not the tray an
- * ordinary download uses either: `IconPull` is already a downward arrow onto a line. A ring with
- * an arrow coming into it stays legible at 13px and says "down into here" without borrowing
- * either neighbour's shape.
+ * The cloud is the remote; the arrow under it is the direction of travel. Neither neighbour's
+ * shape is borrowed — `IconReload` owns the circular arrow (two of those side by side read as
+ * the same button) and `IconPull` already draws a downward arrow onto a line. Kept to two bumps
+ * and a flat base so the cloud still reads at 13px, where a wider one turns into a smudge.
  */
 export function IconFetch({ size = 14 }: IconProps) {
   return (
     <svg {...base(size)} strokeWidth={1.7}>
-      <circle cx="12" cy="12" r="8.5" />
-      <path d="M12 7.5v8" />
-      <polyline points="8.8 12.5 12 15.7 15.2 12.5" />
+      {/* Drawn with cubics rather than arcs so the silhouette stays inside 5..19 × 3.9..10.6
+          instead of bulging up to y≈0.6 — an arc through the same endpoints is taller than it
+          looks, and the icon then sat high in the row. */}
+      <path d="M7.4 10.6C5.8 10.6 4.8 9.3 5.3 7.8C5.8 6.3 7.4 5.7 8.6 6.3C9 4.6 10.5 3.6 12.3 3.9C14.1 4.2 15.4 5.4 15.8 7C17.4 6.6 18.8 7.6 19 9.1C19.1 10.1 18.5 10.6 17.6 10.6Z" />
+      {/* The arrow reaches 19.8 of 24, the same floor Pull and Push use: a short stub left the
+          icon reading as a cloud with a smudge under it. */}
+      <path d="M12 11.4v8.4" />
+      <polyline points="9 16.8 12 19.8 15 16.8" />
     </svg>
   );
 }

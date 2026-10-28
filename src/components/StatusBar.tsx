@@ -89,8 +89,18 @@ export default function StatusBar({
         >
           <IconBranch size={11} />
           <span className="sb-git-branch">{git.branch}</span>
-          {git.ahead > 0 && <span>↑{git.ahead}</span>}
-          {git.behind > 0 && <span>↓{git.behind}</span>}
+          {git.ahead > 0 && (
+            <span className="ahead">
+              <span className="git-arrow">↑</span>
+              {git.ahead}
+            </span>
+          )}
+          {git.behind > 0 && (
+            <span className="behind">
+              <span className="git-arrow">↓</span>
+              {git.behind}
+            </span>
+          )}
           {git.changed > 0 && <span className="sb-git-changes">{git.changed}</span>}
         </button>
       )}

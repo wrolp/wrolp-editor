@@ -1777,9 +1777,25 @@ body.resizing .editor-host {
   white-space: nowrap;
 }
 .git-counter {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--text-dim);
   white-space: nowrap;
+}
+/* Direction is the coloured half. An arrow and a digit at 11px are both thin strokes, and `↑1`
+   read as a single glyph until the arrow took the ahead/behind colour and the count stayed text. */
+.git-arrow {
+  margin-right: 1px;
+}
+.git-counter .ahead .git-arrow,
+.sb-git .ahead .git-arrow {
+  color: var(--add);
+}
+.git-counter .behind .git-arrow,
+.sb-git .behind .git-arrow {
+  color: var(--warn);
 }
 .git-icon-btn {
   display: inline-flex;
