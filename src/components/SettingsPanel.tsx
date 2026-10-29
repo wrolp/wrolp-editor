@@ -585,6 +585,12 @@ export default function SettingsPanel({
                 onChange={(v) => onSaveSettings({ restoreSession: v })}
               />
               <p className="muted">{t("settings.restoreSessionDesc")}</p>
+              <SettingCheck
+                label={t("settings.compareReuseTab")}
+                checked={settings.compareReuseTab}
+                onChange={(v) => onSaveSettings({ compareReuseTab: v })}
+              />
+              <p className="muted">{t("settings.compareReuseTabDesc")}</p>
               <SettingField label={t("settings.draftRestore")}>
                 <select
                   className="select"

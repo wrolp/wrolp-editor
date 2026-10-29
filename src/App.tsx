@@ -162,6 +162,9 @@ const DEFAULT_SETTINGS: Settings = {
   sidebarFont: 12,
   language: "en",
   restoreSession: true,
+  // A new comparison takes over the comparison tab on screen instead of stacking another one;
+  // the setting is there for reading two diffs side by side.
+  compareReuseTab: true,
   // A draft is the only copy of typing that never reached the disk, so startup puts it back
   // and stays out of the way; `ask` is for users who want to see each one first.
   draftRestore: "auto",
@@ -452,6 +455,7 @@ export default function App() {
       trimTrailingWhitespace: settings.trimTrailingWhitespace,
       insertFinalNewline: settings.insertFinalNewline,
     },
+    compareReuseTab: settings.compareReuseTab,
     autoSave: { enabled: settings.autoSave, intervalSec: settings.autoSaveInterval },
     versions: versions.recorder,
     autoSaveVersions: settings.autoSaveVersions,

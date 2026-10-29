@@ -35,7 +35,7 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | Tab groups | A group is a **named set of open tabs plus the folder the Explorer shows**. The chip in the title bar switches between them inside the same window — tabs, caret positions and the tree come back with it |
 | Move / copy tabs | A tab can be re-homed into another group from its context menu. This changes *which group lists the tab*, never the file on disk |
 | Configuration backups | Timestamped snapshots of groups, settings, recent files and folder history, refreshed when the app opens and closes and on demand; older ones are pruned to a count you set, and any snapshot can be restored from Settings → Backups. Drafts and version history are not included |
-| Comparison | A read-only side-by-side diff of any two contents. Either side may be a file on disk or an unsaved buffer (an untitled tab included); a file against its own unsaved text has an entry of its own, and re-running a comparison refreshes its snapshot |
+| Comparison | A read-only side-by-side diff of any two contents. Either side may be a file on disk or an unsaved buffer (an untitled tab included); a file against its own unsaved text has an entry of its own, and re-running a comparison refreshes its snapshot. One comparison tab by default, switchable to a new tab per comparison |
 | Encrypted files | A self-describing AES-256-GCM container keyed from a password. Save as encrypted, new encrypted file, change password, remove encryption; an idle lock drops the keys; remembering a password in the Windows credential store is opt-in; drafts are sealed with the same key |
 | Window | Size, position and the maximized flag come back on the next start. A window left on a monitor that is no longer connected is pulled back onto a screen you still have, and says so |
 
@@ -296,7 +296,9 @@ A read-only side-by-side diff of any two contents, in a tab of its own (titled `
   orientation the conflict prompt uses when another program has written the file.
 - **Snapshot.** Both texts are frozen into the tab when it opens; later edits to either source do not
   change it. **Re-running the same comparison** (same pair of sources, same order) refreshes it. The tab's
-  context menu can swap the two sides.
+  context menu can swap the two sides. By default there is one comparison tab: a new comparison replaces
+  the one on screen (re-running the same pair still refreshes in place); turn off *Reuse one comparison
+  tab* in Settings → General to give every comparison a tab of its own.
 - **Read-only.** Open either file to edit it.
 - **Picker badges:** "unsaved" means the tab holds edits that were never saved; "untitled" means there is
   no file behind it. Pictures, the settings panel and other comparisons are never offered as a side, and a

@@ -181,6 +181,16 @@ export function isFileTab(tab: Tab): boolean {
   return !tab.isSettings && !tab.compare && !tab.gallery && !tab.merge && !tab.commit;
 }
 
+/**
+ * The comparison tab a new comparison would replace: the one on screen when it is a comparison,
+ * otherwise the rightmost one. New tabs append, so the rightmost is the most recently opened.
+ */
+export function compareReplaceTarget(tabs: Tab[], activeId: number | null): Tab | null {
+  const compareTabs = tabs.filter((tab) => !!tab.compare);
+  if (compareTabs.length === 0) return null;
+  return compareTabs.find((tab) => tab.id === activeId) ?? compareTabs[compareTabs.length - 1];
+}
+
 /** The repository and log row a commit tab was opened from. */
 export interface CommitTabData {
   /** Work tree the commit belongs to; the tab keeps working when the panel switches away. */

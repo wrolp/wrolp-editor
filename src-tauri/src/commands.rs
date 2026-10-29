@@ -122,6 +122,10 @@ pub struct Settings {
   pub language: String,
   /// Reopen the tabs of the active group on startup.
   pub restore_session: bool,
+  /// Reuse one comparison tab: a new comparison replaces the one on screen instead of opening
+  /// another. On by default, because stacking comparisons is how the tab strip fills up with
+  /// read-only snapshots nobody asked to keep.
+  pub compare_reuse_tab: bool,
   /// What a reopened session does with a draft that differs from the file on disk: `auto`
   /// loads it without asking, `ask` raises the Restore / Discard dialog for each file.
   /// `auto` is the default because the draft is the only copy of that typing, and a dialog
@@ -256,6 +260,7 @@ impl Default for Settings {
       sidebar_font: 12.0,
       language: "en".into(),
       restore_session: true,
+      compare_reuse_tab: true,
       draft_restore: "auto".into(),
       sidebar_root: String::new(),
       expand_folders: false,
@@ -390,6 +395,7 @@ impl Settings {
         self.language
       },
       restore_session: self.restore_session,
+      compare_reuse_tab: self.compare_reuse_tab,
       draft_restore: if DRAFT_RESTORE.contains(&self.draft_restore.as_str()) {
         self.draft_restore.clone()
       } else {

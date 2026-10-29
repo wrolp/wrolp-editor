@@ -17,6 +17,7 @@ import { cleanupEdits } from "../lib/saveText";
 import type { editor } from "monaco-editor";
 import { tabKey, toStoredTab } from "../lib/group";
 import {
+  compareReplaceTarget,
   eolSequence,
   lineEndingFor,
   pathKey,
@@ -176,6 +177,12 @@ interface Options {
    */
   cleanupPref?: { trimTrailingWhitespace: boolean; insertFinalNewline: boolean };
   /**
+   * Whether a new comparison replaces the comparison tab already on screen instead of opening
+   * another one. In a ref: the callbacks read it when they run, so changing the setting must not
+   * rebuild them.
+   */
+  compareReuseTab?: boolean;
+  /**
    * The automatic save: whether it is on, and how long the file on screen must go without an edit
    * before its write happens. Off by default, and it only ever writes a file that already exists —
    * an untitled buffer would have to be asked for a name, which is not something a timer gets to
@@ -209,6 +216,7 @@ export function useEditorTabs({
   draftRestorePref,
   lineEndingPref,
   cleanupPref,
+  compareReuseTab,
   autoSave,
   versions,
   autoSaveVersions,
@@ -241,6 +249,8 @@ export function useEditorTabs({
   draftRestoreRef.current = draftRestorePref ?? "auto";
   const lineEndingRef = useRef(lineEndingPref ?? "lf");
   lineEndingRef.current = lineEndingPref ?? "lf";
+  const compareReuseRef = useRef(compareReuseTab ?? true);
+  compareReuseRef.current = compareReuseTab ?? true;
   const cleanupRef = useRef(
     cleanupPref ?? { trimTrailingWhitespace: false, insertFinalNewline: false }
   );
@@ -827,6 +837,29 @@ export function useEditorTabs({
         );
         await activate(existing.id);
         return;
+      }
+      // Reuse the comparison tab already on screen (or the rightmost one) when the setting asks
+      // for it. Deliberately after the same-pair check above: re-running a pair must refresh it
+      // in place rather than rebuild the diff models through the replacement branch.
+      if (compareReuseRef.current) {
+        const target = compareReplaceTarget(tabsRef.current, activeRef.current);
+        if (target) {
+          setTabs((prev) =>
+            prev.map((tab) =>
+              tab.id === target.id
+                ? {
+                    ...tab,
+                    path: `compare://${leftKey}|${rightKey}`,
+                    name: t("cmp.label", { left: left.name, right: right.name }),
+                    language: right.language,
+                    compare: { left, right },
+                  }
+                : tab
+            )
+          );
+          await activate(target.id);
+          return;
+        }
       }
       const tab: Tab = {
         id: nextId(),
