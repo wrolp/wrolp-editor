@@ -1,16 +1,31 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import { formatClock, formatWhen, t, translateError } from "../lib/i18n";
 import { pathKey } from "../lib/types";
-import type { GitCommitFile, GitLogEntry, GitProgress, GitStatusEntry } from "../lib/tauri";
+import type {
+  GitCommitFile,
+  GitLocalPathState,
+  GitLogEntry,
+  GitProgress,
+  GitStatusEntry,
+} from "../lib/tauri";
 import { api, errorMessage } from "../lib/tauri";
 import { LOG_PAGE_CHOICES, type GitController } from "../hooks/useGit";
 import type { GitRepoRow } from "../hooks/useGitRepos";
 import { buildGraph } from "../lib/gitGraph";
 import GitAuthDialog from "./GitAuthDialog";
+import GitRowMenu from "./GitRowMenu";
 import GraphCell from "./GitGraphRow";
 import {
   IconBranch,
   IconChevron,
+  IconEyeOff,
   IconFetch,
   IconFile,
   IconPull,
@@ -51,6 +66,8 @@ interface Props {
   onError: (message: string) => void;
   /** A short sentence about something that succeeded, shown like an error but not as one. */
   onNotice: (message: string) => void;
+  /** Open the local Git settings dialog for one repository. */
+  onOpenLocalSettings: (root: string) => void;
 }
 
 type Scope = "workdir" | "index";
@@ -129,6 +146,7 @@ export default function GitPanel({
   onMergeConflict,
   onError,
   onNotice,
+  onOpenLocalSettings,
 }: Props) {
   const [message, setMessage] = useState("");
   const [amend, setAmend] = useState(false);
@@ -153,6 +171,14 @@ export default function GitPanel({
   const [commitOpen, setCommitOpen] = useState<string | null>(null);
   const [commitFiles, setCommitFiles] = useState<GitCommitFile[]>([]);
   const [commitFilesLoading, setCommitFilesLoading] = useState(false);
+  /** The row whose local-only menu is open, and the probe's answer for it. */
+  const [rowMenu, setRowMenu] = useState<{
+    file: GitStatusEntry;
+    x: number;
+    y: number;
+  } | null>(null);
+  const [rowLocal, setRowLocal] = useState<GitLocalPathState | null>(null);
+  const rowMenuFor = useRef<string | null>(null);
 
   // A different folder is a different repository; a half-typed message and a pending discard
   // question from the old one must not carry over.
@@ -261,6 +287,34 @@ export default function GitPanel({
   const suggestedUser = git.auth?.credentials.find(
     (credential) => credential.host === git.authAsk?.host
   )?.username;
+
+  const openRowMenu = (event: ReactMouseEvent<HTMLDivElement>, file: GitStatusEntry) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const wanted = pathKey(file.abs);
+    rowMenuFor.current = wanted;
+    setRowLocal(null);
+    setRowMenu({ file, x: event.clientX, y: event.clientY });
+    void api
+      .gitLocalState(file.abs)
+      .then((state) => {
+        if (rowMenuFor.current === wanted) setRowLocal(state);
+      })
+      .catch(() => {
+        if (rowMenuFor.current === wanted) setRowLocal(null);
+      });
+  };
+
+  const closeRowMenu = useCallback(() => {
+    rowMenuFor.current = null;
+    setRowMenu(null);
+    setRowLocal(null);
+  }, []);
+
+  /** Run one local-only action and say what happened; `run` already reports failures. */
+  const runRowAction = async (action: () => Promise<boolean>, done: string) => {
+    if (await action()) onNotice(done);
+  };
 
   const openCommit = async (entry: GitLogEntry) => {
     if (commitOpen === entry.oid) {
@@ -509,6 +563,16 @@ export default function GitPanel({
             onClick={() => void git.refresh()}
           >
             <IconReload size={13} />
+          </button>
+          <button
+            className="git-icon-btn"
+            title={t("git.local.settings")}
+            aria-label={t("git.local.settings")}
+            onClick={() => {
+              if (repoRoot) onOpenLocalSettings(repoRoot);
+            }}
+          >
+            <IconEyeOff size={13} />
           </button>
           <button
             className="git-icon-btn git-add-repo"
@@ -854,6 +918,7 @@ export default function GitPanel({
                       className="git-row"
                       title={file.path}
                       onClick={() => onDiff(file, "index", repoRoot)}
+                      onContextMenu={(event) => openRowMenu(event, file)}
                     >
                       <span className={`git-badge ${badgeTone(letter)}`}>{letter}</span>
                       <span className="git-name">{name}</span>
@@ -915,6 +980,7 @@ export default function GitPanel({
                     className="git-row"
                     title={file.path}
                     onClick={() => onDiff(file, "workdir", repoRoot)}
+                    onContextMenu={(event) => openRowMenu(event, file)}
                   >
                     <span className={`git-badge ${badgeTone(letter)}`}>{letter}</span>
                     <span className="git-name">{name}</span>
@@ -1182,6 +1248,37 @@ export default function GitPanel({
         </>
       )}
         </>
+      )}
+
+      {rowMenu && (
+        <GitRowMenu
+          state={rowLocal}
+          x={rowMenu.x}
+          y={rowMenu.y}
+          onClose={closeRowMenu}
+          onIgnore={() => {
+            const file = rowMenu.file;
+            closeRowMenu();
+            void runRowAction(
+              () => git.ignoreLocal(file),
+              t("side.localIgnoreDone", { name: splitPath(file.path).name })
+            );
+          }}
+          onAssume={(enabled) => {
+            const file = rowMenu.file;
+            closeRowMenu();
+            void runRowAction(
+              () => git.setAssume([file], enabled),
+              t(enabled ? "side.assumeDone" : "side.unassumeDone", {
+                name: splitPath(file.path).name,
+              })
+            );
+          }}
+          onOpenSettings={() => {
+            closeRowMenu();
+            if (repoRoot) onOpenLocalSettings(repoRoot);
+          }}
+        />
       )}
 
       {git.authAsk && (

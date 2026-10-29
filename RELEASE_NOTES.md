@@ -20,6 +20,7 @@ A small local text editor for Windows, built on Tauri v2 + React + TypeScript, w
 - **Merge editor** — a three-pane merge for each conflicted file: ours, theirs and an editable result; take either side or both per block, undo, jump between conflicts, and Apply writes the result back in the file's own encoding, BOM and line endings
 - **Multiple repositories** — the Source Control view lists the repository behind the group's folder, repositories found in its subdirectories (depth configurable, default 2), and repositories added by hand; pick one to work on it, with Explorer marks and the status bar following the selection
 - **Source control** — a fourth sidebar view for the real git repository behind the group's folder: staged and unstaged changes, diffs, stage / unstage / discard, commits and history, branches, and fetch / pull / push over HTTPS or SSH with progress, cancellation, conflict resolution and a trusted-host check
+- **Local-only git state** — ignore an untracked path through `.git/info/exclude`, or assume a tracked file unchanged in the index; both are available from the Explorer and the changed rows, and can be undone in *Local Git Settings*
 - **Single instance** — a second launch hands its path to the running window
 - **Languages** — English and 简体中文, switchable in Settings
 - **Updates** — Settings → About checks the GitHub release on request, then downloads the signed installer and hands it to the passive installer

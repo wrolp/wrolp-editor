@@ -18,6 +18,7 @@ import TitleBar, { type PreviewMode } from "./components/TitleBar";
 import Toast from "./components/Toast";
 import GroupChip from "./components/GroupChip";
 import GitPanel from "./components/GitPanel";
+import GitLocalSettingsDialog from "./components/GitLocalSettingsDialog";
 import DraftRestoreSummary from "./components/DraftRestoreSummary";
 import ComparePickerDialog from "./components/ComparePickerDialog";
 import CloseConfirmDialog from "./components/CloseConfirmDialog";
@@ -426,6 +427,8 @@ export default function App() {
   const [newGroupOpen, setNewGroupOpen] = useState(false);
   /** Path of the file a comparison starts from, while the other side is being chosen. */
   const [compareFrom, setCompareFrom] = useState<CompareRef | null>(null);
+  /** The repository whose local Git settings dialog is open, or null. */
+  const [localSettingsRoot, setLocalSettingsRoot] = useState<string | null>(null);
 
   const editorRef = useRef<EditorHandle | null>(null);
   const draft = useDraft(toast);
@@ -2336,6 +2339,7 @@ const defaultModeFor = useCallback(
           gitMarks={gitMarks}
           gitDirs={gitDirs}
           onGitLocalChanged={refreshGitLocal}
+          onOpenLocalSettings={setLocalSettingsRoot}
           gitPanel={
             <GitPanel
               workspaceRoot={rootDir}
@@ -2361,6 +2365,7 @@ const defaultModeFor = useCallback(
               onMergeConflict={(file) => void openGitMerge(file)}
               onError={toast}
               onNotice={toast}
+              onOpenLocalSettings={setLocalSettingsRoot}
             />
           }
           onRemoveHistory={(path) =>
@@ -2954,6 +2959,17 @@ const defaultModeFor = useCallback(
           detectedEol={eolLabel(lineEndingFor(fileSettingsTab, settings.lineEnding))}
           onSave={(p, next) => tabs.setFileSettings(p, next)}
           onClose={() => setFileSettingsPath(null)}
+          onError={toast}
+        />
+      )}
+
+      {localSettingsRoot && (
+        <GitLocalSettingsDialog
+          root={localSettingsRoot}
+          name={basename(localSettingsRoot)}
+          onClose={() => setLocalSettingsRoot(null)}
+          onChanged={() => refreshGitLocal(localSettingsRoot)}
+          onOpenPath={(path) => void tabs.openPath(path)}
           onError={toast}
         />
       )}

@@ -410,6 +410,12 @@ private store per file and never touches the folders you edit.
   History section lists commits and the paths each one changed, and a changed path opens the same
   comparison against its first parent. A merge in progress takes no extra staging and commits with
   two parents.
+- **Local-only state.** An untracked path can be *ignored locally*, which appends an anchored
+  pattern to `.git/info/exclude`; a tracked one can be *assumed unchanged*, which sets the index's
+  assume-unchanged bit so working-tree edits stop being reported. Both are reachable from the
+  Explorer's context menu, a changed row's context menu, and *Local Git Settings* in the panel
+  header; the dialog lists every entry, removes them one by one, and opens the exclude file. Assume
+  unchanged is a promise: a checkout can overwrite those files.
 - **Branches.** The branch button lists local and remote-tracking branches, creates one from the
   current commit, switches and deletes with confirmation — a branch whose commits are not merged
   anywhere asks a second, explicit question before it is deleted. Picking a remote-tracking branch

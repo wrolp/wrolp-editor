@@ -26,6 +26,7 @@ import {
   IconPencil,
   IconReload,
   IconRestore,
+  IconSettings,
   IconTarget,
   IconTrash,
   IconTreeChevron,
@@ -750,6 +751,8 @@ interface Props extends Omit<
    * handed back because the affected repository is not necessarily the one the panel shows.
    */
   onGitLocalChanged: (repoRoot: string) => void;
+  /** Open the local Git settings dialog for a repository. */
+  onOpenLocalSettings: (repoRoot: string) => void;
   /**
    * The Source Control panel, mounted here so it shares the sidebar's width and scroll area.
    * It is passed as a node rather than as a dozen props: every one of its decisions is the
@@ -783,6 +786,7 @@ export default function Sidebar(props: Props) {
     onCompareVersion,
     onRestoreVersion,
     onGitLocalChanged,
+    onOpenLocalSettings,
   } = props;
   /**
    * The files with history that are not the one on screen. Compared by `pathKey` rather than by
@@ -886,12 +890,7 @@ export default function Sidebar(props: Props) {
         unassume: localGit.tracked && localGit.assumed,
       }
     : null;
-  const hasLocalGitActions =
-    !!localGitActions &&
-    (localGitActions.ignore ||
-      localGitActions.unignore ||
-      localGitActions.assume ||
-      localGitActions.unassume);
+
 
   /**
    * Apply one local-only change. Both outcomes are reported through `onError`, which is what
@@ -1942,10 +1941,10 @@ export default function Sidebar(props: Props) {
                 </span>
                 {t("side.menuCopyParent")}
               </div>
-              {localGit && localGitActions && hasLocalGitActions && (
+              {localGit && (
                 <>
                   <div className="ws-sep" />
-                  {localGitActions.ignore && (
+                  {localGitActions?.ignore && (
                     <div className="ctx-item" onClick={() => void runLocalGit("ignore")}>
                       <span className="ctx-icon">
                         <IconEyeOff size={14} />
@@ -1953,7 +1952,7 @@ export default function Sidebar(props: Props) {
                       {t("side.menuLocalIgnore")}
                     </div>
                   )}
-                  {localGitActions.unignore && (
+                  {localGitActions?.unignore && (
                     <div className="ctx-item" onClick={() => void runLocalGit("unignore")}>
                       <span className="ctx-icon">
                         <IconEye size={14} />
@@ -1961,7 +1960,7 @@ export default function Sidebar(props: Props) {
                       {t("side.menuUnignore")}
                     </div>
                   )}
-                  {localGitActions.assume && (
+                  {localGitActions?.assume && (
                     <div className="ctx-item" onClick={() => void runLocalGit("assume")}>
                       <span className="ctx-icon">
                         <IconEyeOff size={14} />
@@ -1969,7 +1968,7 @@ export default function Sidebar(props: Props) {
                       {t("side.menuAssume")}
                     </div>
                   )}
-                  {localGitActions.unassume && (
+                  {localGitActions?.unassume && (
                     <div className="ctx-item" onClick={() => void runLocalGit("unassume")}>
                       <span className="ctx-icon">
                         <IconEye size={14} />
@@ -1977,6 +1976,18 @@ export default function Sidebar(props: Props) {
                       {t("side.menuUnassume")}
                     </div>
                   )}
+                  <div
+                    className="ctx-item"
+                    onClick={() => {
+                      setMenu(null);
+                      onOpenLocalSettings(localGit.repoRoot);
+                    }}
+                  >
+                    <span className="ctx-icon">
+                      <IconSettings size={14} />
+                    </span>
+                    {t("side.menuLocalSettings")}
+                  </div>
                 </>
               )}
               {menu.isDir && (
