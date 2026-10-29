@@ -336,6 +336,19 @@ pub fn create_config_backup(app: AppHandle) -> Result<BackupInfo, String> {
   create_with(&app, &settings, "manual")
 }
 
+/// Open the backup folder in the system file manager.
+///
+/// The webview's `openPath` is scoped to the three folders Settings → About names for itself,
+/// and this is not one of them — nor can it be: a folder the user picked can be anywhere, while
+/// the capability is compiled in. The path is resolved here from the app's own setting, so
+/// handing it to the shell needs no permission from the webview.
+#[tauri::command]
+pub fn open_backup_folder(app: AppHandle) -> Result<(), String> {
+  let settings = current_settings(&app);
+  let dir = backup_dir(&app, &settings)?;
+  tauri_plugin_opener::open_path(&dir, None::<&str>).map_err(|e| format!("backup_open:{e}"))
+}
+
 #[tauri::command]
 pub fn list_config_backups(app: AppHandle) -> Result<BackupList, String> {
   let settings = current_settings(&app);

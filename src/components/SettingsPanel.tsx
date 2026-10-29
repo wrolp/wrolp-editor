@@ -953,7 +953,9 @@ export default function SettingsPanel({
                   className="btn small"
                   disabled={!backups?.dirExists}
                   onClick={() => {
-                    if (backups) openPath(backups.dir).catch((e) => onToast(errorMessage(e)));
+                    // Through the backend: the webview's `openPath` is scoped to the three
+                    // folders About opens, and a backup folder can be anywhere the user picked.
+                    api.openBackupFolder().catch((e) => onToast(errorMessage(e)));
                   }}
                 >
                   {t("backup.openFolder")}

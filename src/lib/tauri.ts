@@ -830,6 +830,8 @@ export const api = {
   getStoreDirs: () => invoke<StoreDirs>("get_store_dirs"),
   createConfigBackup: () => invoke<BackupInfo>("create_config_backup"),
   listConfigBackups: () => invoke<BackupList>("list_config_backups"),
+  /** Opens the backup folder in the file manager; the backend resolves it from the setting. */
+  openBackupFolder: () => invoke<void>("open_backup_folder"),
   /** Replaces the state files with a snapshot; returns how many were written. */
   restoreConfigBackup: (path: string) =>
     invoke<number>("restore_config_backup", { path }),
@@ -1007,8 +1009,9 @@ export const api = {
  *
  * `openPath` is the wider of the two — it hands a filesystem path to whatever the OS has
  * registered for it — so it is granted separately and used only for folders the backend named:
- * the two in `getStoreDirs` and the backup folder in `BackupList`. A path from anywhere else
- * never reaches it.
+ * the two in `getStoreDirs`. A path from anywhere else never reaches it. The backup folder is
+ * opened by the backend instead (`openBackupFolder`), because it can be a folder the user
+ * picked, which a compile-time allow-list cannot cover.
  */
 export { invoke, listen, open, save, revealItemInDir, openUrl, openPath };
 

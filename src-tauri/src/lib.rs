@@ -90,6 +90,7 @@ pub fn run() {
       commands::get_store_dirs,
       backup::create_config_backup,
       backup::list_config_backups,
+      backup::open_backup_folder,
       backup::restore_config_backup,
       backup::maybe_auto_backup,
       versioning::versioning_state,
