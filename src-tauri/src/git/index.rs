@@ -191,23 +191,44 @@ pub struct CommitResult {
 }
 
 /// Commit what is staged. Nothing is added on the way: a file the user did not stage stays out,
-/// which is the whole reason the panel has two lists.
+/// which is the whole reason the panel has two lists. `amend` replaces the commit at HEAD instead
+/// of adding one on top of it.
 #[tauri::command]
 pub fn git_commit(
   app: AppHandle,
   root: String,
   message: String,
+  amend: bool,
   locks: State<'_, GitLocks>,
 ) -> Result<CommitResult, String> {
   // A damaged credential file must not stop a commit the repository itself can sign; the
   // fallback identity is a convenience, not a requirement.
   let identity = AuthStore::load(&app).ok().and_then(|store| store.identity);
-  commit(&root, &message, identity.as_ref(), &locks)
+  commit_impl(&root, &message, amend, identity.as_ref(), &locks)
 }
 
 pub(crate) fn commit(
   root: &str,
   message: &str,
+  identity: Option<&Identity>,
+  locks: &GitLocks,
+) -> Result<CommitResult, String> {
+  commit_impl(root, message, false, identity, locks)
+}
+
+pub(crate) fn amend_commit(
+  root: &str,
+  message: &str,
+  identity: Option<&Identity>,
+  locks: &GitLocks,
+) -> Result<CommitResult, String> {
+  commit_impl(root, message, true, identity, locks)
+}
+
+fn commit_impl(
+  root: &str,
+  message: &str,
+  amend: bool,
   identity: Option<&Identity>,
   locks: &GitLocks,
 ) -> Result<CommitResult, String> {
@@ -227,6 +248,11 @@ pub(crate) fn commit(
   ) {
     return Err("git_state_busy".into());
   }
+  // Amending during a merge would move HEAD and throw away the second parent the merge is about
+  // to record: the resolution belongs in the merge commit, not in the commit underneath it.
+  if amend && repo.state() == git2::RepositoryState::Merge {
+    return Err("git_amend_merge".into());
+  }
 
   let head = match repo.head() {
     Ok(reference) => Some(
@@ -237,17 +263,66 @@ pub(crate) fn commit(
     Err(e) if e.code() == git2::ErrorCode::UnbornBranch => None,
     Err(e) => return Err(fail("head", e)),
   };
+  if amend && head.is_none() {
+    return Err("git_no_head".into());
+  }
   let merge = merge_head(repo)?;
 
   let mut index = repo.index().map_err(|e| fail("index", e))?;
   if index.has_conflicts() {
     return Err("git_conflicted".into());
   }
-  if head.is_none() && merge.is_none() && index.is_empty() {
+  if !amend && head.is_none() && merge.is_none() && index.is_empty() {
     return Err("git_nothing_staged".into());
   }
   let tree_oid = index.write_tree().map_err(|e| fail("commit", e))?;
   let tree = repo.find_tree(tree_oid).map_err(|e| fail("tree", e))?;
+
+  if let (true, Some(head)) = (amend, head.as_ref()) {
+    // A message-only amend is legitimate, so an unchanged tree is not a reason to refuse. An
+    // amend that changes neither the tree nor the message would only rewrite the date.
+    if head.tree_id() == tree_oid
+      && head.message().ok().map(|text| text.trim_end()) == Some(message)
+    {
+      return Err("git_nothing_to_amend".into());
+    }
+    let author = head.author();
+    let committer = signature(repo, identity)?;
+    // The parent commits must outlive the references handed to `commit`.
+    let mut owned: Vec<Commit<'_>> = Vec::with_capacity(head.parent_count());
+    for index in 0..head.parent_count() {
+      owned.push(head.parent(index).map_err(|e| fail("commit", e))?);
+    }
+    let parents: Vec<&Commit<'_>> = owned.iter().collect();
+    // `Repository::commit` refuses to move a ref whose tip is not the first parent, which is
+    // exactly what an amend does. Create the object without touching HEAD, then move the branch
+    // (or the detached HEAD) onto it.
+    let oid = repo
+      .commit(None, &author, &committer, message, &tree, &parents)
+      .map_err(|e| fail("commit", e))?;
+    if repo.head_detached().map_err(|e| fail("head", e))? {
+      repo
+        .set_head_detached(oid)
+        .map_err(|e| fail("head", e))?;
+    } else {
+      let name = repo
+        .head()
+        .map_err(|e| fail("head", e))?
+        .name()
+        .map_err(|e| fail("head", e))?
+        .to_string();
+      repo
+        .find_reference(&name)
+        .and_then(|mut reference| reference.set_target(oid, "commit: amend"))
+        .map_err(|e| fail("head", e))?;
+    }
+    return Ok(CommitResult {
+      oid: oid.to_string(),
+      short: short_oid(oid),
+      summary: message.lines().next().unwrap_or(message).to_string(),
+    });
+  }
+
   // A hand commit that would not change the tree is almost always a forgotten `git add`; an
   // empty merge commit, on the other hand, is how git records that the branches met.
   if merge.is_none() {

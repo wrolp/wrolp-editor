@@ -80,7 +80,7 @@ export interface GitController {
   ignoreLocal: (file: GitStatusEntry) => Promise<boolean>;
   /** Set or clear the index's assume-unchanged bit on tracked paths. */
   setAssume: (files: GitStatusEntry[], enabled: boolean) => Promise<boolean>;
-  commit: (message: string) => Promise<GitCommitResult | null>;
+  commit: (message: string, amend?: boolean) => Promise<GitCommitResult | null>;
   createBranch: (name: string, checkout: boolean) => Promise<boolean>;
   switchBranch: (name: string) => Promise<boolean>;
   deleteBranch: (name: string, force?: boolean) => Promise<{ ok: boolean; unmerged: boolean }>;
@@ -140,6 +140,8 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
   remotesRef.current = remotes;
   /** Answers from an older root or an older refresh must not overwrite a newer one. */
   const seq = useRef(0);
+  /** The same for the log: a page asked for before a commit must not land after its reload. */
+  const logSeq = useRef(0);
 
   const applyStatus = useCallback((next: GitStatusView | null) => {
     statusRef.current = next;
@@ -215,20 +217,22 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
     const root = rootRef.current;
     if (!root) return;
     if (more && logRef.current.length >= LOG_MAX_ROWS) return;
+    const mine = ++logSeq.current;
     setLogLoading(true);
     try {
       // Every ref, not just HEAD: a merge whose other side was never walked has a parent with
       // no row to connect to, and the graph would draw a line into nothing.
       const size = logPageRef.current;
       const page = await api.gitLog(root, size, more ? logRef.current.length : 0, true);
+      if (mine !== logSeq.current) return;
       const next = more ? [...logRef.current, ...page] : page;
       setLog(next);
       setLogHasMore(page.length >= size && next.length < LOG_MAX_ROWS);
       setLogCapped(next.length >= LOG_MAX_ROWS);
     } catch (e) {
-      onErrorRef.current(errorMessage(e));
+      if (mine === logSeq.current) onErrorRef.current(errorMessage(e));
     } finally {
-      setLogLoading(false);
+      if (mine === logSeq.current) setLogLoading(false);
     }
   }, []);
 
@@ -242,12 +246,14 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
   const loadAllLog = useCallback(async () => {
     const root = rootRef.current;
     if (!root) return;
+    const mine = ++logSeq.current;
     setLogLoading(true);
     try {
       let rows = logRef.current;
       let done = false;
       while (rows.length < LOG_MAX_ROWS) {
         const page = await api.gitLog(root, LOG_ALL_PAGE, rows.length, true);
+        if (mine !== logSeq.current) return;
         rows = [...rows, ...page];
         if (page.length < LOG_ALL_PAGE) {
           done = true;
@@ -258,15 +264,16 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
       setLogHasMore(!done && rows.length < LOG_MAX_ROWS);
       setLogCapped(rows.length >= LOG_MAX_ROWS);
     } catch (e) {
-      onErrorRef.current(errorMessage(e));
+      if (mine === logSeq.current) onErrorRef.current(errorMessage(e));
     } finally {
-      setLogLoading(false);
+      if (mine === logSeq.current) setLogLoading(false);
     }
   }, []);
 
   // A different folder is a different repository. Everything read from the old one goes.
   useEffect(() => {
     seq.current += 1;
+    logSeq.current += 1;
     applyStatus(null);
     setError(null);
     setBranches([]);
@@ -381,16 +388,18 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
   );
 
   const commit = useCallback(
-    async (message: string): Promise<GitCommitResult | null> => {
+    async (message: string, amend = false): Promise<GitCommitResult | null> => {
       const root = rootRef.current;
       if (!root) return null;
       setBusy("commit");
       try {
-        const result = await api.gitCommit(root, message);
+        const result = await api.gitCommit(root, message, amend);
         await refresh();
         void loadBranches();
-        // The log the panel holds is now missing a row at the top.
-        if (logRef.current.length > 0) void loadLog();
+        // The log the panel holds is missing a row at the top. A repository whose first commit
+        // just landed has an empty log, so this cannot wait for a non-empty list: that is
+        // exactly the case where the history would stay empty until the view is reopened.
+        void loadLog();
         return result;
       } catch (e) {
         onErrorRef.current(errorMessage(e));

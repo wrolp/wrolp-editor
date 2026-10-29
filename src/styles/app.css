@@ -2430,6 +2430,26 @@ body.resizing .editor-host {
   font-size: 11px;
   color: var(--text-faint);
 }
+/* The amend toggle sits with the staged count, leaving the commit button on the right. */
+.git-amend {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-faint);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.git-amend input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+.git-amend input:disabled {
+  cursor: default;
+}
 .git-commit-btn {
   margin-left: auto;
   padding: 5px 12px;

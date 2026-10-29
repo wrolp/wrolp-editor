@@ -247,6 +247,40 @@ pub(crate) fn commit_files(root: &str, rev: &str) -> Result<Vec<CommitFile>, Str
   Ok(files)
 }
 
+/// The commit HEAD points at, for prefilling the amend box. `None` on a branch with no commits:
+/// there is nothing to amend yet.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct HeadCommit {
+  pub oid: String,
+  pub short: String,
+  pub message: String,
+}
+
+#[tauri::command]
+pub fn git_head_commit(root: String) -> Result<Option<HeadCommit>, String> {
+  head_commit(&root)
+}
+
+pub(crate) fn head_commit(root: &str) -> Result<Option<HeadCommit>, String> {
+  let opened = discover(root)?;
+  // The reference borrows the repository; keep the match out of the tail position so the
+  // borrow ends before `opened` is dropped.
+  let result = match opened.repo.head() {
+    Ok(reference) => {
+      let commit = reference.peel_to_commit().map_err(|e| fail("head", e))?;
+      Ok(Some(HeadCommit {
+        oid: commit.id().to_string(),
+        short: short_oid(commit.id()),
+        message: commit.message().unwrap_or_default().to_string(),
+      }))
+    }
+    Err(e) if e.code() == git2::ErrorCode::UnbornBranch => Ok(None),
+    Err(e) => Err(fail("head", e)),
+  };
+  result
+}
+
 fn entry(commit: &Commit<'_>, refs: Vec<RefLabel>) -> LogEntry {
   let author = commit.author();
   LogEntry {

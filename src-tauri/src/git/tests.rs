@@ -7,8 +7,8 @@
 use super::auth::AuthStore;
 use super::branch::{branches_of, create_branch, delete_branch, switch_branch};
 use super::diff::diff_of;
-use super::history::{commit_files, log_page};
-use super::index::{commit, discard, stage, unstage};
+use super::history::{commit_files, head_commit, log_page};
+use super::index::{amend_commit, commit, discard, stage, unstage};
 use super::local::{assume_unchanged, local_ignore, local_state, local_unignore, local_view};
 use super::remote::{
   conflict_sides_of, delete_resolution, fetch_core, merge_abort, pull_core, push_core,
@@ -1401,4 +1401,154 @@ fn local_view_caps_its_pattern_list() {
   let view = local_view(&root(&fixture)).unwrap();
   assert_eq!(view.ignores.len(), 500);
   assert!(view.truncated);
+}
+
+#[test]
+fn amend_replaces_the_head_and_keeps_the_original_author() {
+  let fixture = fixture("amend-author");
+  let _repo = init(&fixture);
+  let file = write(&fixture, "a.txt", "one\n");
+  commit_path(&root(&fixture), &file, "first");
+
+  // The amend runs as someone else: the author must still be the person who wrote the commit,
+  // while the committer records who rewrote it.
+  let reopened = Repository::open(&fixture.dir).unwrap();
+  let mut config = reopened.config().unwrap();
+  config.set_str("user.name", "Later").unwrap();
+  config.set_str("user.email", "later@example.com").unwrap();
+  drop(config);
+
+  write(&fixture, "a.txt", "two\n");
+  stage(&root(&fixture), &[file.clone()], &locks()).unwrap();
+  let result = amend_commit(&root(&fixture), "second", None, &locks()).unwrap();
+
+  let repo = Repository::open(&fixture.dir).unwrap();
+  let head = repo.head().unwrap().peel_to_commit().unwrap();
+  assert_eq!(head.id().to_string(), result.oid);
+  assert_eq!(
+    head.message().ok().map(|text| text.trim_end()),
+    Some("second")
+  );
+  assert_eq!(head.author().name().ok(), Some("Test"));
+  assert_eq!(head.committer().name().ok(), Some("Later"));
+  assert_eq!(head.parent_count(), 0);
+  let blob = head
+    .tree()
+    .unwrap()
+    .get_path(Path::new("a.txt"))
+    .unwrap()
+    .to_object(&repo)
+    .unwrap();
+  assert_eq!(blob.as_blob().unwrap().content(), b"two\n");
+}
+
+#[test]
+fn amend_can_change_only_the_message() {
+  let fixture = fixture("amend-message");
+  let _repo = init(&fixture);
+  let file = write(&fixture, "a.txt", "one\n");
+  commit_path(&root(&fixture), &file, "first");
+  let before = head_commit(&root(&fixture)).unwrap().unwrap();
+  let before_tree = Repository::open(&fixture.dir)
+    .unwrap()
+    .head()
+    .unwrap()
+    .peel_to_commit()
+    .unwrap()
+    .tree_id();
+
+  let result = amend_commit(&root(&fixture), "first, reworded", None, &locks()).unwrap();
+  let after = head_commit(&root(&fixture)).unwrap().unwrap();
+  assert_eq!(after.oid, result.oid);
+  assert_ne!(after.oid, before.oid);
+  assert_eq!(after.message.trim_end(), "first, reworded");
+
+  let after_tree = Repository::open(&fixture.dir)
+    .unwrap()
+    .head()
+    .unwrap()
+    .peel_to_commit()
+    .unwrap()
+    .tree_id();
+  assert_eq!(before_tree, after_tree);
+}
+
+#[test]
+fn amend_keeps_the_parent_of_a_non_root_commit() {
+  let fixture = fixture("amend-parent");
+  let _repo = init(&fixture);
+  let first = write(&fixture, "a.txt", "one\n");
+  commit_path(&root(&fixture), &first, "first");
+  let first_oid = head_commit(&root(&fixture)).unwrap().unwrap().oid;
+  let second = write(&fixture, "b.txt", "two\n");
+  commit_path(&root(&fixture), &second, "second");
+
+  let result = amend_commit(&root(&fixture), "second, reworded", None, &locks()).unwrap();
+  let repo = Repository::open(&fixture.dir).unwrap();
+  let head = repo.head().unwrap().peel_to_commit().unwrap();
+  assert_eq!(head.id().to_string(), result.oid);
+  assert_eq!(head.parent_count(), 1);
+  assert_eq!(head.parent_id(0).unwrap().to_string(), first_oid);
+}
+
+#[test]
+fn amend_with_nothing_to_change_is_refused() {
+  let fixture = fixture("amend-noop");
+  let _repo = init(&fixture);
+  let file = write(&fixture, "a.txt", "one\n");
+  commit_path(&root(&fixture), &file, "first");
+
+  assert_eq!(
+    amend_commit(&root(&fixture), "first", None, &locks()).unwrap_err(),
+    "git_nothing_to_amend"
+  );
+}
+
+#[test]
+fn amend_on_an_unborn_branch_is_refused() {
+  let fixture = fixture("amend-unborn");
+  let _repo = init(&fixture);
+
+  assert!(head_commit(&root(&fixture)).unwrap().is_none());
+  assert_eq!(
+    amend_commit(&root(&fixture), "first", None, &locks()).unwrap_err(),
+    "git_no_head"
+  );
+}
+
+#[test]
+fn amend_during_a_merge_is_refused() {
+  let fixture = fixture("amend-merge");
+  let _repo = init(&fixture);
+  let file = write(&fixture, "a.txt", "one\n");
+  commit_path(&root(&fixture), &file, "first");
+  let head = Repository::open(&fixture.dir)
+    .unwrap()
+    .head()
+    .unwrap()
+    .peel_to_commit()
+    .unwrap()
+    .id();
+  fs::write(
+    fixture.dir.join(".git").join("MERGE_HEAD"),
+    format!("{head}\n"),
+  )
+  .unwrap();
+
+  assert_eq!(
+    amend_commit(&root(&fixture), "first", None, &locks()).unwrap_err(),
+    "git_amend_merge"
+  );
+}
+
+#[test]
+fn head_commit_reports_the_message_the_amend_box_prefills() {
+  let fixture = fixture("head-commit");
+  let _repo = init(&fixture);
+  let file = write(&fixture, "a.txt", "one\n");
+  commit_path(&root(&fixture), &file, "first line\n\nbody");
+
+  let head = head_commit(&root(&fixture)).unwrap().unwrap();
+  assert_eq!(head.message.trim_end(), "first line\n\nbody");
+  assert_eq!(head.short.len(), 8);
 }

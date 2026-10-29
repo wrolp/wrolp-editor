@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { formatClock, formatWhen, t, translateError } from "../lib/i18n";
 import { pathKey } from "../lib/types";
 import type { GitCommitFile, GitLogEntry, GitProgress, GitStatusEntry } from "../lib/tauri";
@@ -131,6 +131,10 @@ export default function GitPanel({
   onNotice,
 }: Props) {
   const [message, setMessage] = useState("");
+  const [amend, setAmend] = useState(false);
+  /** The message HEAD had when amend was turned on, so switching it off can drop just that text. */
+  const [amendBase, setAmendBase] = useState("");
+  const amendSeq = useRef(0);
   const [branchesOpen, setBranchesOpen] = useState(false);
   const [newBranch, setNewBranch] = useState("");
   const [remote, setRemote] = useState<string | null>(null);
@@ -154,6 +158,9 @@ export default function GitPanel({
   // question from the old one must not carry over.
   useEffect(() => {
     setMessage("");
+    setAmend(false);
+    setAmendBase("");
+    amendSeq.current += 1;
     setBranchesOpen(false);
     setDiscardAsk(null);
     // Back to the default for the new repository rather than to what the last one was left at.
@@ -212,12 +219,14 @@ export default function GitPanel({
   const merging = status?.repo.state === "merge";
   // A merge commit records that the branches met even when the resolution equals HEAD, so it
   // needs no staged text — only the absence of unresolved conflicts.
+  const canAmend = amend && !!head && !head.unborn && !merging;
   const canCommit =
     !!message.trim() &&
     !busy &&
     // Staged text does not make a merge committable while any conflict stage remains.
     !(merging && conflictedFiles.length > 0) &&
-    (stagedFiles.length > 0 || merging);
+    // A message-only amend is a real amend: it needs no staged text.
+    (stagedFiles.length > 0 || merging || canAmend);
 
   // The remote to talk to: the one picked, else the branch's, else `origin`, else the first.
   const activeRemote = useMemo(() => {
@@ -272,10 +281,48 @@ export default function GitPanel({
     }
   };
 
+  /**
+   * Turning amend on loads the last commit's message into the box: an amend edits that message,
+   * and starting from a blank box would silently replace it. Turning it off removes the text only
+   * if it is still untouched, so a draft typed after the toggle survives.
+   */
+  const toggleAmend = async (on: boolean) => {
+    const mine = ++amendSeq.current;
+    setAmend(on);
+    if (!on) {
+      setMessage((current) => (current === amendBase ? "" : current));
+      setAmendBase("");
+      return;
+    }
+    if (!repoRoot) return;
+    try {
+      const last = await api.gitHeadCommit(repoRoot);
+      if (mine !== amendSeq.current) return;
+      if (!last) {
+        setAmend(false);
+        return;
+      }
+      const text = last.message.replace(/\s+$/, "");
+      setAmendBase(text);
+      setMessage(text);
+    } catch (e) {
+      if (mine === amendSeq.current) {
+        setAmend(false);
+        onError(errorMessage(e));
+      }
+    }
+  };
+
   const submit = async () => {
     if (!canCommit) return;
-    const result = await git.commit(message);
-    if (result) setMessage("");
+    // A merge left over from before the toggle must not be amended: the backend refuses it, and
+    // the button reads "Finish merge" for the same reason.
+    const result = await git.commit(message, amend && canAmend);
+    if (result) {
+      setMessage("");
+      setAmend(false);
+      setAmendBase("");
+    }
   };
 
   const runDiscard = async () => {
@@ -952,6 +999,15 @@ export default function GitPanel({
                   ? t("git.mergeReady", { n: conflictedFiles.length })
                   : t("git.stagedCount", { n: stagedFiles.length })}
               </span>
+              <label className="git-amend" title={t("git.amendHint")}>
+                <input
+                  type="checkbox"
+                  checked={amend}
+                  disabled={busy || !head || !!head.unborn || merging}
+                  onChange={(e) => void toggleAmend(e.target.checked)}
+                />
+                {t("git.amend")}
+              </label>
               <button
                 className="git-commit-btn"
                 disabled={!canCommit}
@@ -961,7 +1017,9 @@ export default function GitPanel({
                   ? t("git.committing")
                   : merging
                     ? t("git.finishMerge")
-                    : t("git.commit")}
+                    : amend && canAmend
+                      ? t("git.amendCommit")
+                      : t("git.commit")}
               </button>
             </div>
           </div>

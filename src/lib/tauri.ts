@@ -466,6 +466,13 @@ export interface GitCommitResult {
   summary: string;
 }
 
+/** The commit HEAD points at, used to prefill the amend box. */
+export interface GitHeadCommit {
+  oid: string;
+  short: string;
+  message: string;
+}
+
 /** One repository the Source Control panel lists. Manual entries are added by the frontend. */
 export interface GitRepoEntry {
   /** Work tree, in the spelling the filesystem uses. */
@@ -934,9 +941,11 @@ export const api = {
     invoke<number>("git_assume_unchanged", { root, paths, enabled }),
   gitLocalView: (root: string) => invoke<GitLocalView>("git_local_view", { root }),
   gitExcludeOpen: (root: string) => invoke<string>("git_exclude_open", { root }),
-  /** Commits what is staged. Nothing is added on the way. */
-  gitCommit: (root: string, message: string) =>
-    invoke<GitCommitResult>("git_commit", { root, message }),
+  /** Commits what is staged. Nothing is added on the way; `amend` replaces HEAD instead. */
+  gitCommit: (root: string, message: string, amend: boolean) =>
+    invoke<GitCommitResult>("git_commit", { root, message, amend }),
+  /** The message of the commit HEAD points at; null on an unborn branch. */
+  gitHeadCommit: (root: string) => invoke<GitHeadCommit | null>("git_head_commit", { root }),
   /** `all` walks every branch, tag and remote-tracking ref instead of HEAD alone. */
   gitLog: (root: string, limit?: number, skip?: number, all = false) =>
     invoke<GitLogEntry[]>("git_log", {

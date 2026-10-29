@@ -121,6 +121,7 @@ pub fn run() {
       git::index::git_commit,
       git::history::git_log,
       git::history::git_commit_files,
+      git::history::git_head_commit,
       git::branch::git_branches,
       git::branch::git_create_branch,
       git::branch::git_switch_branch,
