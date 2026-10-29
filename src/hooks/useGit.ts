@@ -76,6 +76,10 @@ export interface GitController {
   stage: (files: GitStatusEntry[]) => Promise<boolean>;
   unstage: (files: GitStatusEntry[]) => Promise<boolean>;
   discard: (files: GitStatusEntry[]) => Promise<boolean>;
+  /** Add one path to the repository's own ignore file (`info/exclude`). */
+  ignoreLocal: (file: GitStatusEntry) => Promise<boolean>;
+  /** Set or clear the index's assume-unchanged bit on tracked paths. */
+  setAssume: (files: GitStatusEntry[], enabled: boolean) => Promise<boolean>;
   commit: (message: string) => Promise<GitCommitResult | null>;
   createBranch: (name: string, checkout: boolean) => Promise<boolean>;
   switchBranch: (name: string) => Promise<boolean>;
@@ -352,6 +356,26 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
       return run("discard", () => api.gitDiscard(root, files.map((f) => f.abs)), {
         filesChanged: true,
       });
+    },
+    [run]
+  );
+
+  const ignoreLocal = useCallback(
+    (file: GitStatusEntry) => {
+      const root = rootRef.current;
+      if (!root) return Promise.resolve(false);
+      return run("ignore", () => api.gitLocalIgnore(file.abs));
+    },
+    [run]
+  );
+
+  const setAssume = useCallback(
+    (files: GitStatusEntry[], enabled: boolean) => {
+      const root = rootRef.current;
+      if (!root) return Promise.resolve(false);
+      return run("assume", () =>
+        api.gitAssumeUnchanged(root, files.map((file) => file.abs), enabled)
+      );
     },
     [run]
   );
@@ -693,6 +717,8 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
     stage,
     unstage,
     discard,
+    ignoreLocal,
+    setAssume,
     commit,
     createBranch,
     switchBranch,

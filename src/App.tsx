@@ -540,6 +540,19 @@ export default function App() {
     }
     return counts;
   }, [repoStatuses, rootDir]);
+  /**
+   * A local-only git change (exclude line, assume bit) does not touch the worktree, so the file
+   * watcher has nothing to report. Refresh the panel when the change belongs to the repository
+   * it is showing, and the list counts in every case; decorations for another repository arrive
+   * with their normal poll.
+   */
+  const refreshGitLocal = useCallback(
+    (repoRoot: string) => {
+      if (selectedRepo && pathKey(selectedRepo) === pathKey(repoRoot)) void git.refresh();
+      void repos.refreshSummaries();
+    },
+    [git.refresh, repos.refreshSummaries, selectedRepo]
+  );
   const addGitRepository = useCallback(async () => {
     const chosen = await pickFolder();
     if (!chosen) return;
@@ -2304,6 +2317,7 @@ const defaultModeFor = useCallback(
           onBatchRename={renameMany}
           gitMarks={gitMarks}
           gitDirs={gitDirs}
+          onGitLocalChanged={refreshGitLocal}
           gitPanel={
             <GitPanel
               workspaceRoot={rootDir}

@@ -142,7 +142,13 @@ pub fn run() {
       git::remote::git_resolve_conflict,
       git::remote::git_write_resolution,
       git::remote::git_delete_resolution,
-      git::remote::git_merge_abort
+      git::remote::git_merge_abort,
+      git::local::git_local_ignore,
+      git::local::git_local_unignore,
+      git::local::git_assume_unchanged,
+      git::local::git_local_view,
+      git::local::git_local_state,
+      git::local::git_exclude_open
     ]);
 
   #[cfg(windows)]

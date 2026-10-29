@@ -1,9 +1,19 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from "react";
 import { formatWhen, t } from "../lib/i18n";
 import {
   IconChevron,
   IconCompare,
   IconCopy,
+  IconEye,
+  IconEyeOff,
   IconFile,
   IconFileLock,
   IconFilePlus,
@@ -31,6 +41,7 @@ import {
   parentOf,
   type FolderHistoryEntry,
   type FsEntry,
+  type GitLocalPathState,
   type HistoryEntry,
   type VersionEntry,
   type VersionSummary,
@@ -735,6 +746,11 @@ interface Props extends Omit<
   gitMarks: ReadonlyMap<string, GitMark>;
   gitDirs: ReadonlyMap<string, number>;
   /**
+   * A local-only git change was made from the tree (ignore, assume). The repository root is
+   * handed back because the affected repository is not necessarily the one the panel shows.
+   */
+  onGitLocalChanged: (repoRoot: string) => void;
+  /**
    * The Source Control panel, mounted here so it shares the sidebar's width and scroll area.
    * It is passed as a node rather than as a dozen props: every one of its decisions is the
    * panel's own, and Sidebar only owns the column it sits in.
@@ -766,6 +782,7 @@ export default function Sidebar(props: Props) {
     onBrowseImages,
     onCompareVersion,
     onRestoreVersion,
+    onGitLocalChanged,
   } = props;
   /**
    * The files with history that are not the one on screen. Compared by `pathKey` rather than by
@@ -781,6 +798,10 @@ export default function Sidebar(props: Props) {
   const [menu, setMenu] = useState<MenuTarget | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuAt = useMenuPlacement(menu, menuRef);
+  /** The node's local git state once the probe has answered; null while asking or outside a repo. */
+  const [localGit, setLocalGit] = useState<GitLocalPathState | null>(null);
+  /** The path the probe was asked about, so a late answer for another row is dropped. */
+  const localGitFor = useRef<string | null>(null);
   /** `pathKey` of the node whose name is being edited in place. */
   const [renaming, setRenaming] = useState<string | null>(null);
   /** The folder a new entry is being named in, and what it will be. */
@@ -839,11 +860,78 @@ export default function Sidebar(props: Props) {
   // goes, so the tooltip never names a dangling backslash.
   const parentName = parentDir ? parentDir.replace(/[\\/]+$/, "") || parentDir : "";
 
+  /**
+   * Ask which repository the row belongs to and what this machine already decided about it.
+   * A failure is silence: a folder outside git has nothing to offer here, and an error toast
+   * over a context menu would be noise about a menu the user has not chosen anything from.
+   */
+  const probeLocalGit = useCallback(async (path: string) => {
+    const wanted = pathKey(path);
+    localGitFor.current = wanted;
+    setLocalGit(null);
+    try {
+      const state = await api.gitLocalState(path);
+      if (localGitFor.current === wanted) setLocalGit(state);
+    } catch {
+      if (localGitFor.current === wanted) setLocalGit(null);
+    }
+  }, []);
+
+  /** What the local git group would offer for the row under the pointer. */
+  const localGitActions = localGit
+    ? {
+        ignore: !localGit.tracked && !localGit.ignored,
+        unignore: !localGit.tracked && localGit.ignored && !!localGit.localPattern,
+        assume: localGit.tracked && !localGit.assumed,
+        unassume: localGit.tracked && localGit.assumed,
+      }
+    : null;
+  const hasLocalGitActions =
+    !!localGitActions &&
+    (localGitActions.ignore ||
+      localGitActions.unignore ||
+      localGitActions.assume ||
+      localGitActions.unassume);
+
+  /**
+   * Apply one local-only change. Both outcomes are reported through `onError`, which is what
+   * this panel already uses for a sentence that is not a failure (a copy, a paste).
+   */
+  const runLocalGit = async (kind: "ignore" | "unignore" | "assume" | "unassume") => {
+    const target = menu;
+    const state = localGit;
+    if (!target || !state) return;
+    setMenu(null);
+    localGitFor.current = null;
+    setLocalGit(null);
+    const name = target.name.replace(/\/$/, "");
+    try {
+      if (kind === "ignore") {
+        await api.gitLocalIgnore(target.path);
+        onError(t("side.localIgnoreDone", { name }));
+      } else if (kind === "unignore") {
+        if (!state.localPattern) return;
+        await api.gitLocalUnignore(state.repoRoot, state.localPattern);
+        onError(t("side.localUnignoreDone", { name }));
+      } else {
+        await api.gitAssumeUnchanged(state.repoRoot, [target.path], kind === "assume");
+        onError(t(kind === "assume" ? "side.assumeDone" : "side.unassumeDone", { name }));
+      }
+      onGitLocalChanged(state.repoRoot);
+    } catch (e) {
+      onError(errorMessage(e));
+    }
+  };
+
   // Any click elsewhere, a scroll, or losing focus dismisses the menu. `mousedown` rather
   // than `click` so the click that opened it cannot immediately close it again.
   useEffect(() => {
     if (!menu) return;
-    const close = () => setMenu(null);
+    const close = () => {
+      localGitFor.current = null;
+      setLocalGit(null);
+      setMenu(null);
+    };
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") close();
     };
@@ -1177,6 +1265,10 @@ export default function Sidebar(props: Props) {
           // A right-click on a row is that row's business; its own handler has already
           // answered it and stopped the event.
           if ((e.target as HTMLElement).closest(".tree-row")) return;
+          // The root menu has no node of its own: a probe still in flight for a row must not
+          // paint its local-git group under this one.
+          localGitFor.current = null;
+          setLocalGit(null);
           setMenu({ path: "", name: "", isDir: true, x: e.clientX, y: e.clientY });
         }}
       >
@@ -1345,6 +1437,7 @@ export default function Sidebar(props: Props) {
                     setAnchor(pathKey(target.path));
                   }
                   setMenu({ ...target, x, y });
+                  void probeLocalGit(target.path);
                 }}
               />
               {creating && pathKey(creating.dir) === pathKey(rootDir) && (
@@ -1849,6 +1942,43 @@ export default function Sidebar(props: Props) {
                 </span>
                 {t("side.menuCopyParent")}
               </div>
+              {localGit && localGitActions && hasLocalGitActions && (
+                <>
+                  <div className="ws-sep" />
+                  {localGitActions.ignore && (
+                    <div className="ctx-item" onClick={() => void runLocalGit("ignore")}>
+                      <span className="ctx-icon">
+                        <IconEyeOff size={14} />
+                      </span>
+                      {t("side.menuLocalIgnore")}
+                    </div>
+                  )}
+                  {localGitActions.unignore && (
+                    <div className="ctx-item" onClick={() => void runLocalGit("unignore")}>
+                      <span className="ctx-icon">
+                        <IconEye size={14} />
+                      </span>
+                      {t("side.menuUnignore")}
+                    </div>
+                  )}
+                  {localGitActions.assume && (
+                    <div className="ctx-item" onClick={() => void runLocalGit("assume")}>
+                      <span className="ctx-icon">
+                        <IconEyeOff size={14} />
+                      </span>
+                      {t("side.menuAssume")}
+                    </div>
+                  )}
+                  {localGitActions.unassume && (
+                    <div className="ctx-item" onClick={() => void runLocalGit("unassume")}>
+                      <span className="ctx-icon">
+                        <IconEye size={14} />
+                      </span>
+                      {t("side.menuUnassume")}
+                    </div>
+                  )}
+                </>
+              )}
               {menu.isDir && (
                 <>
                   <div className="ws-sep" />

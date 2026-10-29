@@ -9,6 +9,7 @@ use super::branch::{branches_of, create_branch, delete_branch, switch_branch};
 use super::diff::diff_of;
 use super::history::{commit_files, log_page};
 use super::index::{commit, discard, stage, unstage};
+use super::local::{assume_unchanged, local_ignore, local_state, local_unignore, local_view};
 use super::remote::{
   conflict_sides_of, delete_resolution, fetch_core, merge_abort, pull_core, push_core,
   resolve_conflict, write_resolution, Sink,
@@ -1146,4 +1147,258 @@ fn writing_a_resolution_needs_a_conflict() {
     delete_resolution(&root, &file, &locks()).unwrap_err(),
     "git_not_conflicted"
   );
+}
+
+fn exclude_file(fixture: &Fixture) -> PathBuf {
+  fixture.dir.join(".git").join("info").join("exclude")
+}
+
+fn exclude_text(fixture: &Fixture) -> String {
+  fs::read_to_string(exclude_file(fixture)).unwrap_or_default()
+}
+
+#[test]
+fn local_ignore_hides_untracked_paths_and_stays_idempotent() {
+  let fixture = fixture("local-ignore-file");
+  let _repo = init(&fixture);
+  let file = write(&fixture, "local.config.json", "{}\n");
+
+  local_ignore(&file, &locks()).unwrap();
+  assert!(exclude_text(&fixture)
+    .lines()
+    .any(|line| line == "/local.config.json"));
+
+  let status = status_of(&root(&fixture)).unwrap();
+  assert_eq!(status.untracked, 0);
+  assert!(status
+    .files
+    .iter()
+    .any(|entry| entry.path == "local.config.json" && entry.kind == "ignored"));
+
+  local_ignore(&file, &locks()).unwrap();
+  assert_eq!(
+    exclude_text(&fixture).matches("/local.config.json").count(),
+    1
+  );
+}
+
+#[test]
+fn local_ignore_of_a_directory_leaves_tracked_files_alone() {
+  let fixture = fixture("local-ignore-dir");
+  let _repo = init(&fixture);
+  let kept = write(&fixture, "build/kept.txt", "one\n");
+  commit_path(&root(&fixture), &kept, "first");
+  write(&fixture, "build/out.txt", "x\n");
+  write(&fixture, "build/kept.txt", "two\n");
+
+  let dir = fixture.dir.join("build");
+  local_ignore(&dir.to_string_lossy(), &locks()).unwrap();
+  assert!(exclude_text(&fixture).lines().any(|line| line == "/build/"));
+
+  let status = status_of(&root(&fixture)).unwrap();
+  assert!(!status
+    .files
+    .iter()
+    .any(|entry| entry.path == "build/out.txt" && entry.kind == "untracked"));
+  // Ignore rules never apply to a tracked file: its change is still a change.
+  assert!(status
+    .files
+    .iter()
+    .any(|entry| entry.path == "build/kept.txt" && entry.workdir.as_deref() == Some("M")));
+}
+
+#[test]
+fn local_ignore_refuses_a_tracked_path() {
+  let fixture = fixture("local-ignore-tracked");
+  let _repo = init(&fixture);
+  let file = write(&fixture, "a.txt", "one\n");
+  commit_path(&root(&fixture), &file, "first");
+
+  assert_eq!(local_ignore(&file, &locks()).unwrap_err(), "git_tracked");
+  assert!(!exclude_text(&fixture).contains("/a.txt"));
+}
+
+#[test]
+fn local_ignore_does_not_duplicate_a_gitignore_rule() {
+  let fixture = fixture("local-ignore-gitignore");
+  let _repo = init(&fixture);
+  write(&fixture, ".gitignore", "*.log\n");
+  let file = write(&fixture, "debug.log", "x\n");
+
+  assert_eq!(
+    local_ignore(&file, &locks()).unwrap_err(),
+    "git_already_ignored"
+  );
+  assert!(!exclude_text(&fixture).contains("debug.log"));
+}
+
+#[test]
+fn local_ignore_separates_its_line_from_an_unterminated_file() {
+  let fixture = fixture("local-ignore-newline");
+  let _repo = init(&fixture);
+  fs::create_dir_all(fixture.dir.join(".git").join("info")).unwrap();
+  fs::write(
+    exclude_file(&fixture),
+    "# a comment without a final newline",
+  )
+  .unwrap();
+  let file = write(&fixture, "a.txt", "x\n");
+
+  local_ignore(&file, &locks()).unwrap();
+  assert!(exclude_text(&fixture).contains("\n/a.txt\n"));
+  assert_eq!(status_of(&root(&fixture)).unwrap().untracked, 0);
+}
+
+#[test]
+fn local_unignore_removes_only_the_named_line_and_keeps_the_rest() {
+  let fixture = fixture("local-unignore");
+  let _repo = init(&fixture);
+  fs::create_dir_all(fixture.dir.join(".git").join("info")).unwrap();
+  fs::write(exclude_file(&fixture), "# keep\r\n/a.txt\r\n/nested/\r\n").unwrap();
+
+  local_unignore(&root(&fixture), "/a.txt", &locks()).unwrap();
+  assert_eq!(exclude_text(&fixture), "# keep\r\n/nested/\r\n");
+  assert_eq!(
+    local_unignore(&root(&fixture), "/a.txt", &locks()).unwrap_err(),
+    "git_no_local_ignore"
+  );
+  assert_eq!(
+    local_unignore(&root(&fixture), "", &locks()).unwrap_err(),
+    "git_pattern_invalid"
+  );
+}
+
+#[test]
+fn local_ignore_escapes_pattern_characters_and_anchors_the_path() {
+  let fixture = fixture("local-ignore-chars");
+  let _repo = init(&fixture);
+  let bracket = write(&fixture, "a[1].txt", "x\n");
+  let hash = write(&fixture, "#note.txt", "x\n");
+
+  local_ignore(&bracket, &locks()).unwrap();
+  local_ignore(&hash, &locks()).unwrap();
+  let text = exclude_text(&fixture);
+  assert!(text.lines().any(|line| line == "/a\\[1\\].txt"));
+  assert!(text.lines().any(|line| line == "/#note.txt"));
+  assert_eq!(status_of(&root(&fixture)).unwrap().untracked, 0);
+}
+
+#[test]
+fn assume_unchanged_hides_edits_and_can_be_cleared() {
+  let fixture = fixture("assume-unchanged");
+  let _repo = init(&fixture);
+  let file = write(&fixture, "a.txt", "one\n");
+  commit_path(&root(&fixture), &file, "first");
+  write(&fixture, "a.txt", "two\n");
+  let entry = &status_of(&root(&fixture)).unwrap().files[0];
+  assert_eq!(entry.workdir.as_deref(), Some("M"));
+
+  assert_eq!(
+    assume_unchanged(&root(&fixture), &[file.clone()], true, &locks()).unwrap(),
+    1
+  );
+  assert!(status_of(&root(&fixture)).unwrap().files.is_empty());
+  // The worktree is untouched: only the index's opinion of it changed.
+  assert_eq!(fs::read_to_string(&file).unwrap(), "two\n");
+
+  // The bit lives in the index file, so a fresh repository handle still sees it.
+  let reopened = Repository::open(&fixture.dir).unwrap();
+  let index = reopened.index().unwrap();
+  let entry = index.get_path(Path::new("a.txt"), 0).unwrap();
+  assert!(entry.flags & git2::IndexEntryFlag::VALID.bits() != 0);
+
+  assert_eq!(
+    assume_unchanged(&root(&fixture), &[file.clone()], false, &locks()).unwrap(),
+    1
+  );
+  let entry = &status_of(&root(&fixture)).unwrap().files[0];
+  assert_eq!(entry.workdir.as_deref(), Some("M"));
+}
+
+#[test]
+fn assume_unchanged_keeps_the_staged_half_visible() {
+  let fixture = fixture("assume-staged");
+  let _repo = init(&fixture);
+  let file = write(&fixture, "a.txt", "one\n");
+  commit_path(&root(&fixture), &file, "first");
+  write(&fixture, "a.txt", "two\n");
+  stage(&root(&fixture), &[file.clone()], &locks()).unwrap();
+  write(&fixture, "a.txt", "three\n");
+
+  assume_unchanged(&root(&fixture), &[file.clone()], true, &locks()).unwrap();
+  let status = status_of(&root(&fixture)).unwrap();
+  let entry = status
+    .files
+    .iter()
+    .find(|file| file.path == "a.txt")
+    .expect("the staged half is still a change");
+  assert_eq!(entry.index.as_deref(), Some("M"));
+  assert_eq!(entry.workdir, None);
+}
+
+#[test]
+fn assume_unchanged_refuses_untracked_paths_and_an_empty_enable() {
+  let fixture = fixture("assume-untracked");
+  let _repo = init(&fixture);
+  let file = write(&fixture, "a.txt", "one\n");
+
+  assert_eq!(
+    assume_unchanged(&root(&fixture), &[file], true, &locks()).unwrap_err(),
+    "git_untracked"
+  );
+  assert_eq!(
+    assume_unchanged(&root(&fixture), &[], true, &locks()).unwrap_err(),
+    "git_paths_empty"
+  );
+}
+
+#[test]
+fn local_view_and_state_describe_both_kinds_of_local_state() {
+  let fixture = fixture("local-state");
+  let _repo = init(&fixture);
+  let tracked = write(&fixture, "kept.txt", "one\n");
+  commit_path(&root(&fixture), &tracked, "first");
+  write(&fixture, "kept.txt", "two\n");
+  assume_unchanged(&root(&fixture), &[tracked.clone()], true, &locks()).unwrap();
+
+  let ignored_dir = fixture.dir.join("build");
+  fs::create_dir_all(&ignored_dir).unwrap();
+  write(&fixture, "build/out.txt", "x\n");
+  local_ignore(&ignored_dir.to_string_lossy(), &locks()).unwrap();
+
+  let view = local_view(&root(&fixture)).unwrap();
+  assert!(view.ignores.iter().any(|line| line == "/build/"));
+  assert_eq!(view.assumed.len(), 1);
+  assert_eq!(view.assumed[0].path, "kept.txt");
+  assert!(!view.truncated);
+
+  let state = local_state(&tracked).unwrap();
+  assert!(state.tracked);
+  assert!(state.assumed);
+  assert!(!state.ignored);
+  assert_eq!(state.local_pattern, None);
+
+  let inside = fixture.dir.join("build").join("out.txt");
+  let state = local_state(&inside.to_string_lossy()).unwrap();
+  assert!(!state.tracked);
+  assert!(state.ignored);
+  assert_eq!(state.local_pattern.as_deref(), Some("/build/"));
+
+  let state = local_state(&ignored_dir.to_string_lossy()).unwrap();
+  assert!(!state.tracked);
+  assert!(state.ignored);
+  assert_eq!(state.local_pattern.as_deref(), Some("/build/"));
+}
+
+#[test]
+fn local_view_caps_its_pattern_list() {
+  let fixture = fixture("local-view-cap");
+  let _repo = init(&fixture);
+  fs::create_dir_all(fixture.dir.join(".git").join("info")).unwrap();
+  let text: String = (0..501).map(|n| format!("/file-{n}.txt\n")).collect();
+  fs::write(exclude_file(&fixture), text).unwrap();
+
+  let view = local_view(&root(&fixture)).unwrap();
+  assert_eq!(view.ignores.len(), 500);
+  assert!(view.truncated);
 }

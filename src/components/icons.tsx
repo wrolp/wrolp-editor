@@ -100,6 +100,27 @@ export function IconFold({ size = 14 }: IconProps) {
   );
 }
 
+/** Git's view of a path, for the local-only state that lives outside the repository's history. */
+export function IconEye({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" />
+      <circle cx="12" cy="12" r="2.6" />
+    </svg>
+  );
+}
+
+/** Hidden from git's view: the same eye, struck through. */
+export function IconEyeOff({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" />
+      <circle cx="12" cy="12" r="2.6" />
+      <line x1="4" y1="20" x2="20" y2="4" />
+    </svg>
+  );
+}
+
 /** Swap the two sides of a comparison: one line each way, arrowheads at opposite ends. */
 export function IconSwap({ size = 14 }: IconProps) {
   return (

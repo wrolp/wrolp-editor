@@ -428,6 +428,38 @@ export interface GitCommitFile {
   abs: string;
 }
 
+/** One path's local-only git state, for the Explorer's context menu. */
+export interface GitLocalPathState {
+  repoRoot: string;
+  /** An index entry exists at some stage, so ignore rules cannot hide it. */
+  tracked: boolean;
+  /** The stage-0 entry carries assume-unchanged. */
+  assumed: boolean;
+  /** Read-only for now: this feature never writes the skip-worktree bit. */
+  skipWorktree: boolean;
+  ignored: boolean;
+  /** The line in `info/exclude` covering this path, when the app can name one. */
+  localPattern: string | null;
+  excludePath: string;
+}
+
+export interface GitLocalFile {
+  path: string;
+  abs: string;
+}
+
+/** What the local git settings dialog lists for one repository. */
+export interface GitLocalView {
+  repoRoot: string;
+  excludePath: string;
+  excludeExists: boolean;
+  /** Non-empty, non-comment lines of `info/exclude`, in file order. */
+  ignores: string[];
+  /** Stage-0 entries carrying assume-unchanged. */
+  assumed: GitLocalFile[];
+  truncated: boolean;
+}
+
 export interface GitCommitResult {
   oid: string;
   short: string;
@@ -893,6 +925,15 @@ export const api = {
   gitStage: (root: string, paths: string[]) => invoke<void>("git_stage", { root, paths }),
   gitUnstage: (root: string, paths: string[]) => invoke<void>("git_unstage", { root, paths }),
   gitDiscard: (root: string, paths: string[]) => invoke<void>("git_discard", { root, paths }),
+  /** The repository's own exclude file and the index's assume-unchanged bit. */
+  gitLocalState: (path: string) => invoke<GitLocalPathState>("git_local_state", { path }),
+  gitLocalIgnore: (path: string) => invoke<void>("git_local_ignore", { path }),
+  gitLocalUnignore: (root: string, pattern: string) =>
+    invoke<void>("git_local_unignore", { root, pattern }),
+  gitAssumeUnchanged: (root: string, paths: string[], enabled: boolean) =>
+    invoke<number>("git_assume_unchanged", { root, paths, enabled }),
+  gitLocalView: (root: string) => invoke<GitLocalView>("git_local_view", { root }),
+  gitExcludeOpen: (root: string) => invoke<string>("git_exclude_open", { root }),
   /** Commits what is staged. Nothing is added on the way. */
   gitCommit: (root: string, message: string) =>
     invoke<GitCommitResult>("git_commit", { root, message }),
