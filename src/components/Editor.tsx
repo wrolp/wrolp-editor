@@ -1,9 +1,11 @@
 import MonacoEditor from "@monaco-editor/react";
 import type { Monaco } from "@monaco-editor/loader";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import type { editor } from "monaco-editor";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import monaco from "../lib/monaco";
 import { t } from "../lib/i18n";
-import "../lib/monaco";
+import { useMenuPlacement } from "../hooks/useMenuPlacement";
 import { dirtyRanges } from "../lib/dirtyDiff";
 import { isUntitled, modelUri } from "../lib/path";
 import { isFileTab, type CursorPos, type EditStats, type EditorHandle, type Tab } from "../lib/types";
@@ -58,6 +60,10 @@ export default function Editor({
   const readyRef = useRef(onReady);
   readyRef.current = onReady;
   const instanceRef = useRef<editor.IStandaloneCodeEditor | null>(null);
+  /** The app's own right-click menu; Monaco's is turned off in the options below. */
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuAt = useMenuPlacement(menu, menuRef);
   /** The tab as of this render, read by the callbacks that outlive the render that made them. */
   const tabRef = useRef(tab);
   tabRef.current = tab;
@@ -190,6 +196,7 @@ export default function Editor({
   // A new model starts empty; without this the previous tab's numbers linger until the
   // next event. The frame retry covers Monaco attaching the model after this effect.
   useEffect(() => {
+    setMenu(null);
     statsRef.current({ selectionChars: 0, selectionLines: 0, totalChars: 0 });
     const raf = requestAnimationFrame(report);
     return () => cancelAnimationFrame(raf);
@@ -214,44 +221,198 @@ export default function Editor({
   // Release the handle on unmount so async callbacks cannot touch a disposed instance.
   useEffect(() => () => readyRef.current(null), []);
 
+  /**
+   * What Copy puts on the clipboard: the selected text, or the line under each cursor when there
+   * is no selection. The second half is the reason this menu exists — a menu opened over a plain
+   * caret has nothing to copy otherwise.
+   */
+  const selectionText = useCallback((): string | null => {
+    const instance = instanceRef.current;
+    const model = instance?.getModel();
+    if (!instance || !model) return null;
+    const selections = instance.getSelections() ?? [];
+    const filled = selections.filter((selection) => !selection.isEmpty());
+    if (filled.length > 0) {
+      return filled.map((selection) => model.getValueInRange(selection)).join("\n");
+    }
+    const lines = new Set<string>();
+    for (const selection of selections) {
+      const line = selection.positionLineNumber;
+      const text = model.getLineContent(line);
+      lines.add(line < model.getLineCount() ? `${text}\n` : text);
+    }
+    return [...lines].join("\n");
+  }, []);
+
+  /** The ranges Cut removes without a selection: whole lines, with their own line breaks. */
+  const lineRanges = (model: editor.ITextModel, selections: monaco.Selection[]) => {
+    const lines = [...new Set(selections.map((selection) => selection.positionLineNumber))].sort(
+      (a, b) => a - b
+    );
+    return lines.map((line) => {
+      const last = model.getLineCount();
+      if (line < last) return new monaco.Range(line, 1, line + 1, 1);
+      if (line > 1) {
+        return new monaco.Range(
+          line - 1,
+          model.getLineMaxColumn(line - 1),
+          line,
+          model.getLineMaxColumn(line)
+        );
+      }
+      return new monaco.Range(1, 1, 1, model.getLineMaxColumn(1));
+    });
+  };
+
+  const runMenu = (action: "cut" | "copy" | "paste" | "selectAll") => {
+    const instance = instanceRef.current;
+    if (!instance) return;
+    setMenu(null);
+    const editable = !tabRef.current.locked;
+    if (action === "copy") {
+      const text = selectionText();
+      if (text !== null) void writeText(text).catch(() => {});
+      instance.focus();
+      return;
+    }
+    if (action === "cut") {
+      if (!editable) return;
+      const text = selectionText() ?? "";
+      void (async () => {
+        // A failed clipboard write must leave the text in the document: cutting is a move, and
+        // moving something to nowhere loses it.
+        const copied = text.length === 0 ? true : await writeText(text).then(() => true).catch(() => false);
+        if (!copied) return;
+        const model = instance.getModel();
+        if (!model) return;
+        const selections = instance.getSelections() ?? [];
+        const filled = selections.filter((selection) => !selection.isEmpty());
+        const ranges = filled.length > 0 ? filled : lineRanges(model, selections);
+        instance.executeEdits(
+          "cut",
+          ranges.map((range) => ({ range, text: "", forceMoveMarkers: true }))
+        );
+        instance.focus();
+      })();
+      return;
+    }
+    if (action === "paste") {
+      if (!editable) return;
+      instance.focus();
+      // The command is redirected to the Tauri clipboard in `lib/editorMenu.ts`.
+      instance.trigger("editorMenu", "editor.action.clipboardPasteAction", null);
+      return;
+    }
+    instance.focus();
+    instance.trigger("editorMenu", "editor.action.selectAll", null);
+  };
+
+  const openMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
+    // A right-click on the open menu is its own business; reopening it there would move it.
+    if ((event.target as HTMLElement).closest(".editor-menu")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const instance = instanceRef.current;
+    if (!instance) return;
+    // A right-click outside the selection puts the caret where the pointer is, which is what the
+    // menu's Copy/Cut then act on. Inside a selection the selection is kept, so it can be copied.
+    const target = instance.getTargetAtClientPoint(event.clientX, event.clientY);
+    const position = target?.position;
+    if (position) {
+      const selections = instance.getSelections() ?? [];
+      if (!selections.some((selection) => selection.containsPosition(position))) {
+        instance.setPosition(position);
+      }
+    }
+    setMenu({ x: event.clientX, y: event.clientY });
+  };
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("wheel", close, { passive: true });
+    window.addEventListener("blur", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("wheel", close);
+      window.removeEventListener("blur", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menu]);
+
   return (
-    <MonacoEditor
-      path={modelUri(tab.path)}
-      defaultValue={tab.initialValue ?? tab.original}
-      language={tab.language}
-      theme={theme === "light" ? "vs" : "vs-dark"}
-      loading={<div className="editor-empty">{t("app.loading")}</div>}
-      onChange={(value) => value !== undefined && onChange(value)}
-      onMount={handleMount}
-      options={{
-        fontSize,
-        minimap: { enabled: minimap },
-        automaticLayout: true,
-        // A locked encrypted file is read-only rather than merely covered: text decrypted
-        // earlier in the session stays on screen and stays readable, but edits typed after
-        // the key was dropped could neither be saved nor drafted, so accepting them would be
-        // accepting work this app cannot keep.
-        readOnly: !!tab.locked,
-        domReadOnly: !!tab.locked,
-        // On, and it is the app's only right-click menu for the text: the entries are Monaco's
-        // own, with "Select All" and a working "Paste" added in `src/lib/editorMenu.ts`. Said out
-        // loud because the default is `true` anyway, and a reader who finds no menu here would
-        // otherwise look for the code that turned it off.
-        contextmenu: true,
-        tabSize,
-        insertSpaces,
-        // On by default so a file keeps the indentation style it was written with; the
-        // two settings above then act as the fallback for files it cannot guess about.
-        detectIndentation,
-        // When on, the document scrolls past its end, so the last line can sit above the
-        // bottom edge instead of being glued to it.
-        scrollBeyondLastLine,
-        fontFamily: 'Consolas, "Cascadia Mono", "Courier New", monospace',
-        renderWhitespace,
-        wordWrap: wordWrap ? "on" : "off",
-        // Keeps the enclosing scope pinned while scrolling a long file.
-        stickyScroll: { enabled: stickyScroll },
-      }}
-    />
+    <div className="editor-frame" onContextMenuCapture={openMenu}>
+      <MonacoEditor
+        path={modelUri(tab.path)}
+        defaultValue={tab.initialValue ?? tab.original}
+        language={tab.language}
+        theme={theme === "light" ? "vs" : "vs-dark"}
+        loading={<div className="editor-empty">{t("app.loading")}</div>}
+        onChange={(value) => value !== undefined && onChange(value)}
+        onMount={handleMount}
+        options={{
+          fontSize,
+          minimap: { enabled: minimap },
+          automaticLayout: true,
+          // A locked encrypted file is read-only rather than merely covered: text decrypted
+          // earlier in the session stays on screen and stays readable, but edits typed after
+          // the key was dropped could neither be saved nor drafted, so accepting them would be
+          // accepting work this app cannot keep.
+          readOnly: !!tab.locked,
+          domReadOnly: !!tab.locked,
+          // The app draws its own menu (below): Monaco's has no "copy the current line" and
+          // builds its labels when the bundle loads, so they cannot follow a language switch.
+          // Paste is still Monaco's command, redirected to the Tauri clipboard in
+          // `src/lib/editorMenu.ts`.
+          contextmenu: false,
+          tabSize,
+          insertSpaces,
+          // On by default so a file keeps the indentation style it was written with; the
+          // two settings above then act as the fallback for files it cannot guess about.
+          detectIndentation,
+          // When on, the document scrolls past its end, so the last line can sit above the
+          // bottom edge instead of being glued to it.
+          scrollBeyondLastLine,
+          fontFamily: 'Consolas, "Cascadia Mono", "Courier New", monospace',
+          renderWhitespace,
+          wordWrap: wordWrap ? "on" : "off",
+          // Keeps the enclosing scope pinned while scrolling a long file.
+          stickyScroll: { enabled: stickyScroll },
+        }}
+      />
+
+      {menu && (
+        <div
+          className="ctx-menu editor-menu"
+          ref={menuRef}
+          style={{ display: "block", left: menuAt.left, top: menuAt.top }}
+          onMouseDown={(event) => event.stopPropagation()}
+          onContextMenu={(event) => event.stopPropagation()}
+        >
+          {!tab.locked && (
+            <div className="ctx-item" onClick={() => runMenu("cut")}>
+              {t("editor.cut")}
+            </div>
+          )}
+          <div className="ctx-item" onClick={() => runMenu("copy")}>
+            {t("editor.copy")}
+          </div>
+          {!tab.locked && (
+            <div className="ctx-item" onClick={() => runMenu("paste")}>
+              {t("editor.paste")}
+            </div>
+          )}
+          {!tab.locked && <div className="ws-sep" />}
+          <div className="ctx-item" onClick={() => runMenu("selectAll")}>
+            {t("editor.selectAll")}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }

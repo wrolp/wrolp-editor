@@ -2915,6 +2915,12 @@ body.resizing .editor-host {
   position: absolute;
   inset: 0;
 }
+/* The editor and its own right-click menu share one box: the menu is fixed-positioned, so this
+   only has to give Monaco the full height it had as a direct child of `.editor-host`. */
+.editor-frame {
+  position: relative;
+  height: 100%;
+}
 /* Lines that differ from what the file on disk holds, marked by `Editor.tsx`. Two colours because
    the two cases want different actions: added text can be kept as it is, changed text has lost
    something. The plain rgba is the fallback and `color-mix` the modern spelling of the same

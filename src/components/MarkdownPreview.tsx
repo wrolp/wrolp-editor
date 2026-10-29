@@ -6,12 +6,15 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
 } from "react";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { convertFileSrc } from "@tauri-apps/api/core";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import monaco from "../lib/monaco";
 import { t } from "../lib/i18n";
+import { useMenuPlacement } from "../hooks/useMenuPlacement";
 import { IconTreeChevron } from "./icons";
 import { api, errorMessage, openUrl } from "../lib/tauri";
 
@@ -65,6 +68,20 @@ export default function MarkdownPreview({
 }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  /**
+   * The preview's own right-click menu. The pane is read-only, so it offers Copy (the selection,
+   * or the block under the pointer), Copy code, Copy link and Select All — not Cut or Paste.
+   */
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    selection: string;
+    block: string;
+    code: string | null;
+    link: string | null;
+  } | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuAt = useMenuPlacement(menu, menuRef);
   /**
    * Bumped whenever the body node turns out to be a fresh one, which is what makes the two
    * injection passes below run for it rather than for the node they filled last time.
@@ -505,6 +522,74 @@ export default function MarkdownPreview({
     if (max > 0) onScrollRatio(el.scrollTop / max);
   };
 
+  const openPreviewMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const pane = scrollRef.current;
+    if (!pane) return;
+    const target = event.target as Element;
+    const selection = window.getSelection();
+    const selected =
+      selection && pane.contains(selection.anchorNode) ? selection.toString() : "";
+    const code = target.closest("pre")?.textContent ?? null;
+    const link = target.closest("a[href]")?.getAttribute("href") ?? null;
+    // The fallback is the block the pointer is in, so Copy works over a paragraph or a table
+    // cell without asking the user to select it first.
+    const block =
+      target.closest("p, li, blockquote, h1, h2, h3, h4, h5, h6, td, th")?.textContent ??
+      bodyRef.current?.innerText ??
+      "";
+    setMenu({
+      x: event.clientX,
+      y: event.clientY,
+      selection: selected,
+      block: block.trim(),
+      code,
+      link,
+    });
+  };
+
+  const runPreviewMenu = (action: "copy" | "code" | "link" | "selectAll") => {
+    const current = menu;
+    setMenu(null);
+    if (!current) return;
+    if (action === "selectAll") {
+      const body = bodyRef.current;
+      if (!body) return;
+      const range = document.createRange();
+      range.selectNodeContents(body);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      return;
+    }
+    const text =
+      action === "copy"
+        ? current.selection || current.block
+        : action === "code"
+          ? current.code ?? ""
+          : current.link ?? "";
+    if (text) void writeText(text).catch(() => {});
+  };
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("wheel", close, { passive: true });
+    window.addEventListener("blur", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("wheel", close);
+      window.removeEventListener("blur", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menu]);
+
   // A path outside the asset scope renders as a broken image icon. React cannot attach
   // handlers to `dangerouslySetInnerHTML` content and `error` does not bubble, so the
   // only way to notice is a capture-phase listener on the container.
@@ -669,10 +754,44 @@ export default function MarkdownPreview({
   }, []);
 
   const pane = (
-    <div className="md-preview" data-md-width={width} ref={scrollRef} onScroll={onScroll}>
+    <div
+      className="md-preview"
+      data-md-width={width}
+      ref={scrollRef}
+      onScroll={onScroll}
+      onContextMenu={openPreviewMenu}
+    >
       {/* Sanitized in `sanitize` below; `path` is rendered as text, never interpolated. */}
       <div className="md-body" ref={attachBody} dangerouslySetInnerHTML={{ __html: html }} />
       {beyondEnd && <div className="md-tail" />}
+
+      {menu && (
+        <div
+          className="ctx-menu"
+          ref={menuRef}
+          style={{ display: "block", left: menuAt.left, top: menuAt.top }}
+          onMouseDown={(event) => event.stopPropagation()}
+          onContextMenu={(event) => event.stopPropagation()}
+        >
+          <div className="ctx-item" onClick={() => runPreviewMenu("copy")}>
+            {t("editor.copy")}
+          </div>
+          {menu.code !== null && (
+            <div className="ctx-item" onClick={() => runPreviewMenu("code")}>
+              {t("preview.copyCode")}
+            </div>
+          )}
+          {menu.link !== null && (
+            <div className="ctx-item" onClick={() => runPreviewMenu("link")}>
+              {t("preview.copyLink")}
+            </div>
+          )}
+          <div className="ws-sep" />
+          <div className="ctx-item" onClick={() => runPreviewMenu("selectAll")}>
+            {t("editor.selectAll")}
+          </div>
+        </div>
+      )}
     </div>
   );
 

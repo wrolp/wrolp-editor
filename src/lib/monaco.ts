@@ -42,9 +42,9 @@ window.MonacoEnvironment = {
 
 loader.config({ monaco });
 
-// The editor keeps Monaco's own right-click menu, and two of its parts have to be corrected:
-// imported for the side effect, and after `monaco-editor` above so the registrations here are the
-// ones that end up at the head of the command list.
+// The editor draws its own right-click menu; the one Monaco command it still relies on is Paste,
+// which has to read the Tauri clipboard. Imported for that side effect, after `monaco-editor`
+// above so this registration is the one at the head of the command list.
 import "./editorMenu";
 
 export default monaco;
