@@ -1965,10 +1965,12 @@ export default function App() {
   };
 
   const openGitDiff = useCallback(
-    async (file: GitStatusEntry, scope: "workdir" | "index") => {
-      if (!rootDir) return;
+    async (file: GitStatusEntry, scope: "workdir" | "index", repoRoot: string | null) => {
+      // The panel's selected repository, not the group folder: a repository in a subdirectory
+      // is a different repository, and discovering from the folder above it finds the wrong one.
+      if (!repoRoot) return;
       try {
-        const diff = await api.gitDiff(rootDir, file.abs, scope, file.oldPath);
+        const diff = await api.gitDiff(repoRoot, file.abs, scope, file.oldPath);
         const blocked = diffBlocked(diff);
         if (blocked) {
           toast(t(blocked));
@@ -2002,7 +2004,7 @@ export default function App() {
         toast(errorMessage(e));
       }
     },
-    [rootDir, tabs, toast]
+    [tabs, toast]
   );
 
   const openGitMerge = useCallback(
@@ -2055,10 +2057,11 @@ export default function App() {
   );
 
   const openGitCommitDiff = useCallback(
-    async (commit: GitLogEntry, file: GitCommitFile) => {
-      if (!rootDir) return;
+    async (commit: GitLogEntry, file: GitCommitFile, repoRoot: string | null) => {
+      // Same repository as the one whose log listed this commit, not the folder above it.
+      if (!repoRoot) return;
       try {
-        const diff = await api.gitDiff(rootDir, file.abs, "commit", file.oldPath, commit.oid);
+        const diff = await api.gitDiff(repoRoot, file.abs, "commit", file.oldPath, commit.oid);
         const blocked = diffBlocked(diff);
         if (blocked) {
           toast(t(blocked));
@@ -2088,7 +2091,7 @@ export default function App() {
         toast(errorMessage(e));
       }
     },
-    [rootDir, tabs, toast]
+    [tabs, toast]
   );
   const menuMinimapOn = menuTab?.fileSettings.minimap ?? settings.minimap;
   const wordWrap = editorTab?.fileSettings.wordWrap ?? settings.wordWrap;
@@ -2336,8 +2339,10 @@ const defaultModeFor = useCallback(
               active={sidebarView === "git" && sidebarVisible}
               dirtyPaths={dirtyPaths}
               onOpenFile={(path) => void tabs.openPath(path)}
-              onDiff={(file, scope) => void openGitDiff(file, scope)}
-              onCommitFileDiff={(commit, file) => void openGitCommitDiff(commit, file)}
+              onDiff={(file, scope, root) => void openGitDiff(file, scope, root)}
+              onCommitFileDiff={(commit, file, root) =>
+                void openGitCommitDiff(commit, file, root)
+              }
               onMergeConflict={(file) => void openGitMerge(file)}
               onError={toast}
               onNotice={toast}

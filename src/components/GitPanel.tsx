@@ -43,8 +43,9 @@ interface Props {
   /** `pathKey` of open tabs holding unsaved edits: the disk text is not what the editor shows. */
   dirtyPaths: Set<string>;
   onOpenFile: (path: string) => void;
-  onDiff: (file: GitStatusEntry, scope: "workdir" | "index") => void;
-  onCommitFileDiff: (commit: GitLogEntry, file: GitCommitFile) => void;
+  /** `root` is the repository this panel is showing, not the group folder above it. */
+  onDiff: (file: GitStatusEntry, scope: "workdir" | "index", root: string | null) => void;
+  onCommitFileDiff: (commit: GitLogEntry, file: GitCommitFile, root: string | null) => void;
   /** Open the three-way merge editor for one conflicted path. */
   onMergeConflict: (file: GitStatusEntry) => void;
   onError: (message: string) => void;
@@ -805,7 +806,7 @@ export default function GitPanel({
                       key={`s:${file.path}`}
                       className="git-row"
                       title={file.path}
-                      onClick={() => onDiff(file, "index")}
+                      onClick={() => onDiff(file, "index", repoRoot)}
                     >
                       <span className={`git-badge ${badgeTone(letter)}`}>{letter}</span>
                       <span className="git-name">{name}</span>
@@ -866,7 +867,7 @@ export default function GitPanel({
                     key={`w:${file.path}`}
                     className="git-row"
                     title={file.path}
-                    onClick={() => onDiff(file, "workdir")}
+                    onClick={() => onDiff(file, "workdir", repoRoot)}
                   >
                     <span className={`git-badge ${badgeTone(letter)}`}>{letter}</span>
                     <span className="git-name">{name}</span>
@@ -1067,7 +1068,7 @@ export default function GitPanel({
                                 key={`${entry.oid}:${file.path}`}
                                 className="git-log-file"
                                 title={file.path}
-                                onClick={() => onCommitFileDiff(entry, file)}
+                                onClick={() => onCommitFileDiff(entry, file, repoRoot)}
                               >
                                 <span className={`git-badge ${badgeTone(file.status)}`}>
                                   {file.status}
