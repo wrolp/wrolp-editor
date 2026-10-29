@@ -375,9 +375,11 @@ export default function TabBar({
           title={
             tab.compare
               ? `${tab.compare.left.path}\n↔\n${tab.compare.right.path}`
-              : tab.isSettings
-                ? t("tab.settings")
-                : tab.path
+              : tab.commit
+                ? `${tab.commit.entry.oid}\n${tab.commit.entry.author}\n\n${tab.commit.entry.message.trimEnd()}`
+                : tab.isSettings
+                  ? t("tab.settings")
+                  : tab.path
           }
         >
           <TabIcon tab={tab} />

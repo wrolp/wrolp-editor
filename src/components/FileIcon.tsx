@@ -1,5 +1,5 @@
 import { fileIcon } from "../lib/path";
-import { IconCompare, IconImage, IconMerge, IconSettings } from "./icons";
+import { IconCommit, IconCompare, IconImage, IconMerge, IconSettings } from "./icons";
 import type { Tab } from "../lib/types";
 
 /**
@@ -29,6 +29,13 @@ export function TabIcon({ tab }: { tab: Tab }) {
     return (
       <span className="file-glyph icon-compare" title={tab.compare.left.path}>
         <IconCompare size={12} />
+      </span>
+    );
+  }
+  if (tab.commit) {
+    return (
+      <span className="file-glyph icon-commit" title={tab.commit.entry.oid}>
+        <IconCommit size={12} />
       </span>
     );
   }

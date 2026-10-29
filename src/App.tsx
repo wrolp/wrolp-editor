@@ -19,6 +19,7 @@ import Toast from "./components/Toast";
 import GroupChip from "./components/GroupChip";
 import GitPanel from "./components/GitPanel";
 import GitLocalSettingsDialog from "./components/GitLocalSettingsDialog";
+import CommitTabView from "./components/CommitTabView";
 import DraftRestoreSummary from "./components/DraftRestoreSummary";
 import ComparePickerDialog from "./components/ComparePickerDialog";
 import CloseConfirmDialog from "./components/CloseConfirmDialog";
@@ -1744,6 +1745,7 @@ export default function App() {
         tab.isSettings ||
         tab.compare ||
         tab.merge ||
+        tab.commit ||
         tab.isBinary ||
         tab.encrypted ||
         isLockedBlank(tab) ||
@@ -2131,13 +2133,15 @@ export default function App() {
    * Markdown and images share the pane; only what fills it differs.
    */
   const previewKind: PreviewKind = editorTab
-    ? isMarkdown(editorTab.path)
-      ? "markdown"
-      : isHtml(editorTab.path)
-        ? "html"
-        : isPreviewableImage(editorTab.path)
-          ? "image"
-          : null
+    ? editorTab.commit
+      ? null
+      : isMarkdown(editorTab.path)
+        ? "markdown"
+        : isHtml(editorTab.path)
+          ? "html"
+          : isPreviewableImage(editorTab.path)
+            ? "image"
+            : null
     : null;
 /**
    * The layout a file opens in when it has no stored choice of its own.
@@ -2169,13 +2173,15 @@ const defaultModeFor = useCallback(
   // A comparison is text and nothing else: it already has two panes of its own.
   const previewMode: PreviewMode = lockedToPicture
     ? "preview"
-    : editorTab?.compare || editorTab?.merge
+    : editorTab?.compare || editorTab?.merge || editorTab?.commit
       ? "text"
       : (editorTab && previewPref[editorTab.path]) ||
         (editorTab ? defaultModeFor(editorTab.path) : "text");
   const showEditor = previewMode !== "preview";
   const showMerge = !!editorTab?.merge;
-  const showPreview = previewMode !== "text" && !!editorTab && !showMerge;
+  /** A commit owns the pane like a comparison: read-only, with the editor behind it hidden. */
+  const showCommit = !!editorTab?.commit;
+  const showPreview = previewMode !== "text" && !!editorTab && !showMerge && !showCommit;
   /** A comparison owns the pane; the text editor is only hidden behind it. */
   const showDiff = !!editorTab?.compare;
   /**
@@ -2362,6 +2368,9 @@ const defaultModeFor = useCallback(
               onCommitFileDiff={(commit, file, root) =>
                 void openGitCommitDiff(commit, file, root)
               }
+              onOpenCommitTab={(entry, root) => {
+                if (root) void tabs.openCommitTab({ root, entry });
+              }}
               onMergeConflict={(file) => void openGitMerge(file)}
               onError={toast}
               onNotice={toast}
@@ -2412,7 +2421,7 @@ const defaultModeFor = useCallback(
               className="editor-host"
               style={{
                 display:
-                  showSettings || showGallery || !showEditor || showDiff || showMerge
+                  showSettings || showGallery || !showEditor || showDiff || showMerge || showCommit
                     ? "none"
                     : "block",
               }}
@@ -2479,6 +2488,22 @@ const defaultModeFor = useCallback(
                 detectIndentation={detectIndentation}
                 scrollBeyondLastLine={settings.scrollBeyondLastLine}
                 onStats={setDiffStats}
+              />
+            </div>
+          )}
+
+          {showCommit && editorTab?.commit && (
+            <div className="editor-host">
+              <CommitTabView
+                key={editorTab.id}
+                data={editorTab.commit}
+                fontSize={settings.fontSize}
+                renderWhitespace={renderWhitespaceMode}
+                wordWrap={wordWrap}
+                tabSize={tabSize}
+                insertSpaces={insertSpaces}
+                detectIndentation={detectIndentation}
+                scrollBeyondLastLine={settings.scrollBeyondLastLine}
               />
             </div>
           )}

@@ -23,6 +23,7 @@ import {
   isFileTab,
   isLockedBlank,
   sideKey,
+  type CommitTabData,
   type ComparePair,
   type CompareRef,
   type CompareSide,
@@ -1355,6 +1356,43 @@ export function useEditorTabs({
     [activate]
   );
 
+  /**
+   * Open one commit's changed files as a read-only tab. The repository root and oid are its
+   * identity: asking for the same commit again activates the tab that is already open rather
+   * than stacking a second view of the same immutable commit.
+   */
+  const openCommitTab = useCallback(
+    async (data: CommitTabData) => {
+      const existing = tabsRef.current.find(
+        (tab) =>
+          !!tab.commit &&
+          pathKey(tab.commit.root) === pathKey(data.root) &&
+          tab.commit.entry.oid === data.entry.oid
+      );
+      if (existing) {
+        await activate(existing.id);
+        return;
+      }
+      const tab: Tab = {
+        id: nextId(),
+        // A key, never a path; `isFileTab` keeps it out of every file lookup.
+        path: `commit://${pathKey(data.root)}|${data.entry.oid}`,
+        name: `${data.entry.short} · ${data.entry.summary || t("git.noMessage")}`,
+        language: "plaintext",
+        original: "",
+        dirty: false,
+        commit: data,
+        encoding: "UTF-8",
+        bom: false,
+        bytes: null,
+        fileSettings: EMPTY_FILE_SETTINGS,
+      };
+      setTabs((prev) => [...prev, tab]);
+      await activate(tab.id);
+    },
+    [activate]
+  );
+
   /** Mark the merge tab dirty; the flag only drives the close confirmation. */
   const setMergeDirty = useCallback((id: number, dirty: boolean) => {
     setTabs((prev) =>
@@ -2557,6 +2595,7 @@ export function useEditorTabs({
     openSettings,
     openGallery,
     openMerge,
+    openCommitTab,
     setMergeDirty,
     setMergeResult,
     closeTab,

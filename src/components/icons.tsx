@@ -69,6 +69,17 @@ export function IconCompare({ size = 14 }: IconProps) {
   );
 }
 
+/** A commit: a dot on a history line. */
+export function IconCommit({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <line x1="12" y1="3" x2="12" y2="8" />
+      <circle cx="12" cy="12" r="3" />
+      <line x1="12" y1="16" x2="12" y2="21" />
+    </svg>
+  );
+}
+
 /**
  * A file's versions: the points one save left behind on a rail, newest at the top. Deliberately
  * not a clock — that shape already means "recently opened" in the sidebar next to it.

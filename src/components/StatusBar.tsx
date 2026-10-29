@@ -73,7 +73,9 @@ export default function StatusBar({
             ? t("tab.settings")
             : tab.merge
               ? tab.name
-              : comparing
+              : tab.commit
+                ? t("git.commitTab.status", { short: tab.commit.entry.short })
+                : comparing
                 ? t("cmp.label", { left: comparing.left.name, right: comparing.right.name })
                 : tab.path
           : t("status.noFile")}

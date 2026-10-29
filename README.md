@@ -416,6 +416,11 @@ private store per file and never touches the folders you edit.
   Explorer's context menu, a changed row's context menu, and *Local Git Settings* in the panel
   header; the dialog lists every entry, removes them one by one, and opens the exclude file. Assume
   unchanged is a promise: a checkout can overwrite those files.
+- **Commit diff tabs.** Hover a history row for the full commit message; right-click it and choose
+  *Open commit diff tab* to list every file the commit changed and show the selected file's diff
+  against its first parent. Binary, submodule, encrypted and oversized files say why instead of
+  showing an empty diff; opening the same commit in the same repository again reuses its tab, while
+  the same oid in another repository gets its own.
 - **Branches.** The branch button lists local and remote-tracking branches, creates one from the
   current commit, switches and deletes with confirmation — a branch whose commits are not merged
   anywhere asks a second, explicit question before it is deleted. Picking a remote-tracking branch

@@ -16,6 +16,8 @@ import type {
   GitStatusEntry,
 } from "../lib/tauri";
 import { api, errorMessage } from "../lib/tauri";
+import { badgeTone } from "../lib/gitStatus";
+import { useMenuPlacement } from "../hooks/useMenuPlacement";
 import { LOG_PAGE_CHOICES, type GitController } from "../hooks/useGit";
 import type { GitRepoRow } from "../hooks/useGitRepos";
 import { buildGraph } from "../lib/gitGraph";
@@ -25,6 +27,7 @@ import GraphCell from "./GitGraphRow";
 import {
   IconBranch,
   IconChevron,
+  IconCommit,
   IconEyeOff,
   IconFetch,
   IconFile,
@@ -68,6 +71,8 @@ interface Props {
   onNotice: (message: string) => void;
   /** Open the local Git settings dialog for one repository. */
   onOpenLocalSettings: (root: string) => void;
+  /** Open one commit's changed files as a new tab. */
+  onOpenCommitTab: (entry: GitLogEntry, root: string | null) => void;
 }
 
 type Scope = "workdir" | "index";
@@ -76,25 +81,6 @@ type Scope = "workdir" | "index";
 function badgeLetter(file: GitStatusEntry, scope: Scope): string {
   if (file.kind === "conflicted") return "U";
   return (scope === "index" ? file.index : file.workdir) ?? "?";
-}
-
-function badgeTone(letter: string): string {
-  switch (letter) {
-    case "A":
-    case "?":
-      return "add";
-    case "D":
-      return "del";
-    case "R":
-    case "C":
-      return "ren";
-    case "U":
-      return "conflict";
-    case "T":
-      return "type";
-    default:
-      return "mod";
-  }
 }
 
 function splitPath(path: string): { name: string; dir: string } {
@@ -147,6 +133,7 @@ export default function GitPanel({
   onError,
   onNotice,
   onOpenLocalSettings,
+  onOpenCommitTab,
 }: Props) {
   const [message, setMessage] = useState("");
   const [amend, setAmend] = useState(false);
@@ -179,11 +166,20 @@ export default function GitPanel({
   } | null>(null);
   const [rowLocal, setRowLocal] = useState<GitLocalPathState | null>(null);
   const rowMenuFor = useRef<string | null>(null);
+  /** The commit row whose own menu is open. */
+  const [commitMenu, setCommitMenu] = useState<{
+    entry: GitLogEntry;
+    x: number;
+    y: number;
+  } | null>(null);
+  const commitMenuRef = useRef<HTMLDivElement>(null);
+  const commitMenuAt = useMenuPlacement(commitMenu, commitMenuRef);
 
   // A different folder is a different repository; a half-typed message and a pending discard
   // question from the old one must not carry over.
   useEffect(() => {
     setMessage("");
+    setCommitMenu(null);
     setAmend(false);
     setAmendBase("");
     amendSeq.current += 1;
@@ -315,6 +311,24 @@ export default function GitPanel({
   const runRowAction = async (action: () => Promise<boolean>, done: string) => {
     if (await action()) onNotice(done);
   };
+
+  useEffect(() => {
+    if (!commitMenu) return;
+    const close = () => setCommitMenu(null);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("wheel", close, { passive: true });
+    window.addEventListener("blur", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("wheel", close);
+      window.removeEventListener("blur", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [commitMenu]);
 
   const openCommit = async (entry: GitLogEntry) => {
     if (commitOpen === entry.oid) {
@@ -1140,8 +1154,17 @@ export default function GitPanel({
                     <div key={entry.oid}>
                       <div
                         className={`git-log-row${open ? " open" : ""}`}
-                        title={`${entry.oid}\n${entry.author} · ${formatWhen(entry.time)}`}
+                        title={`${entry.oid}\n${entry.author} · ${formatWhen(entry.time)}${
+                          entry.message.trimEnd() ? `\n\n${entry.message.trimEnd()}` : ""
+                        }`}
                         onClick={() => void openCommit(entry)}
+                        onContextMenu={(event) => {
+                          // Taking the event before the row's click handler is what keeps a
+                          // right-click from expanding or collapsing the commit as well.
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setCommitMenu({ entry, x: event.clientX, y: event.clientY });
+                        }}
                       >
                         {row && (
                           <GraphCell
@@ -1248,6 +1271,29 @@ export default function GitPanel({
         </>
       )}
         </>
+      )}
+
+      {commitMenu && (
+        <div
+          className="ctx-menu"
+          ref={commitMenuRef}
+          style={{ display: "block", left: commitMenuAt.left, top: commitMenuAt.top }}
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <div
+            className="ctx-item"
+            onClick={() => {
+              const entry = commitMenu.entry;
+              setCommitMenu(null);
+              onOpenCommitTab(entry, repoRoot);
+            }}
+          >
+            <span className="ctx-icon">
+              <IconCommit size={14} />
+            </span>
+            {t("git.log.openCommitTab")}
+          </div>
+        </div>
       )}
 
       {rowMenu && (

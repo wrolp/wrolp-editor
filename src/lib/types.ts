@@ -1,6 +1,6 @@
 import type { Monaco } from "@monaco-editor/loader";
 import type { editor } from "monaco-editor";
-import type { Draft, FileSettings } from "./tauri";
+import type { Draft, FileSettings, GitLogEntry } from "./tauri";
 
 export interface Tab {
   id: number;
@@ -46,6 +46,11 @@ export interface Tab {
     /** The picture the gallery was opened from, so "browse this folder" lands on it. */
     startPath?: string;
   };
+  /**
+   * A commit's changed files and their diffs, read-only. The tab keeps the repository root
+   * because the panel may switch to another repository while this one stays open.
+   */
+  commit?: CommitTabData;
   /**
    * Encoding the file on disk turned out to be, and whether it carried a BOM. A save
    * must write the same encoding back or a legacy file comes out mangled.
@@ -173,7 +178,14 @@ export interface GitMark {
  * skip them. Getting this wrong is silent — a comparison would try to save itself.
  */
 export function isFileTab(tab: Tab): boolean {
-  return !tab.isSettings && !tab.compare && !tab.gallery && !tab.merge;
+  return !tab.isSettings && !tab.compare && !tab.gallery && !tab.merge && !tab.commit;
+}
+
+/** The repository and log row a commit tab was opened from. */
+export interface CommitTabData {
+  /** Work tree the commit belongs to; the tab keeps working when the panel switches away. */
+  root: string;
+  entry: GitLogEntry;
 }
 
 /**
