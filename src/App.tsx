@@ -325,6 +325,13 @@ type PreviewKind = "markdown" | "image" | "html" | null;
  * being so long that the next message arrives before the last one has gone.
  */
 const TOAST_MS = 4000;
+/**
+ * How long a toast stays after the pointer leaves it. A message worth hovering is worth a
+ * moment to finish reading, and moving the hand away should not be the thing that closes it.
+ * Separate from `TOAST_MS` because an auto-dismiss and a post-hover grace are different
+ * decisions.
+ */
+const TOAST_LINGER_MS = 2500;
 
 export default function App() {
   const [toastState, setToastState] = useState({ message: "", visible: false });
@@ -332,15 +339,23 @@ export default function App() {
   /** Whether a pointer is resting on the toast, which is what stops the countdown. */
   const toastHeld = useRef(false);
   const hideToast = useCallback(() => setToastState((s) => ({ ...s, visible: false })), []);
+  /** Replace whatever countdown is running with one that hides the toast after `ms`. */
+  const scheduleHide = useCallback(
+    (ms: number) => {
+      window.clearTimeout(toastTimer.current);
+      toastTimer.current = window.setTimeout(hideToast, ms);
+    },
+    [hideToast]
+  );
   const toast = useCallback(
     (message: string) => {
       setToastState({ message, visible: true });
       window.clearTimeout(toastTimer.current);
       // A message that lands while the pointer is still on the previous one is shown held too,
       // so the toast never drops out from under the hand reading it.
-      if (!toastHeld.current) toastTimer.current = window.setTimeout(hideToast, TOAST_MS);
+      if (!toastHeld.current) scheduleHide(TOAST_MS);
     },
-    [hideToast]
+    [scheduleHide]
   );
   const holdToast = useCallback(() => {
     toastHeld.current = true;
@@ -348,8 +363,8 @@ export default function App() {
   }, []);
   const releaseToast = useCallback(() => {
     toastHeld.current = false;
-    hideToast();
-  }, [hideToast]);
+    scheduleHide(TOAST_LINGER_MS);
+  }, [scheduleHide]);
 
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
   // `system` is resolved here rather than in the backend: the OS preference can change while
