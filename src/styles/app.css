@@ -3606,7 +3606,11 @@ body.resizing .editor-host {
   overflow-y: auto;
 }
 .settings-cat {
-  max-width: 760px;
+  /* Wide enough that a settings row and its explanation share a line and the backup/credential
+     tables do not wrap every path; the column still centres and stays readable on a large
+     monitor instead of stretching a paragraph across the whole window. */
+  width: 100%;
+  max-width: 1080px;
   margin: 0 auto;
   padding: 28px 32px;
 }
