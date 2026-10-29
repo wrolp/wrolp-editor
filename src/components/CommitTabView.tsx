@@ -3,12 +3,12 @@ import { formatWhen, t, translateError } from "../lib/i18n";
 import { basename, langOf } from "../lib/path";
 import { api, errorMessage, type GitCommitFile, type GitDiffText } from "../lib/tauri";
 import { badgeTone } from "../lib/gitStatus";
+import { foldPair, type FoldChange } from "../lib/diffFold";
 import type { CommitTabData, ComparePair } from "../lib/types";
 import DiffView from "./DiffView";
-import { IconChevron } from "./icons";
+import { IconChevron, IconFold } from "./icons";
 
-interface Props {
-  data: CommitTabData;
+interface ViewProps {
   fontSize: number;
   renderWhitespace: "none" | "boundary" | "selection" | "all" | "trailing";
   wordWrap: boolean;
@@ -16,6 +16,10 @@ interface Props {
   insertSpaces: boolean;
   detectIndentation: boolean;
   scrollBeyondLastLine: boolean;
+}
+
+interface Props extends ViewProps {
+  data: CommitTabData;
 }
 
 /** The i18n key for a diff that cannot be shown as text, or null when it can. */
@@ -31,11 +35,10 @@ function blockedKey(diff: GitDiffText): string | null {
 const ignoreStats = () => {};
 
 /**
- * One commit's changed files, with the diff of the selected file beside the list.
- *
- * The commit is immutable, so the list and each file's diff are read once and cached for the
- * life of the tab. A repository's file count can be large, which is why only one diff editor is
- * ever mounted: the list carries "all files", the pane carries "this one".
+ * One commit's changed files, folded by file. A file's header is expanded on demand, and its diff
+ * is read the first time that happens, then cached: the commit is immutable, and a commit that
+ * changed hundreds of files never pays for the diffs nobody opened. Inside an open file the diff
+ * can be folded down to its changed lines.
  */
 export default function CommitTabView({
   data,
@@ -50,29 +53,40 @@ export default function CommitTabView({
   const [files, setFiles] = useState<GitCommitFile[] | null>(null);
   const [filesError, setFilesError] = useState<string | null>(null);
   const [filesRev, setFilesRev] = useState(0);
-  const [selected, setSelected] = useState<string | null>(null);
   const [diffs, setDiffs] = useState<Map<string, GitDiffText | string>>(new Map());
   const diffsRef = useRef(diffs);
   diffsRef.current = diffs;
-  const [diffLoading, setDiffLoading] = useState(false);
-  const diffSeq = useRef(0);
+  const filesRef = useRef<GitCommitFile[] | null>(null);
+  filesRef.current = files;
+  const loadingRef = useRef(new Set<string>());
+  /** The file sections that are open; a commit starts folded so the list stays a list. */
+  const [open, setOpen] = useState<Set<string>>(new Set());
   const [messageOpen, setMessageOpen] = useState(false);
+  /** The visible height of the file list, so a diff never grows taller than the editor area. */
+  const [listHeight, setListHeight] = useState(0);
+  const listObserver = useRef<ResizeObserver | null>(null);
+  const attachList = useCallback((el: HTMLDivElement | null) => {
+    listObserver.current?.disconnect();
+    if (el) {
+      const measure = () => setListHeight(el.clientHeight);
+      measure();
+      listObserver.current = new ResizeObserver(measure);
+      listObserver.current.observe(el);
+    }
+  }, []);
 
   useEffect(() => {
     let live = true;
     setFiles(null);
     setFilesError(null);
-    setSelected(null);
     setDiffs(new Map());
-    setDiffLoading(false);
+    setOpen(new Set());
     setMessageOpen(false);
-    diffSeq.current += 1;
+    loadingRef.current.clear();
     api
       .gitCommitFiles(data.root, data.entry.oid)
       .then((list) => {
-        if (!live) return;
-        setFiles(list);
-        setSelected(list[0]?.path ?? null);
+        if (live) setFiles(list);
       })
       .catch((e) => {
         if (live) setFilesError(errorMessage(e));
@@ -82,58 +96,33 @@ export default function CommitTabView({
     };
   }, [data.root, data.entry.oid, filesRev]);
 
-  useEffect(() => {
-    const seq = ++diffSeq.current;
-    if (!selected) return;
-    if (diffsRef.current.has(selected)) {
-      setDiffLoading(false);
-      return;
-    }
-    const file = files?.find((entry) => entry.path === selected);
-    if (!file) return;
-    setDiffLoading(true);
-    api
-      .gitDiff(data.root, file.abs, "commit", file.oldPath, data.entry.oid)
-      .then((diff) => {
-        if (seq !== diffSeq.current) return;
-        setDiffs((prev) => new Map(prev).set(selected, diff));
-      })
-      .catch((e) => {
-        if (seq !== diffSeq.current) return;
-        setDiffs((prev) => new Map(prev).set(selected, errorMessage(e)));
-      })
-      .finally(() => {
-        if (seq === diffSeq.current) setDiffLoading(false);
-      });
-  }, [selected, files, data.root, data.entry.oid]);
+  const loadDiff = useCallback(
+    (path: string) => {
+      const file = filesRef.current?.find((entry) => entry.path === path);
+      if (!file) return;
+      if (diffsRef.current.has(path) || loadingRef.current.has(path)) return;
+      loadingRef.current.add(path);
+      api
+        .gitDiff(data.root, file.abs, "commit", file.oldPath, data.entry.oid)
+        .then((diff) => setDiffs((prev) => new Map(prev).set(path, diff)))
+        .catch((e) => setDiffs((prev) => new Map(prev).set(path, errorMessage(e))))
+        .finally(() => {
+          loadingRef.current.delete(path);
+        });
+    },
+    [data.root, data.entry.oid]
+  );
 
-  const diff = selected ? diffs.get(selected) : undefined;
-  const blocked = diff && typeof diff !== "string" ? blockedKey(diff) : null;
-
-  const pair = useMemo<ComparePair | null>(() => {
-    if (!selected || !diff || typeof diff === "string") return null;
-    if (blockedKey(diff)) return null;
-    const name = basename(selected);
-    const language = langOf(selected);
-    return {
-      left: {
-        path: diff.left.path,
-        name: `${name} · ${t("git.sideParent")}`,
-        content: diff.left.text,
-        language,
-        kind: "git",
-        oid: `${data.entry.oid}:l:${diff.left.oid ?? "missing"}`,
-      },
-      right: {
-        path: diff.right.path,
-        name: `${name} · ${data.entry.short}`,
-        content: diff.right.text,
-        language,
-        kind: "git",
-        oid: `${data.entry.oid}:r:${diff.right.oid ?? "missing"}`,
-      },
-    };
-  }, [diff, selected, data.entry.oid, data.entry.short]);
+  const toggle = (path: string) => {
+    const willOpen = !open.has(path);
+    setOpen((prev) => {
+      const next = new Set(prev);
+      if (willOpen) next.add(path);
+      else next.delete(path);
+      return next;
+    });
+    if (willOpen) loadDiff(path);
+  };
 
   const reload = useCallback(() => setFilesRev((value) => value + 1), []);
 
@@ -169,74 +158,208 @@ export default function CommitTabView({
       </button>
       {messageOpen && <pre className="commit-message">{data.entry.message.trimEnd()}</pre>}
 
-      <div className="commit-body">
-        <div className="commit-files">
-          <div className="commit-files-head">
-            {t("git.commitTab.files", { n: files?.length ?? 0 })}
+      {filesError ? (
+        <div className="commit-placeholder">
+          <span>{translateError(filesError)}</span>
+          <button className="btn small" onClick={reload}>
+            {t("git.local.retry")}
+          </button>
+        </div>
+      ) : files === null ? (
+        <div className="commit-placeholder">{t("git.loading")}</div>
+      ) : files.length === 0 ? (
+        <div className="commit-placeholder">{t("git.commitTab.empty")}</div>
+      ) : (
+        <>
+          <div className="commit-toolbar">
+            <span>{t("git.commitTab.files", { n: files.length })}</span>
           </div>
-          {files === null ? (
-            filesError ? (
-              <div className="commit-placeholder">
-                <span>{translateError(filesError)}</span>
-                <button className="btn small" onClick={reload}>
-                  {t("git.local.retry")}
-                </button>
-              </div>
-            ) : (
-              <div className="commit-placeholder">{t("git.loading")}</div>
-            )
-          ) : files.length === 0 ? (
-            <div className="commit-placeholder">{t("git.commitTab.empty")}</div>
-          ) : (
-            files.map((file) => (
-              <div className="commit-file-block" key={file.path}>
-                <button
-                  className={`commit-file${selected === file.path ? " active" : ""}`}
-                  title={file.path}
-                  onClick={() => setSelected(file.path)}
-                >
-                  <span className={`git-badge ${badgeTone(file.status)}`}>{file.status}</span>
-                  <span className="commit-file-name">{file.path}</span>
-                </button>
-                {file.oldPath && (
-                  <div className="commit-file-old" title={file.oldPath}>
-                    {file.oldPath} →
-                  </div>
-                )}
-              </div>
-            ))
-          )}
-          {files && files.length >= 5000 && (
-            <div className="commit-note">{t("git.commitTab.truncated")}</div>
-          )}
-        </div>
+          <div className="commit-list" ref={attachList}>
+            {files.map((file) => {
+              const isOpen = open.has(file.path);
+              const diff = diffs.get(file.path);
+              return (
+                <div className="commit-file-section" key={file.path}>
+                  <button
+                    className="commit-file-head"
+                    onClick={() => toggle(file.path)}
+                    aria-expanded={isOpen}
+                    title={file.path}
+                  >
+                    <span className={`commit-chev${isOpen ? "" : " rot"}`}>
+                      <IconChevron size={11} />
+                    </span>
+                    <span className={`git-badge ${badgeTone(file.status)}`}>{file.status}</span>
+                    <span className="commit-file-name">{file.path}</span>
+                    {file.oldPath && <span className="commit-file-old">{file.oldPath} →</span>}
+                  </button>
+                  {isOpen &&
+                    (diff === undefined ? (
+                      <div className="commit-file-diff">
+                        <div className="commit-placeholder">{t("git.loading")}</div>
+                      </div>
+                    ) : (
+                      <CommitFileDiff
+                        file={file}
+                        diff={diff}
+                        oid={data.entry.oid}
+                        short={data.entry.short}
+                        maxHeight={listHeight}
+                        fontSize={fontSize}
+                        renderWhitespace={renderWhitespace}
+                        wordWrap={wordWrap}
+                        tabSize={tabSize}
+                        insertSpaces={insertSpaces}
+                        detectIndentation={detectIndentation}
+                        scrollBeyondLastLine={scrollBeyondLastLine}
+                      />
+                    ))}
+                </div>
+              );
+            })}
+            {files.length >= 5000 && (
+              <div className="commit-note">{t("git.commitTab.truncated")}</div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
-        <div className="commit-diff">
-          {!selected ? (
-            <div className="commit-placeholder">{t("git.commitTab.pick")}</div>
-          ) : diffLoading && !diff ? (
-            <div className="commit-placeholder">{t("git.loading")}</div>
-          ) : typeof diff === "string" ? (
-            <div className="commit-placeholder">{translateError(diff)}</div>
-          ) : blocked ? (
-            <div className="commit-placeholder">{t(blocked)}</div>
-          ) : pair ? (
-            <DiffView
-              key={selected}
-              pair={pair}
-              fontSize={fontSize}
-              renderWhitespace={renderWhitespace}
-              wordWrap={wordWrap}
-              tabSize={tabSize}
-              insertSpaces={insertSpaces}
-              detectIndentation={detectIndentation}
-              scrollBeyondLastLine={scrollBeyondLastLine}
-              onStats={ignoreStats}
-            />
-          ) : (
-            <div className="commit-placeholder">{t("git.loading")}</div>
-          )}
-        </div>
+interface FileDiffProps extends ViewProps {
+  file: GitCommitFile;
+  /** `GitDiffText` for a normal file, or an error string when the read failed. */
+  diff: GitDiffText | string;
+  oid: string;
+  short: string;
+  /** The editor area's visible height; a diff must not grow past it. */
+  maxHeight: number;
+}
+
+/**
+ * One file's diff, with a fold that keeps only the changed lines. The fold cuts the whole texts by
+ * the ranges Monaco computed for those same whole texts, which is why `changes` is collected only
+ * while the fold is off.
+ */
+function CommitFileDiff({
+  file,
+  diff,
+  oid,
+  short,
+  maxHeight,
+  fontSize,
+  renderWhitespace,
+  wordWrap,
+  tabSize,
+  insertSpaces,
+  detectIndentation,
+  scrollBeyondLastLine,
+}: FileDiffProps) {
+  // Folded by default: "show only changes" is the view people open this tab for. Until the
+  // diff's changed ranges arrive the whole text is shown and the ranges are collected, then the
+  // fold applies on its own.
+  const [fold, setFold] = useState(true);
+  const [changes, setChanges] = useState<readonly FoldChange[] | null>(null);
+
+  const full = useMemo(
+    () =>
+      typeof diff === "string"
+        ? { left: "", right: "" }
+        : { left: diff.left.text, right: diff.right.text },
+    [diff]
+  );
+  // The editor reports an empty change list on mount, before the diff is computed; that empty
+  // list must not count as "nothing to fold", or the first real update would be discarded and
+  // the default fold would never apply.
+  const ready = !!changes && changes.length > 0;
+  const folded = useMemo(
+    () => (fold && ready && changes ? foldPair(full.left, full.right, changes) : null),
+    [fold, ready, changes, full]
+  );
+  const source = useMemo(() => folded ?? full, [folded, full]);
+  // The pane is sized to what is actually on screen, so a one-line change is not shown in a
+  // fixed box and a long file scrolls on its own.
+  const hostHeight = useMemo(() => {
+    const count = (text: string) => (text.length === 0 ? 0 : text.split("\n").length);
+    const lines = Math.max(count(source.left), count(source.right), 1);
+    const linePx = Math.max(1, Math.round(fontSize * 1.5));
+    // Leave a little of the list visible below the diff, so the next file's header peeks out
+    // instead of the pane filling the whole editor area.
+    const cap = maxHeight > 0 ? Math.max(160, maxHeight - 96) : 900;
+    return Math.min(cap, Math.max(160, lines * linePx + 30));
+  }, [source, fontSize, maxHeight]);
+  const pair = useMemo<ComparePair | null>(() => {
+    if (typeof diff === "string") return null;
+    const name = basename(file.path);
+    const language = langOf(file.path);
+    return {
+      left: {
+        path: diff.left.path,
+        name: `${name} · ${t("git.sideParent")}`,
+        content: source.left,
+        language,
+        kind: "git",
+        oid: `${oid}:l:${diff.left.oid ?? "missing"}`,
+      },
+      right: {
+        path: diff.right.path,
+        name: `${name} · ${short}`,
+        content: source.right,
+        language,
+        kind: "git",
+        oid: `${oid}:r:${diff.right.oid ?? "missing"}`,
+      },
+    };
+  }, [diff, source, file.path, oid, short]);
+
+  if (typeof diff === "string") {
+    return <div className="commit-placeholder">{translateError(diff)}</div>;
+  }
+  const blocked = blockedKey(diff);
+  if (blocked) {
+    return <div className="commit-placeholder">{t(blocked)}</div>;
+  }
+  if (!pair) {
+    return <div className="commit-placeholder">{t("git.loading")}</div>;
+  }
+
+  return (
+    <div className="commit-file-diff">
+      <div className="commit-file-diff-tools">
+        <button
+          className={`btn small icon-btn${fold ? " on" : ""}`}
+          onClick={() => setFold(!fold)}
+          disabled={!ready}
+          title={t("ver.fold")}
+          aria-label={t("ver.fold")}
+          aria-pressed={fold}
+        >
+          <IconFold size={14} />
+        </button>
+        {folded?.folded && (
+          <span className="ver-hidden">
+            {t("ver.hiddenLines", { left: folded.hiddenLeft, right: folded.hiddenRight })}
+          </span>
+        )}
+        {fold && ready && !folded?.folded && (
+          <span className="ver-hidden">{t("ver.nothingHidden")}</span>
+        )}
+      </div>
+      <div className="commit-file-diff-host" style={{ height: hostHeight }}>
+        <DiffView
+          key={file.path}
+          pair={pair}
+          fontSize={fontSize}
+          renderWhitespace={renderWhitespace}
+          wordWrap={wordWrap}
+          tabSize={tabSize}
+          insertSpaces={insertSpaces}
+          detectIndentation={detectIndentation}
+          scrollBeyondLastLine={scrollBeyondLastLine}
+          onStats={ignoreStats}
+          onChanges={fold && ready ? undefined : setChanges}
+        />
       </div>
     </div>
   );

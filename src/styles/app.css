@@ -3120,46 +3120,44 @@ body.resizing .editor-host {
   white-space: pre-wrap;
   word-break: break-word;
 }
-.commit-body {
-  display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
-  flex: 1 1 auto;
-  min-height: 0;
-}
-.commit-files {
-  min-height: 0;
-  overflow-y: auto;
-  border-right: 1px solid var(--border);
-  background: var(--surface);
-}
-.commit-files-head {
-  position: sticky;
-  top: 0;
-  padding: 5px 10px;
+.commit-toolbar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 12px;
   border-bottom: 1px solid var(--border);
-  background: var(--surface);
   color: var(--muted);
   font-size: 11px;
 }
-.commit-file {
+.commit-toolbar-actions {
+  display: flex;
+  gap: 6px;
+}
+.commit-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.commit-file-section {
+  border-bottom: 1px solid var(--border);
+}
+.commit-file-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 7px;
   width: 100%;
-  padding: 4px 10px;
+  padding: 5px 12px;
   border: 0;
-  background: transparent;
+  background: var(--surface);
   color: var(--text);
   font-size: 12px;
   text-align: left;
   cursor: pointer;
 }
-.commit-file:hover {
+.commit-file-head:hover {
   background: var(--surface-hover);
-}
-.commit-file.active {
-  background: var(--surface-active);
-  color: var(--text-strong);
 }
 .commit-file-name {
   flex: 1 1 auto;
@@ -3169,31 +3167,49 @@ body.resizing .editor-host {
   white-space: nowrap;
 }
 .commit-file-old {
-  padding: 0 10px 4px 28px;
+  flex: 0 0 auto;
+  max-width: 40%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--muted);
   font-size: 10.5px;
 }
+.commit-file-diff {
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+.commit-file-diff-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.commit-file-diff-host {
+  /* Height is set inline from the content; this is only the floor for an empty diff. */
+  min-height: 160px;
+}
+/* Monaco's own scrollbar inside a capped diff is tinted to match the app's. */
+.commit-file-diff-host .monaco-editor .scrollbar.vertical .slider {
+  background: var(--scroll-thumb);
+}
+.commit-file-diff-host .monaco-editor .scrollbar.vertical .slider:hover {
+  background: var(--scroll-thumb-hover);
+}
 .commit-note {
-  padding: 6px 10px;
+  padding: 6px 12px;
   color: var(--muted);
   font-size: 11px;
 }
-.commit-diff {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  min-height: 0;
-}
 .commit-placeholder {
+  flex: 1 1 auto;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 10px;
-  height: 100%;
   padding: 24px;
   color: var(--muted);
   font-size: 12px;
@@ -4710,7 +4726,8 @@ body.resizing .editor-host {
 .draft-list,
 .md-toc,
 .md-preview,
-.md-body pre {
+.md-body pre,
+.commit-list {
   scrollbar-width: thin;
   scrollbar-color: var(--scroll-thumb) transparent;
 }
@@ -4723,7 +4740,8 @@ body.resizing .editor-host {
 .draft-list::-webkit-scrollbar,
 .md-toc::-webkit-scrollbar,
 .md-preview::-webkit-scrollbar,
-.md-body pre::-webkit-scrollbar {
+.md-body pre::-webkit-scrollbar,
+.commit-list::-webkit-scrollbar {
   width: var(--scroll-size);
   height: var(--scroll-size);
 }
@@ -4737,7 +4755,8 @@ body.resizing .editor-host {
 .md-toc::-webkit-scrollbar-track,
 .md-preview::-webkit-scrollbar-track,
 .md-body pre::-webkit-scrollbar-track,
-.md-body pre::-webkit-scrollbar-corner {
+.md-body pre::-webkit-scrollbar-corner,
+.commit-list::-webkit-scrollbar-track {
   background: transparent;
 }
 .sidebar::-webkit-scrollbar-thumb,
@@ -4749,7 +4768,8 @@ body.resizing .editor-host {
 .draft-list::-webkit-scrollbar-thumb,
 .md-toc::-webkit-scrollbar-thumb,
 .md-preview::-webkit-scrollbar-thumb,
-.md-body pre::-webkit-scrollbar-thumb {
+.md-body pre::-webkit-scrollbar-thumb,
+.commit-list::-webkit-scrollbar-thumb {
   background: var(--scroll-thumb);
   border: 2px solid transparent;
   background-clip: padding-box;
@@ -4766,7 +4786,8 @@ body.resizing .editor-host {
 .draft-list:hover::-webkit-scrollbar-thumb,
 .md-toc:hover::-webkit-scrollbar-thumb,
 .md-preview:hover::-webkit-scrollbar-thumb,
-.md-body pre:hover::-webkit-scrollbar-thumb {
+.md-body pre:hover::-webkit-scrollbar-thumb,
+.commit-list:hover::-webkit-scrollbar-thumb {
   background-color: var(--scroll-thumb-hover);
 }
 
