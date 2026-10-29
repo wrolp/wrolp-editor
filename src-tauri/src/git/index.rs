@@ -207,6 +207,7 @@ pub fn git_commit(
   commit_impl(&root, &message, amend, identity.as_ref(), &locks)
 }
 
+#[cfg(test)]
 pub(crate) fn commit(
   root: &str,
   message: &str,
@@ -216,6 +217,7 @@ pub(crate) fn commit(
   commit_impl(root, message, false, identity, locks)
 }
 
+#[cfg(test)]
 pub(crate) fn amend_commit(
   root: &str,
   message: &str,
