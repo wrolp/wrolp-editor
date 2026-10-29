@@ -384,7 +384,13 @@ pub(crate) fn push_core(
   let mut remote = repo.find_remote(&name).map_err(|e| fail("remote", e))?;
 
   let rejected: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-  let mut callbacks = callbacks(auth, Arc::clone(&cancel), sink.clone());
+  let hostkey: HostKeyNote = Arc::new(Mutex::new(None));
+  let mut callbacks = callbacks(
+    auth,
+    Arc::clone(&cancel),
+    sink.clone(),
+    Arc::clone(&hostkey),
+  );
   {
     let rejected = Arc::clone(&rejected);
     callbacks.push_update_reference(move |refname, status| {
@@ -400,9 +406,11 @@ pub(crate) fn push_core(
   let mut options = PushOptions::new();
   options.remote_callbacks(callbacks);
   sink(starting());
-  remote
-    .push(&[refspec.as_str()], Some(&mut options))
-    .map_err(|e| remote_fail("push", e, &cancel))?;
+  // A host key the panel should ask about wins over what the transport wrote in its place;
+  // `remote_fail` still handles everything else, including authentication.
+  if let Err(e) = remote.push(&[refspec.as_str()], Some(&mut options)) {
+    return Err(hostkey_note(&hostkey).unwrap_or_else(|| remote_fail("push", e, &cancel)));
+  }
   if let Some(reason) = rejected.lock().ok().and_then(|list| list.first().cloned()) {
     return Err(format!("git_push_rejected:{reason}"));
   }
@@ -436,11 +444,18 @@ fn fetch_into(
 ) -> Result<(), String> {
   let mut remote = repo.find_remote(name).map_err(|e| fail("remote", e))?;
   preflight(remote.url().unwrap_or_default(), &cancel)?;
+  let hostkey: HostKeyNote = Arc::new(Mutex::new(None));
   let mut options = FetchOptions::new();
-  options.remote_callbacks(callbacks(auth, Arc::clone(&cancel), sink));
-  remote
-    .fetch::<&str>(&[], Some(&mut options), None)
-    .map_err(|e| remote_fail("fetch", e, &cancel))?;
+  options.remote_callbacks(callbacks(
+    auth,
+    Arc::clone(&cancel),
+    sink,
+    Arc::clone(&hostkey),
+  ));
+  // Same as push: the refusal recorded by the callback outranks libgit2's replacement string.
+  if let Err(e) = remote.fetch::<&str>(&[], Some(&mut options), None) {
+    return Err(hostkey_note(&hostkey).unwrap_or_else(|| remote_fail("fetch", e, &cancel)));
+  }
   Ok(())
 }
 
@@ -486,7 +501,34 @@ fn upstream_of(repo: &Repository, branch: &str) -> Option<(String, String)> {
   Some((remote.to_string(), target.to_string()))
 }
 
-fn callbacks(auth: &AuthStore, cancel: Arc<AtomicBool>, sink: Sink) -> RemoteCallbacks<'static> {
+/// What the certificate callback refused, if it refused.
+///
+/// libgit2 does not carry a callback's error text out of the SSH transport: when the check fails
+/// the transport sets its own `invalid or unknown remote ssh hostkey` (`ssh_libssh2.c`), which
+/// names neither the host nor the fingerprint the panel needs to ask about. The callback leaves
+/// its answer in this slot instead, and the operation reports that in preference to the string
+/// libgit2 put in its place.
+type HostKeyNote = Arc<Mutex<Option<String>>>;
+
+/// The refusal the certificate callback recorded, if any.
+fn hostkey_note(slot: &HostKeyNote) -> Option<String> {
+  slot.lock().ok().and_then(|note| note.clone())
+}
+
+/// Record a refused host key and fail the check with the same text.
+fn refuse(slot: &HostKeyNote, message: String) -> Result<CertificateCheckStatus, git2::Error> {
+  if let Ok(mut note) = slot.lock() {
+    *note = Some(message.clone());
+  }
+  Err(git2::Error::from_str(&message))
+}
+
+fn callbacks(
+  auth: &AuthStore,
+  cancel: Arc<AtomicBool>,
+  sink: Sink,
+  hostkey_slot: HostKeyNote,
+) -> RemoteCallbacks<'static> {
   let mut callbacks = RemoteCallbacks::new();
   let auth = auth.clone();
 
@@ -541,12 +583,14 @@ fn callbacks(auth: &AuthStore, cancel: Arc<AtomicBool>, sink: Sink) -> RemoteCal
         Some(trusted) if trusted.eq_ignore_ascii_case(&fingerprint) => {
           Ok(CertificateCheckStatus::CertificateOk)
         }
-        Some(_) => Err(git2::Error::from_str(&format!(
-          "git_host_changed:{host}|{fingerprint}"
-        ))),
-        None => Err(git2::Error::from_str(&format!(
-          "git_host_untrusted:{host}|{fingerprint}"
-        ))),
+        Some(_) => refuse(
+          &hostkey_slot,
+          format!("git_host_changed:{host}|{fingerprint}"),
+        ),
+        None => refuse(
+          &hostkey_slot,
+          format!("git_host_untrusted:{host}|{fingerprint}"),
+        ),
       }
     });
   }
@@ -1289,6 +1333,25 @@ pub(crate) fn merge_abort(root: &str, locks: &GitLocks) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// The slot exists because libgit2 overwrites the callback's error text with its own
+  /// "invalid or unknown remote ssh hostkey"; what the callback recorded has to survive for the
+  /// panel to learn which host and fingerprint to ask about.
+  #[test]
+  fn a_refused_host_key_is_kept_for_the_caller() {
+    let slot: HostKeyNote = Arc::new(Mutex::new(None));
+    assert_eq!(hostkey_note(&slot), None);
+
+    let refused = refuse(&slot, "git_host_untrusted:github.com|abcd".into());
+    assert!(refused.is_err());
+    if let Err(error) = refused {
+      assert_eq!(error.message(), "git_host_untrusted:github.com|abcd");
+    }
+    assert_eq!(
+      hostkey_note(&slot).as_deref(),
+      Some("git_host_untrusted:github.com|abcd")
+    );
+  }
 
   #[test]
   fn urls_are_shown_without_credentials() {
