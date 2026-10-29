@@ -912,7 +912,19 @@ export default function App() {
     [draft, tabs, toast]
   );
 
+  /**
+   * Set once a restore has replaced the files on disk.
+   *
+   * From that moment the copy in memory is the state the snapshot replaced, not the state to
+   * keep, and every flush below writes memory over disk. The reload at the end of the restore
+   * fires `blur` and `visibilitychange`, so without this flag the restore is undone a moment
+   * after it lands — which is exactly what happened: the snapshot's groups were written, the
+   * old empty store was flushed back over them, and the restart read the empty one.
+   */
+  const restoring = useRef(false);
+
   const flushEverything = useCallback(async () => {
+    if (restoring.current) return;
     await draft.flushAll();
     await groups.flush();
     await frame.flush();
@@ -929,7 +941,16 @@ export default function App() {
   const restoreBackup = useCallback(
     async (path: string) => {
       await flushEverything();
-      await api.restoreConfigBackup(path);
+      // From here on, nothing may write the state in memory: what is on disk is the snapshot,
+      // and the reload's own blur/visibility events would otherwise flush the replaced state
+      // back over it. Cleared only when the restore fails, so the app keeps working.
+      restoring.current = true;
+      try {
+        await api.restoreConfigBackup(path);
+      } catch (e) {
+        restoring.current = false;
+        throw e;
+      }
       window.location.reload();
     },
     [flushEverything]
