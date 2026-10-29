@@ -142,6 +142,11 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
   const seq = useRef(0);
   /** The same for the log: a page asked for before a commit must not land after its reload. */
   const logSeq = useRef(0);
+  /**
+   * The HEAD the log was last read against. `undefined` means "no status has arrived yet";
+   * `null` means "unborn branch", which is a real state and must not be confused with it.
+   */
+  const seenHead = useRef<string | null | undefined>(undefined);
 
   const applyStatus = useCallback((next: GitStatusView | null) => {
     statusRef.current = next;
@@ -274,6 +279,7 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
   useEffect(() => {
     seq.current += 1;
     logSeq.current += 1;
+    seenHead.current = undefined;
     applyStatus(null);
     setError(null);
     setBranches([]);
@@ -286,6 +292,25 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
     setIdentityAsk(false);
     setLoading(false);
   }, [rootDir, applyStatus]);
+
+  /**
+   * Another program can commit, amend, checkout or rebase under this one. The status poll is
+   * what notices: when the commit HEAD points at changes, the log and the branch rows are stale.
+   * `undefined` means the status has not arrived yet; `null` is an unborn branch, which is a
+   * real state and must not be mistaken for "nothing has been read".
+   */
+  const headOid = status ? status.repo.head.oid : undefined;
+  useEffect(() => {
+    if (headOid === undefined) return;
+    if (seenHead.current === undefined) {
+      seenHead.current = headOid;
+      return;
+    }
+    if (seenHead.current === headOid) return;
+    seenHead.current = headOid;
+    void loadLog();
+    void loadBranches();
+  }, [headOid, loadLog, loadBranches]);
 
   // Poll only while the panel is actually on screen and the window is visible.
   useEffect(() => {
@@ -545,6 +570,8 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
         await refresh();
         await loadBranches();
         void loadRemotes();
+        // A fetch or push moves a remote-tracking ref, and the log rows carry those labels.
+        void loadLog();
         return result;
       } catch (e) {
         const raw = typeof e === "string" ? e : errorMessage(e);
@@ -556,7 +583,7 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
         setProgress(null);
       }
     },
-    [refresh, loadBranches, loadRemotes, handleAuthError]
+    [refresh, loadBranches, loadRemotes, loadLog, handleAuthError]
   );
 
   const fetchRemote = useCallback(
