@@ -111,6 +111,20 @@ export function IconFold({ size = 14 }: IconProps) {
   );
 }
 
+/**
+ * A line that continues on the next one instead of running off the edge: the top line turns back
+ * at the right and comes down, arrow and all, onto the line below.
+ */
+export function IconWordWrap({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <path d="M3 6h14a3 3 0 0 1 0 6H6" />
+      <polyline points="9 9 6 12 9 15" />
+      <line x1="3" y1="18" x2="13" y2="18" />
+    </svg>
+  );
+}
+
 /** Git's view of a path, for the local-only state that lives outside the repository's history. */
 export function IconEye({ size = 14 }: IconProps) {
   return (

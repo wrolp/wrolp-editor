@@ -299,6 +299,10 @@ A read-only side-by-side diff of any two contents, in a tab of its own (titled `
   context menu can swap the two sides. By default there is one comparison tab: a new comparison replaces
   the one on screen (re-running the same pair still refreshes in place); turn off *Reuse one comparison
   tab* in Settings → General to give every comparison a tab of its own.
+- **Show only the changes.** The fold button in the header keeps the changed lines and a few lines
+  of context around each, hiding the stretches that did not change, and says how many lines it
+  dropped. The tab's snapshot is not touched, so unfolding gives the whole text back — but while
+  folded the line numbers are those of the folded text, and find and copy reach only what is shown.
 - **Read-only.** Open either file to edit it.
 - **Picker badges:** "unsaved" means the tab holds edits that were never saved; "untitled" means there is
   no file behind it. Pictures, the settings panel and other comparisons are never offered as a side, and a

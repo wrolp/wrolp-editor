@@ -4,6 +4,7 @@ import { t } from "../lib/i18n";
 import "../lib/monaco";
 import { sideKey, type ComparePair, type DiffStats } from "../lib/types";
 import type { FoldChange } from "../lib/diffFold";
+import { IconFold, IconWordWrap } from "./icons";
 
 interface Props {
   pair: ComparePair;
@@ -21,6 +22,24 @@ interface Props {
    * surroundings. Monaco's own numbers, so nothing here is a second diff algorithm.
    */
   onChanges?: (changes: readonly FoldChange[]) => void;
+  /**
+   * An optional control for folding the two texts down to their changed lines. Absent means the
+   * header keeps its two columns exactly as it is — the version dialog and the conflict
+   * comparison pass nothing and are untouched.
+   */
+  fold?: {
+    on: boolean;
+    canFold: boolean;
+    /** Lines dropped from each side while folded, or null when nothing was dropped. */
+    hidden: { left: number; right: number } | null;
+    nothingHidden: boolean;
+    onToggle: () => void;
+  };
+  /**
+   * An optional switch for wrapping long lines in this view. Like `fold`, absent means nothing is
+   * rendered; the global setting stays the default this view starts from.
+   */
+  wrap?: { on: boolean; onToggle: () => void };
 }
 
 /**
@@ -43,6 +62,8 @@ export default function DiffView({
   scrollBeyondLastLine,
   onStats,
   onChanges,
+  fold,
+  wrap,
 }: Props) {
   const statsRef = useRef(onStats);
   statsRef.current = onStats;
@@ -100,6 +121,44 @@ export default function DiffView({
         <span className="diff-name" title={pair.right.path}>
           {pair.right.name}
         </span>
+        {(fold || wrap) && (
+          <div className="diff-tools">
+            {fold?.hidden && (
+              <span
+                className="diff-tools-note"
+                title={t("ver.hiddenLines", { left: fold.hidden.left, right: fold.hidden.right })}
+              >
+                {t("cmp.foldHidden", { left: fold.hidden.left, right: fold.hidden.right })}
+              </span>
+            )}
+            {fold?.nothingHidden && (
+              <span className="diff-tools-note">{t("ver.nothingHidden")}</span>
+            )}
+            {fold && (
+              <button
+                className={`diff-tool${fold.on ? " on" : ""}`}
+                onClick={fold.onToggle}
+                disabled={!fold.canFold}
+                title={t("ver.fold")}
+                aria-label={t("ver.fold")}
+                aria-pressed={fold.on}
+              >
+                <IconFold size={14} />
+              </button>
+            )}
+            {wrap && (
+              <button
+                className={`diff-tool${wrap.on ? " on" : ""}`}
+                onClick={wrap.onToggle}
+                title={t("settings.wordWrap")}
+                aria-label={t("settings.wordWrap")}
+                aria-pressed={wrap.on}
+              >
+                <IconWordWrap size={14} />
+              </button>
+            )}
+          </div>
+        )}
       </div>
       <div className="diff-host">
         <DiffEditor

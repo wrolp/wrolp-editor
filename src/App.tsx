@@ -4,7 +4,7 @@ import ImagePreview from "./components/ImagePreview";
 import ImageGallery from "./components/ImageGallery";
 import HtmlPreview from "./components/HtmlPreview";
 import Editor from "./components/Editor";
-import DiffView from "./components/DiffView";
+import ComparePane from "./components/ComparePane";
 import MergeView from "./components/MergeView";
 import MarkdownPreview from "./components/MarkdownPreview";
 import DraftRestoreDialog from "./components/DraftRestoreDialog";
@@ -2477,13 +2477,9 @@ const defaultModeFor = useCallback(
               holds the file's live buffer, and unmounting it would dispose the model. */}
           {showDiff && editorTab?.compare && (
             <div className="editor-host">
-              <DiffView
-                // Keyed by the two sides' identities: swapping them remounts the view,
-                // which is what releases the two models it had attached. Re-pointing the
-                // model paths alone would detach them without disposing, and the library
-                // only disposes the models attached at unmount.
-                key={`${sideKey(editorTab.compare.left.kind, editorTab.compare.left.path)}|${sideKey(editorTab.compare.right.kind, editorTab.compare.right.path)}`}
+              <ComparePane
                 pair={editorTab.compare}
+                identity={editorTab.path}
                 fontSize={settings.fontSize}
                 renderWhitespace={renderWhitespaceMode}
                 wordWrap={wordWrap}
