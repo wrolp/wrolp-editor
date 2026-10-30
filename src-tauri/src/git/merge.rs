@@ -255,11 +255,7 @@ mod tests {
 
   #[test]
   fn a_conflict_between_two_regions_keeps_the_clean_ones_around_it() {
-    let (text, settled) = merged(
-      "1\n2\n3\n4\n5\n",
-      "ONE\n2\n3\n4\n5\n",
-      "1\n2\nX\n4\n5\n",
-    );
+    let (text, settled) = merged("1\n2\n3\n4\n5\n", "ONE\n2\n3\n4\n5\n", "1\n2\nX\n4\n5\n");
     // The first line is only ours, the third only theirs: both land, nothing to ask.
     assert_eq!(text, "ONE\n2\nX\n4\n5\n");
     assert_eq!(settled, 2);
