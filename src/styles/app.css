@@ -1778,6 +1778,27 @@ body.resizing .editor-host {
 .git-repo-row:hover {
   background: var(--surface-hover);
 }
+/* The folder-switch menu lists folders rather than repository roots, so each row keeps the
+   folder's name and the full path stays in the tooltip. */
+.git-folder-menu {
+  min-width: 240px;
+  max-width: 420px;
+}
+.git-folder-menu .git-folder-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.git-folder-menu .git-folder-missing {
+  flex: 0 0 auto;
+  margin-left: 6px;
+  color: var(--danger);
+}
+.git-folder-menu .ctx-item.current {
+  color: var(--accent);
+}
 .git-repo-row.current {
   background: var(--surface-active);
   color: var(--text-strong);

@@ -9,6 +9,7 @@ import {
 import { formatClock, formatWhen, t, translateError } from "../lib/i18n";
 import { pathKey } from "../lib/types";
 import type {
+  FolderHistoryEntry,
   GitCommitFile,
   GitLocalPathState,
   GitLogEntry,
@@ -31,6 +32,7 @@ import {
   IconEyeOff,
   IconFetch,
   IconFile,
+  IconFolder,
   IconPull,
   IconPush,
   IconReload,
@@ -53,6 +55,15 @@ interface Props {
   repoScanError: string | null;
   onSelectRepo: (root: string) => void;
   onAddRepo: () => void;
+  /**
+   * Move the Explorer to another folder. The panel follows it: the scan runs from that folder,
+   * so what is shown afterwards is that folder's repository, not an extra entry in the list.
+   */
+  onSwitchWorkspace: () => void;
+  /** Folders this group's Explorer has been pointed at, newest first. */
+  folderHistory: FolderHistoryEntry[];
+  /** Point the Explorer at one of those folders. */
+  onOpenFolder: (dir: string) => void;
   onRemoveRepo: (root: string) => void;
   onRescanRepos: () => void;
   onInitWorkspace: () => Promise<void>;
@@ -120,6 +131,9 @@ export default function GitPanel({
   repoScanError,
   onSelectRepo,
   onAddRepo,
+  onSwitchWorkspace,
+  folderHistory,
+  onOpenFolder,
   onRemoveRepo,
   onRescanRepos,
   onInitWorkspace,
@@ -174,6 +188,22 @@ export default function GitPanel({
   } | null>(null);
   const commitMenuRef = useRef<HTMLDivElement>(null);
   const commitMenuAt = useMenuPlacement(commitMenu, commitMenuRef);
+  /** The recent-folders menu under the switch button, plus "pick another folder" behind it. */
+  const [folderMenu, setFolderMenu] = useState<{ x: number; y: number } | null>(null);
+  const folderMenuRef = useRef<HTMLDivElement>(null);
+  const folderBtnRef = useRef<HTMLButtonElement>(null);
+  const folderMenuAt = useMenuPlacement(folderMenu, folderMenuRef);
+
+  useEffect(() => {
+    if (!folderMenu) return;
+    const close = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (folderMenuRef.current?.contains(target) || folderBtnRef.current?.contains(target)) return;
+      setFolderMenu(null);
+    };
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [folderMenu]);
 
   // A different folder is a different repository; a half-typed message and a pending discard
   // question from the old one must not carry over.
@@ -587,6 +617,30 @@ export default function GitPanel({
             }}
           >
             <IconEyeOff size={13} />
+          </button>
+          <button
+            ref={folderBtnRef}
+            className="git-icon-btn"
+            title={t("git.switchFolderHint")}
+            aria-label={t("git.switchFolder")}
+            aria-haspopup="menu"
+            aria-expanded={!!folderMenu}
+            onClick={(event) => {
+              if (folderMenu) {
+                setFolderMenu(null);
+                return;
+              }
+              // With no history there is nothing to choose between, so the picker is the whole
+              // gesture; once there is, the list opens and the picker is its last entry.
+              if (folderHistory.length === 0) {
+                onSwitchWorkspace();
+                return;
+              }
+              const rect = event.currentTarget.getBoundingClientRect();
+              setFolderMenu({ x: rect.left, y: rect.bottom + 2 });
+            }}
+          >
+            <IconFolder size={13} />
           </button>
           <button
             className="git-icon-btn git-add-repo"
@@ -1271,6 +1325,42 @@ export default function GitPanel({
         </>
       )}
         </>
+      )}
+
+      {folderMenu && (
+        <div
+          className="ctx-menu git-folder-menu"
+          ref={folderMenuRef}
+          style={{ display: "block", left: folderMenuAt.left, top: folderMenuAt.top }}
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          {folderHistory.map((entry) => (
+            <div
+              key={entry.path}
+              className={`ctx-item${
+                pathKey(entry.path) === pathKey(workspaceRoot ?? "") ? " current" : ""
+              }`}
+              title={entry.path}
+              onClick={() => {
+                setFolderMenu(null);
+                onOpenFolder(entry.path);
+              }}
+            >
+              <span className="git-folder-name">{entry.name}</span>
+              {!entry.exists && <span className="git-folder-missing">×</span>}
+            </div>
+          ))}
+          <div className="ws-sep" />
+          <div
+            className="ctx-item"
+            onClick={() => {
+              setFolderMenu(null);
+              onSwitchWorkspace();
+            }}
+          >
+            {t("git.switchFolder")}
+          </div>
+        </div>
       )}
 
       {commitMenu && (

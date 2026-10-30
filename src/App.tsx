@@ -2456,6 +2456,9 @@ const defaultModeFor = useCallback(
               repoScanError={repos.scanError}
               onSelectRepo={repos.select}
               onAddRepo={() => void addGitRepository()}
+              onSwitchWorkspace={() => void pickRootFolder()}
+              folderHistory={folderHistory}
+              onOpenFolder={(dir) => setSidebarRoot(dir)}
               onRemoveRepo={removeGitRepository}
               onRescanRepos={() => void repos.rescan()}
               onInitWorkspace={initGitWorkspace}
