@@ -479,7 +479,7 @@ function FolderNode({
   ...handlers
 }: NodeProps & { entry: FsEntry; siblings: NodeTarget[] }) {
   // The initial state only: a folder the user folded stays folded, so the setting applies
-  // when a directory is opened (or refreshed), not to the tree already on screen.
+  // when a directory is opened, not to the tree already on screen or to a refresh of it.
   const [collapsed, setCollapsed] = useState(depth >= expandLimit);
   /**
    * The listing, with the refetch counter it was read for. Keeping the counter next to the
@@ -527,7 +527,10 @@ function FolderNode({
     // handlers only report failures; they are not part of the fetch condition
   }, [collapsed, listing?.token, token, entry.name, entry.path]);
 
-  const children = listing !== null && listing.token >= token ? listing.entries : null;
+  // The rows already read stay on screen while a newer listing is on its way. Blanking them
+  // for a loading row would unmount every folder open inside, and a folder that mounts starts
+  // folded — which is exactly the shape the refresh was supposed to keep.
+  const children = listing ? listing.entries : null;
 
   return (
     <>
@@ -798,7 +801,6 @@ export default function Sidebar(props: Props) {
     return versionList.filter((item) => pathKey(item.path) !== active);
   }, [activePath, versionList]);
   const [entries, setEntries] = useState<FsEntry[]>([]);
-  const [refreshKey, setRefreshKey] = useState(0);
   const [menu, setMenu] = useState<MenuTarget | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuAt = useMenuPlacement(menu, menuRef);
@@ -1024,13 +1026,9 @@ export default function Sidebar(props: Props) {
     // `parentOf` answers "" for a drive or share root, where the folder holding the entry is
     // the one the Explorer itself is showing.
     const parent = parentOf(target.path) || rootDir;
-    if (!parent) {
-      // No folder to re-read at all, which means there is no tree either: nothing is on
-      // screen that the rename could have changed.
-      setRefreshKey((k) => k + 1);
-      return true;
-    }
-    bumpFolder(parent);
+    // A missing parent means there is no tree either: nothing is on screen that the rename
+    // could have changed, so there is nothing to re-read.
+    if (parent) bumpFolder(parent);
     return true;
   };
 
@@ -1215,14 +1213,14 @@ export default function Sidebar(props: Props) {
     };
     // Re-fetch on view switch, explicit refresh and a rename in this folder. The token only
     // ever counts up, so these do not re-run for a refresh aimed somewhere else in the tree.
-  }, [rootDir, onError, view, refreshKey, rootToken]);
+  }, [rootDir, onError, view, rootToken]);
 
   // Rows of another folder are not rows of this one, so a selection does not outlive a change
-  // of what the tree is showing, or a re-read that may have replaced the rows themselves.
+  // of what the tree is showing.
   useEffect(() => {
     setSelected(new Map());
     setAnchor(null);
-  }, [view, rootDir, refreshKey]);
+  }, [view, rootDir]);
 
   if (!visible) return null;
 
@@ -1403,7 +1401,15 @@ export default function Sidebar(props: Props) {
           <button
             className="side-btn side-btn-icon"
             title={t("side.refresh")}
-            onClick={() => setRefreshKey((k) => k + 1)}
+            onClick={() => {
+              // The whole tree is the root folder's own subtree, so this is the same request
+              // the root's context menu makes: every open folder re-reads and stays open.
+              if (!rootDir) return;
+              bumpFolder(rootDir);
+              // The rows a selection was made against are re-read, so it does not survive
+              // the refresh; the folders' expansion does.
+              clearSelection();
+            }}
           >
             ↻
           </button>
@@ -1417,7 +1423,6 @@ export default function Sidebar(props: Props) {
           ) : (
             <>
               <TreeLevel
-                key={refreshKey}
                 entries={entries}
                 depth={0}
                 activePath={activePath}
