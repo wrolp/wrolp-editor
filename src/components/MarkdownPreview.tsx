@@ -14,6 +14,7 @@ import { convertFileSrc } from "@tauri-apps/api/core";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import monaco from "../lib/monaco";
 import { t } from "../lib/i18n";
+import { INLINE_SVG_SANITIZE, SANITIZE, SVG_SANITIZE } from "../lib/markdownHtml";
 import { useMenuPlacement } from "../hooks/useMenuPlacement";
 import { IconTreeChevron } from "./icons";
 import { api, errorMessage, openUrl } from "../lib/tauri";
@@ -237,7 +238,7 @@ export default function MarkdownPreview({
   }, [text, resolved, theme]);
 
   /**
-   * Folders the document points images into, resolved to absolute paths. `..` is allowed
+   * Folders the document points embedded assets into, resolved to absolute paths. `..` is allowed
    * here on purpose: the backend decides what is reachable, and it refuses whole drives
    * and the user's profile no matter how the path is spelled.
    */
@@ -246,9 +247,11 @@ export default function MarkdownPreview({
     const doc = new DOMParser().parseFromString(`<body>${sanitized}</body>`, "text/html");
     const base = dirOf(path);
     const dirs = new Set<string>();
-    for (const img of Array.from(doc.body.querySelectorAll("img"))) {
-      const abs = resolveLocalImage(img.getAttribute("src"), base);
-      if (abs) dirs.add(dirOf(abs));
+    for (const el of Array.from(doc.body.querySelectorAll(LOCAL_ASSET_SELECTOR))) {
+      for (const name of ["src", "poster"]) {
+        const abs = resolveLocalAsset(el.getAttribute(name), base);
+        if (abs) dirs.add(dirOf(abs));
+      }
     }
     return [...dirs];
   }, [sanitized, path]);
@@ -275,7 +278,7 @@ export default function MarkdownPreview({
   }, [referencedDirs]);
 
   const html = useMemo(
-    () => (granted ? rewriteImageSources(sanitized, path) : sanitized),
+    () => (granted ? rewriteAssetSources(sanitized, path) : sanitized),
     [sanitized, granted, path]
   );
 
@@ -928,126 +931,6 @@ function lastRenderedLine(el: Node): DOMRect | null {
   return null;
 }
 
-/**
- * Strip everything executable. `marked` only emits the tags we ask for, but markdown
- * text can carry raw HTML straight through, so the allow-list is deliberately narrow:
- * no scripts, no event handlers, no styles, no `javascript:` URLs.
- */
-const SANITIZE = {
-  ALLOWED_TAGS: [
-    "h1", "h2", "h3", "h4", "h5", "h6",
-    "p", "br", "hr",
-    "strong", "em", "del", "code", "pre", "blockquote",
-    "ul", "ol", "li",
-    "a", "img",
-    "table", "thead", "tbody", "tr", "th", "td",
-    // For the highlighter's token spans, and for the diagram placeholders. Both are inert on
-    // their own: neither carries an attribute that survives the hook below.
-    "span", "div",
-  ],
-  ALLOWED_ATTR: ["href", "src", "alt", "title", "align"],
-  // Strip srcset and style too, then constrain URLs to schemes that cannot run code.
-  FORBID_ATTR: ["style", "srcset", "onerror", "onload", "onclick"],
-  /**
-   * Either an explicitly harmless scheme, or no scheme at all — the second branch is
-   * what lets `img/logo.png`, `../shared/x.png`, `/root.png` and `#anchor` survive.
-   *
-   * Do not "tighten" this to a scheme-only list: DOMPurify drops the whole element when
-   * a URI attribute fails this test (`_isValidAttribute` returns false, not just the
-   * attribute), so a scheme-only pattern silently deletes every local image. Everything
-   * with a colon has to be named here, which is what keeps `javascript:` and `data:`
-   * out except for the `<img>` data-URI case DOMPurify allows on its own.
-   */
-  ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel):|[^:]+$)/i,
-};
-
-/**
- * Lets the highlighter's `class` through inside a code block, and nowhere else.
- *
- * The highlighter emits `<span class="mtkN">`, and those classes are what carry the colour,
- * so without this every block renders as flat uncoloured text. But `class` on the document
- * at large is a different thing: a document that could name classes could restyle the app
- * chrome around it, so the attribute is kept strictly inside `pre > code`.
- *
- * `uponSanitizeAttribute` is the hook that can do this — it runs *before* the allow-list
- * check and exposes `forceKeepAttr`, which short-circuits it. (`afterSanitizeAttributes`
- * would be too late: the attribute has already been removed by then.) The decision is
- * per-attribute rather than a mutation of `allowedAttributes`, because that set is cloned
- * once per `sanitize()` call and mutating it would leak into every later element.
- *
- * Registered once at module scope: `addHook` pushes onto an array, so doing this per render
- * would stack duplicates that each re-run for every attribute of every element.
- */
-DOMPurify.addHook("uponSanitizeAttribute", (node, event) => {
-  if (event.attrName !== "class") return;
-  // Diagram SVG keeps its classes. Mermaid colours everything through class selectors in
-  // its embedded `<style>` (`#mmd-x .node rect { fill: … }`), so stripping `class` there
-  // left every rule unmatched: nodes fell back to an inherited grey fill and the labels
-  // lost their layout — grey slabs with no text. SVG content is already fenced off from
-  // the document by its own pass, and a class inside a drawing cannot style the app.
-  if (node.namespaceURI === "http://www.w3.org/2000/svg") return;
-  // `closest` matches the element itself, so this covers `<code class="language-x">` as
-  // well as the spans inside it.
-  if ((node as Element).closest("pre > code")) event.forceKeepAttr = true;
-  else event.keepAttr = false;
-});
-
-/**
- * A second, narrower boundary for diagram SVG.
- *
- * The main allow-list cannot take SVG: mermaid emits a `<style>` element inside its `<svg>`,
- * and `style` is in `FORBID_ATTR` by design, so forcing it through would strip the styling
- * or the whole drawing. Diagram output does not come from the document either — it comes
- * from mermaid or from a local program — but it is still generated from text the document
- * supplied, so it gets its own pass with scripting and HTML embedding forbidden outright.
- *
- * `xlink:href` is deliberately not forbidden: both mermaid and graphviz reference their own
- * arrowheads with `url(#marker)`, and DOMPurify's default URI check already rejects
- * `javascript:`.
- *
- * Residual risk, now that `style` really is let through rather than merely believed to be:
- * CSS inside an inline `<svg>` applies to the whole document, not just the drawing, so a
- * crafted document could restyle the app's own chrome through mermaid's `themeCSS`
- * directive. It is CSS only — no script, and no way to read anything back out — and it
- * takes a file the user chose to open. Scoping the rules would mean rewriting mermaid's
- * stylesheet on the way through, which is a bigger change than the problem warrants; if it
- * ever stops being acceptable, dropping `style` and setting the colours on the container in
- * app.css is the fallback.
- */
-const SVG_SANITIZE = {
-  USE_PROFILES: { svg: true, svgFilters: true },
-  // Naming a profile REPLACES the default allow-list rather than adding to it, and `style`
-  // belongs to the html profile. Without this line mermaid's embedded stylesheet is
-  // stripped, taking every colour with it: the shapes keep the inline fills they carry and
-  // the labels fall back to the app's text colour, which is how a dark diagram ended up
-  // with light boxes and unreadable text. `FORBID_CONTENTS` does not undo this — it only
-  // governs the children of a node that was disallowed in the first place.
-  ADD_TAGS: ["style"],
-  FORBID_TAGS: [
-    "script", "foreignObject", "iframe", "object", "embed",
-    "animate", "animateMotion", "animateTransform", "set", "handler",
-  ],
-  FORBID_ATTR: ["onload", "onerror", "onclick", "onbegin", "onend", "onrepeat"],
-};
-
-/**
- * The same profile for a drawing that came out of the document rather than out of a diagram tool.
- *
- * One thing less: `style`. Mermaid's own stylesheet is what colours its drawing, so the diagram
- * pass has to keep it; a `<style>` written by the document would apply to the whole preview
- * rather than to the picture, which is a way for a file to restyle the app around it. What is
- * left is the markup's own attributes — fills, strokes, gradients, transforms — so a hand-written
- * drawing still arrives, only without whatever a stylesheet block was doing for it.
- */
-const INLINE_SVG_SANITIZE = {
-  USE_PROFILES: { svg: true, svgFilters: true },
-  FORBID_TAGS: [
-    "script", "foreignObject", "iframe", "object", "embed", "style",
-    "animate", "animateMotion", "animateTransform", "set", "handler",
-  ],
-  FORBID_ATTR: ["style", "onload", "onerror", "onclick", "onbegin", "onend", "onrepeat"],
-};
-
 /** Fence languages that are diagrams rather than source. */
 const DIAGRAM_KINDS = { mermaid: "mermaid", plantuml: "plantuml", graphviz: "graphviz" } as const;
 type DiagramKind = (typeof DIAGRAM_KINDS)[keyof typeof DIAGRAM_KINDS];
@@ -1115,6 +998,9 @@ function monacoLanguage(token: string): string | null {
 
 /** Extensions worth spending an asset grant on. Anything else is left alone. */
 const IMAGE_EXT = /\.(?:png|jpe?g|gif|webp|avif|bmp|ico|svg|tiff?|heic)$/i;
+
+/** The same, for a document that embeds a recording rather than a picture. */
+const MEDIA_EXT = /\.(?:mp4|m4v|webm|mov|avi|mkv|ogv|mp3|wav|ogg|oga|opus|flac|aac|m4a)$/i;
 
 let mermaidModule: Promise<typeof import("mermaid")> | null = null;
 
@@ -1307,8 +1193,8 @@ function findHeadingBySlug(body: HTMLElement, want: string): HTMLElement | null 
 }
 
 /**
- * Resolve an `img` src against the document's folder, or return null when it is not a
- * local image reference. Absolute URLs, data URIs, protocol-relative and root-absolute
+ * Resolve an embedded asset's src against the document's folder, or return null when it is
+ * not a local reference. Absolute URLs, data URIs, protocol-relative and root-absolute
  * links, and Windows paths spelled in the markdown ("C:\x.png") all return null: the
  * first group already resolves on its own, and the rest is what `NOT_A_LOCAL_PATH` refuses
  * for links too.
@@ -1319,23 +1205,28 @@ function findHeadingBySlug(body: HTMLElement, want: string): HTMLElement | null 
  * hands `convertFileSrc` a `%` to escape a second time, and the asset protocol then answers 404
  * for a file that is sitting right beside the document.
  */
-function resolveLocalImage(src: string | null, baseDir: string): string | null {
+function resolveLocalAsset(src: string | null, baseDir: string): string | null {
   if (!src) return null;
   if (baseDir && NOT_A_LOCAL_PATH.test(src)) return null;
   const file = splitFragment(src)[0].split(/[?#]/)[0];
-  if (!IMAGE_EXT.test(file)) return null;
+  if (!IMAGE_EXT.test(file) && !MEDIA_EXT.test(file)) return null;
   const decoded = decodeRef(file);
   if (NOT_A_LOCAL_PATH.test(decoded)) return null;
   return joinToLocal(decoded, baseDir);
 }
 
-/** Swap every local image reference for an asset URL the backend has allowed. */
-function rewriteImageSources(html: string, markdownPath: string): string {
+/** Every element in a preview that can point at a file beside the document. */
+const LOCAL_ASSET_SELECTOR = "img, video, audio, source";
+
+/** Swap every local picture/recording reference for an asset URL the backend has allowed. */
+function rewriteAssetSources(html: string, markdownPath: string): string {
   const doc = new DOMParser().parseFromString(`<body>${html}</body>`, "text/html");
   const base = dirOf(markdownPath);
-  for (const img of Array.from(doc.body.querySelectorAll("img"))) {
-    const abs = resolveLocalImage(img.getAttribute("src"), base);
-    if (abs) img.setAttribute("src", convertFileSrc(abs));
+  for (const el of Array.from(doc.body.querySelectorAll(LOCAL_ASSET_SELECTOR))) {
+    for (const name of ["src", "poster"]) {
+      const abs = resolveLocalAsset(el.getAttribute(name), base);
+      if (abs) el.setAttribute(name, convertFileSrc(abs));
+    }
   }
   return doc.body.innerHTML;
 }

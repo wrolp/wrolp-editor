@@ -5392,6 +5392,97 @@ body.resizing .editor-host {
   border-top: 1px solid var(--border);
   margin: 1.6em 0;
 }
+/* A document's own markup. The `*` reset at the top of this file takes the browser's spacing
+   away from every one of these, so each is laid out here the way the equivalent markdown is. */
+.md-body details {
+  margin: 0 0 1em;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+.md-body summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.md-body details[open] > summary {
+  margin-bottom: 0.5em;
+}
+.md-body figure {
+  margin: 0 0 1em;
+}
+.md-body figcaption,
+.md-body caption {
+  color: var(--muted);
+  font-size: 0.92em;
+}
+.md-body figcaption {
+  margin-top: 0.4em;
+  text-align: center;
+}
+.md-body dl {
+  margin: 0 0 1em;
+}
+.md-body dt {
+  font-weight: 600;
+}
+.md-body dd {
+  margin-left: 1.6em;
+}
+.md-body kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+  font-size: 0.88em;
+}
+.md-body mark {
+  padding: 0 0.15em;
+  border-radius: 2px;
+  background: #f5d66b;
+  color: #1f1f1f;
+}
+.md-body abbr[title] {
+  text-decoration: underline dotted;
+}
+/* The box a task list is. It replaces the bullet rather than joining it, and a loose list wraps
+   it in a paragraph whose margin would otherwise push the lines apart. */
+.md-body li:has(input[type="checkbox"]) {
+  list-style: none;
+}
+.md-body li > p:has(input[type="checkbox"]) {
+  margin-bottom: 0;
+}
+.md-body input[type="checkbox"] {
+  width: 13px;
+  height: 13px;
+  margin-right: 0.45em;
+  vertical-align: -2px;
+  accent-color: var(--accent-soft);
+}
+.md-body video,
+.md-body audio,
+.md-body iframe {
+  max-width: 100%;
+}
+.md-body video {
+  border-radius: 4px;
+  background: var(--sunken);
+}
+.md-body iframe {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--sunken);
+}
+.md-body iframe[width],
+.md-body iframe[height] {
+  width: auto;
+  aspect-ratio: auto;
+}
 /* The tail's height is set from `measureTail` in MarkdownPreview.tsx, not declared here.
    It needs the gap below the last line and that line's own height, and neither is a
    constant: a heading ends with padding and a border, a `pre` with 12px of padding. A
