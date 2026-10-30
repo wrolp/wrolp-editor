@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { getVersion } from "@tauri-apps/api/app";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import logoUrl from "../../branding/logo.svg";
@@ -975,51 +975,62 @@ export default function SettingsPanel({
               {backups && backups.backups.length > 0 && (
                 <div className="backup-list">
                   {backups.backups.map((snapshot) => (
-                    <div className="backup-row" key={snapshot.path}>
-                      <span className="backup-kind">
-                        {t(BACKUP_KIND[snapshot.kind] ?? "backup.kindManual")}
-                      </span>
-                      <span className="backup-when" title={snapshot.createdAt}>
-                        {formatWhen(snapshot.createdAt)}
-                      </span>
-                      <span className="backup-summary">
-                        {t("backup.summary", { groups: snapshot.groups, tabs: snapshot.tabs })}
-                        {" · "}
-                        {sizeLabel(snapshot.bytes)}
-                      </span>
-                      <button
-                        className="btn small"
-                        disabled={backupBusy}
-                        onClick={() => setRestoreTarget(snapshot)}
-                      >
-                        {t("backup.restore")}
-                      </button>
-                    </div>
+                    <Fragment key={snapshot.path}>
+                      <div className="backup-row">
+                        <span className="backup-kind">
+                          {t(BACKUP_KIND[snapshot.kind] ?? "backup.kindManual")}
+                        </span>
+                        <span className="backup-when" title={snapshot.createdAt}>
+                          {formatWhen(snapshot.createdAt)}
+                        </span>
+                        <span className="backup-summary">
+                          {t("backup.summary", { groups: snapshot.groups, tabs: snapshot.tabs })}
+                          {" · "}
+                          {sizeLabel(snapshot.bytes)}
+                        </span>
+                        {/* Clicking the same row again folds the question away. */}
+                        <button
+                          className="btn small"
+                          disabled={backupBusy}
+                          onClick={() =>
+                            setRestoreTarget((prev) =>
+                              prev?.path === snapshot.path ? null : snapshot
+                            )
+                          }
+                        >
+                          {t("backup.restore")}
+                        </button>
+                      </div>
+                      {/* Under the row it is about, not under the whole list: the snapshot that
+                          would be replaced stays visible above the question. */}
+                      {restoreTarget?.path === snapshot.path && (
+                        <div className="backup-confirm">
+                          <div className="backup-confirm-title">{t("backup.confirmTitle")}</div>
+                          <p className="muted">
+                            {t("backup.confirmBody", {
+                              when: formatWhen(restoreTarget.createdAt),
+                            })}
+                          </p>
+                          <div className="backup-actions">
+                            <button
+                              className="btn primary small"
+                              disabled={backupBusy}
+                              onClick={restoreNow}
+                            >
+                              {t("backup.confirm")}
+                            </button>
+                            <button
+                              className="btn small"
+                              disabled={backupBusy}
+                              onClick={() => setRestoreTarget(null)}
+                            >
+                              {t("backup.cancel")}
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </Fragment>
                   ))}
-                </div>
-              )}
-              {restoreTarget && (
-                <div className="backup-confirm">
-                  <div className="backup-confirm-title">{t("backup.confirmTitle")}</div>
-                  <p className="muted">
-                    {t("backup.confirmBody", { when: formatWhen(restoreTarget.createdAt) })}
-                  </p>
-                  <div className="backup-actions">
-                    <button
-                      className="btn primary small"
-                      disabled={backupBusy}
-                      onClick={restoreNow}
-                    >
-                      {t("backup.confirm")}
-                    </button>
-                    <button
-                      className="btn small"
-                      disabled={backupBusy}
-                      onClick={() => setRestoreTarget(null)}
-                    >
-                      {t("backup.cancel")}
-                    </button>
-                  </div>
                 </div>
               )}
             </div>

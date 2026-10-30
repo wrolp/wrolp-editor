@@ -4190,8 +4190,9 @@ body.resizing .editor-host {
   color: var(--muted);
   overflow-wrap: anywhere;
 }
+/* Sits under the row it is about, so it needs air above it and nothing extra below. */
 .backup-confirm {
-  margin-top: 14px;
+  margin: 8px 0 10px;
   padding: 10px 12px;
   border: 1px solid var(--accent-soft);
   border-radius: 8px;
