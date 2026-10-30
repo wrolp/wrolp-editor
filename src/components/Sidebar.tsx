@@ -704,6 +704,10 @@ interface Props extends Omit<
   onSetView: (view: SidebarView) => void;
   onPickFolder: () => void;
   onRemoveHistory: (path: string) => void;
+  /** Remove several entries in one write; the paths are the ones the list shows. */
+  onRemoveHistoryMany: (paths: string[]) => void;
+  /** Ask to forget every opened file; the caller owns the confirmation dialog. */
+  onClearHistory: () => void;
   /** Folders this group's Explorer has been pointed at, newest first. */
   folderHistory: FolderHistoryEntry[];
   /** Forgets one folder so it stops being offered. */
@@ -781,6 +785,8 @@ export default function Sidebar(props: Props) {
     onSetView,
     onPickFolder,
     onRemoveHistory,
+    onRemoveHistoryMany,
+    onClearHistory,
     folderHistory,
     onRemoveFolder,
     onReveal,
@@ -802,6 +808,10 @@ export default function Sidebar(props: Props) {
   }, [activePath, versionList]);
   const [entries, setEntries] = useState<FsEntry[]>([]);
   const [menu, setMenu] = useState<MenuTarget | null>(null);
+  /** History rows picked for a bulk remove, by `pathKey`. Independent of the tree's selection. */
+  const [histSelected, setHistSelected] = useState<Set<string>>(new Set());
+  /** The row a Shift+click measures its range from, within the history list. */
+  const [histAnchor, setHistAnchor] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuAt = useMenuPlacement(menu, menuRef);
   /** The node's local git state once the probe has answered; null while asking or outside a repo. */
@@ -1140,6 +1150,33 @@ export default function Sidebar(props: Props) {
     setAnchor(null);
   };
 
+  /** Ctrl+click on a history row: in or out of the bulk selection, nothing opened. */
+  const toggleHistSelect = (path: string) => {
+    const key = pathKey(path);
+    setHistSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+    setHistAnchor(key);
+  };
+
+  /** Shift+click on a history row: everything between the anchor and it, in list order. */
+  const histSelectRange = (path: string) => {
+    const key = pathKey(path);
+    const keys = history.map((item) => pathKey(item.path));
+    const to = keys.indexOf(key);
+    const from = histAnchor === null ? -1 : keys.indexOf(histAnchor);
+    if (from < 0 || to < 0) {
+      setHistSelected(new Set([key]));
+      setHistAnchor(key);
+      return;
+    }
+    const [start, end] = from <= to ? [from, to] : [to, from];
+    setHistSelected(new Set(keys.slice(start, end + 1)));
+  };
+
   /**
    * Carry out a batch the dialog has worked out, then re-read every folder an entry came
    * from: rows are listings of one folder, so those folders are the whole of what changed.
@@ -1216,10 +1253,13 @@ export default function Sidebar(props: Props) {
   }, [rootDir, onError, view, rootToken]);
 
   // Rows of another folder are not rows of this one, so a selection does not outlive a change
-  // of what the tree is showing.
+  // of what the tree is showing. The history's own selection dies on the same boundary: a
+  // bulk remove aimed at the list must not stay armed once the list is off screen.
   useEffect(() => {
     setSelected(new Map());
     setAnchor(null);
+    setHistSelected(new Set());
+    setHistAnchor(null);
   }, [view, rootDir]);
 
   if (!visible) return null;
@@ -1469,30 +1509,73 @@ export default function Sidebar(props: Props) {
       </div>
 
       <div className={`side-view${view === "history" ? " active" : ""}`}>
+        {history.length > 0 && (
+          <div className="side-actions">
+            {histSelected.size > 0 && (
+              <button
+                className="side-btn"
+                onClick={() => {
+                  onRemoveHistoryMany(
+                    history
+                      .filter((h) => histSelected.has(pathKey(h.path)))
+                      .map((h) => h.path)
+                  );
+                  setHistSelected(new Set());
+                  setHistAnchor(null);
+                }}
+              >
+                {t("side.removeSelected", { n: histSelected.size })}
+              </button>
+            )}
+            <button className="side-btn" onClick={onClearHistory}>
+              {t("side.clearHistory")}
+            </button>
+          </div>
+        )}
         {history.length === 0 ? (
           <div className="empty">{t("side.noHistory")}</div>
         ) : (
-          history.map((item) => (
-            <div
-              key={item.path}
-              className="hist-item"
-              title={item.path}
-              onClick={() => onOpenPath(item.path)}
-            >
-              <span className="hi-name">{item.name}</span>
-              <span className="hi-path">{item.path}</span>
-              <button
-                className="hist-remove"
-                title={t("side.removeHistory")}
+          history.map((item) => {
+            const key = pathKey(item.path);
+            return (
+              <div
+                key={item.path}
+                className={`hist-item${histSelected.has(key) ? " selected" : ""}`}
+                title={item.path}
                 onClick={(e) => {
-                  e.stopPropagation();
-                  onRemoveHistory(item.path);
+                  // Multi-select rides the same modifiers as the tree: Ctrl toggles, Shift
+                  // spans. A plain click keeps opening the file, but first drops a selection
+                  // that would otherwise keep a bulk remove armed against rows off screen.
+                  if (e.ctrlKey || e.metaKey) {
+                    toggleHistSelect(item.path);
+                    return;
+                  }
+                  if (e.shiftKey) {
+                    histSelectRange(item.path);
+                    return;
+                  }
+                  if (histSelected.size > 0) {
+                    setHistSelected(new Set());
+                    setHistAnchor(null);
+                  }
+                  onOpenPath(item.path);
                 }}
               >
-                ×
-              </button>
-            </div>
-          ))
+                <span className="hi-name">{item.name}</span>
+                <span className="hi-path">{item.path}</span>
+                <button
+                  className="hist-remove"
+                  title={t("side.removeHistory")}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onRemoveHistory(item.path);
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })
         )}
       </div>
 

@@ -1610,6 +1610,13 @@ body.resizing .editor-host {
 .hist-item:hover {
   background: var(--surface-2);
 }
+/* A row picked for a bulk remove reads the same as a tree row picked for a batch rename. */
+.hist-item.selected {
+  background: var(--surface-active);
+}
+.hist-item.selected .hi-name {
+  color: var(--text);
+}
 .hist-item .hi-name {
   /* Same variable as the tree: both are the sidebar's list content, and their old sizes already
      agreed at 12px, so the setting moves them together. The path under the name stays a step

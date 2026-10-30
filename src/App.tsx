@@ -22,6 +22,7 @@ import GitLocalSettingsDialog from "./components/GitLocalSettingsDialog";
 import CommitTabView from "./components/CommitTabView";
 import DraftRestoreSummary from "./components/DraftRestoreSummary";
 import ComparePickerDialog from "./components/ComparePickerDialog";
+import ClearHistoryDialog from "./components/ClearHistoryDialog";
 import CloseConfirmDialog from "./components/CloseConfirmDialog";
 import ReloadConfirmDialog from "./components/ReloadConfirmDialog";
 import DeletedFileDialog from "./components/DeletedFileDialog";
@@ -433,6 +434,8 @@ export default function App() {
   const [compareFrom, setCompareFrom] = useState<CompareRef | null>(null);
   /** The repository whose local Git settings dialog is open, or null. */
   const [localSettingsRoot, setLocalSettingsRoot] = useState<string | null>(null);
+  /** The clear-history confirmation, shown before the whole recent-files list is dropped. */
+  const [confirmingClear, setConfirmingClear] = useState(false);
 
   const editorRef = useRef<EditorHandle | null>(null);
   const draft = useDraft(toast);
@@ -2392,6 +2395,13 @@ const defaultModeFor = useCallback(
               .then(setHistory)
               .catch((e) => toast(errorMessage(e)))
           }
+          onRemoveHistoryMany={(paths) =>
+            api
+              .removeHistoryMany(paths)
+              .then(setHistory)
+              .catch((e) => toast(errorMessage(e)))
+          }
+          onClearHistory={() => setConfirmingClear(true)}
           onReveal={(path) => {
             revealItemInDir(path).catch((e) => toast(errorMessage(e)));
           }}
@@ -3001,6 +3011,23 @@ const defaultModeFor = useCallback(
           onChanged={() => refreshGitLocal(localSettingsRoot)}
           onOpenPath={(path) => void tabs.openPath(path)}
           onError={toast}
+        />
+      )}
+
+      {confirmingClear && (
+        <ClearHistoryDialog
+          count={history.length}
+          onConfirm={() => {
+            setConfirmingClear(false);
+            api
+              .clearHistory()
+              .then(() => {
+                setHistory([]);
+                toast(t("side.historyCleared"));
+              })
+              .catch((e) => toast(errorMessage(e)));
+          }}
+          onCancel={() => setConfirmingClear(false)}
         />
       )}
 

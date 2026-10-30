@@ -1288,6 +1288,28 @@ pub fn remove_history(app: AppHandle, path: String) -> Result<Vec<HistoryEntry>,
   Ok(history)
 }
 
+/// Remove several entries in one write. The list is tiny (capped at 50), so a linear scan per
+/// path is cheaper than the machinery of a set, and one command beats N round trips that each
+/// rewrite the file.
+#[tauri::command]
+pub fn remove_history_many(
+  app: AppHandle,
+  paths: Vec<String>,
+) -> Result<Vec<HistoryEntry>, String> {
+  let targets: Vec<String> = paths.iter().map(|p| draft::normalize_path(p)).collect();
+  let mut history = read_json::<Vec<HistoryEntry>>(&app, "history.json")?.unwrap_or_default();
+  history.retain(|h| !targets.contains(&draft::normalize_path(&h.path)));
+  write_json(&app, "history.json", &history)?;
+  Ok(history)
+}
+
+/// Forget every opened file. The list is written empty rather than deleted, so a first run and a
+/// cleared one read the same and no caller has to special-case a missing file.
+#[tauri::command]
+pub fn clear_history(app: AppHandle) -> Result<(), String> {
+  write_json(&app, "history.json", &Vec::<HistoryEntry>::new())
+}
+
 /// A folder the Explorer has been pointed at, newest first within its group.
 ///
 /// Separate from the file history in `history.json` because the two answer different

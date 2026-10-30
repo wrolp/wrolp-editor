@@ -860,6 +860,9 @@ export const api = {
     invoke<string>("render_diagram", { kind, source }),
   getHistory: () => invoke<HistoryEntry[]>("get_history"),
   removeHistory: (path: string) => invoke<HistoryEntry[]>("remove_history", { path }),
+  removeHistoryMany: (paths: string[]) =>
+    invoke<HistoryEntry[]>("remove_history_many", { paths }),
+  clearHistory: () => invoke<void>("clear_history"),
   getFolderHistory: (group: string) =>
     invoke<FolderHistoryEntry[]>("get_folder_history", { group }),
   recordFolderHistory: (group: string, dir: string) =>

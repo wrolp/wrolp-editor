@@ -82,6 +82,8 @@ pub fn run() {
       unlock::clear_remembered_passwords,
       commands::get_history,
       commands::remove_history,
+      commands::remove_history_many,
+      commands::clear_history,
       commands::get_folder_history,
       commands::record_folder_history,
       commands::remove_folder_history,
