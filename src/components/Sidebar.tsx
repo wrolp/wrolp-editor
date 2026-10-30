@@ -840,6 +840,8 @@ export default function Sidebar(props: Props) {
     caret: number;
   } | null>(null);
   const foldersArrow = useRef<HTMLButtonElement>(null);
+  /** The open panel itself, so a wheel inside it can be told from a wheel anywhere else. */
+  const foldersPanel = useRef<HTMLDivElement>(null);
   /**
    * What "Copy" last took, waiting to be pasted.
    *
@@ -954,13 +956,21 @@ export default function Sidebar(props: Props) {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") close();
     };
+    // A wheel over the panel is how one reaches the folders at the bottom of a long history, so
+    // it cannot dismiss it: inside the panel the gesture belongs to the list. Everywhere else
+    // it still closes, which is what the rest of the menus do. (Dismissing on `mousedown` stays
+    // right even for the scrollbar, because Chromium delivers no DOM mouse event for that.)
+    const onWheel = (e: WheelEvent) => {
+      if (foldersPanel.current?.contains(e.target as Node)) return;
+      close();
+    };
     window.addEventListener("mousedown", close);
-    window.addEventListener("wheel", close, { passive: true });
+    window.addEventListener("wheel", onWheel, { passive: true });
     window.addEventListener("blur", close);
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("mousedown", close);
-      window.removeEventListener("wheel", close);
+      window.removeEventListener("wheel", onWheel);
       window.removeEventListener("blur", close);
       window.removeEventListener("keydown", onKey);
     };
@@ -1336,6 +1346,7 @@ export default function Sidebar(props: Props) {
               </button>
               {foldersOpen && foldersAt && (
                 <div
+                  ref={foldersPanel}
                   className="folder-menu"
                   style={
                     {
