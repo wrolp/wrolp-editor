@@ -155,6 +155,8 @@ export interface MergeTabData {
   bom: boolean;
   eol: string;
   tooLarge: boolean;
+  /** Regions a three-way merge settled before the view opened; 0 when git's markers stand. */
+  autosolved?: number;
 }
 
 /**

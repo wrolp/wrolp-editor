@@ -2075,7 +2075,10 @@ export default function App() {
           toast(t("merge.tooLarge"));
           return;
         }
-        const mergedText = sides.merged ?? (sides.ours ?? sides.theirs ?? "");
+        // The regions the two sides changed differently are still marked; the ones they did
+        // not disagree about are already applied, so the view opens on the real questions.
+        const mergedText =
+          sides.autoMerged ?? sides.merged ?? (sides.ours ?? sides.theirs ?? "");
         const parsed = parseConflicts(mergedText);
         if (!parsed.ok) {
           toast(
@@ -2102,6 +2105,7 @@ export default function App() {
           bom: sides.bom,
           eol: sides.eol,
           tooLarge: sides.tooLarge,
+          autosolved: sides.autosolved,
         });
       } catch (e) {
         toast(errorMessage(e));

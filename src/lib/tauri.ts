@@ -554,6 +554,14 @@ export interface GitConflictSides {
   eol: string;
   /** The working tree is above the diff ceiling. */
   tooLarge: boolean;
+  /**
+   * A three-way merge of the three sides, when it settled at least one region. Regions both
+   * sides changed differently are still marked, in git's spelling; null means git's own
+   * working-tree text is all there is.
+   */
+  autoMerged: string | null;
+  /** How many regions that merge settled without asking. */
+  autosolved: number;
 }
 
 export interface GitIdentity {

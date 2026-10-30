@@ -27,6 +27,7 @@ use tauri::ipc::Channel;
 use tauri::{AppHandle, State};
 
 use super::auth::{self, AuthStore, Identity};
+use super::merge;
 use super::status::is_dirty;
 use super::{
   conflict_paths, discover, fail, git_path, rel_of, repo_info, signature, GitLocks, GitOps,
@@ -95,6 +96,11 @@ pub struct ConflictSides {
   pub eol: String,
   /// The working tree text is above the diff ceiling and was not carried.
   pub too_large: bool,
+  /// What a three-way merge of the three sides produced, when it settled at least one region.
+  /// Regions both sides changed differently are still marked, in git's spelling.
+  pub auto_merged: Option<String>,
+  /// How many regions the merge settled without asking.
+  pub autosolved: usize,
 }
 
 #[tauri::command]
@@ -925,6 +931,8 @@ pub(crate) fn conflict_sides_of(
     bom: false,
     eol: default_eol.to_string(),
     too_large: false,
+    auto_merged: None,
+    autosolved: 0,
   };
   let mut found = false;
   let conflicts = index.conflicts().map_err(|e| fail("index", e))?;
@@ -979,6 +987,21 @@ pub(crate) fn conflict_sides_of(
   }
   if sides.binary {
     sides.merged = None;
+  }
+
+  // Most conflicts are not disagreements: the two sides touched different regions, and git
+  // only wrote markers because neither was applied. Merging against the base settles those
+  // here, so the view opens on the few regions that really need an answer. A binary or
+  // oversized file, or one whose working tree is gone, is left exactly as git wrote it.
+  if !sides.binary && !sides.too_large && sides.merged.is_some() {
+    if let (Some(base), Some(ours), Some(theirs)) = (&sides.base, &sides.ours, &sides.theirs) {
+      if let Some((text, settled)) = merge::merge3(base, ours, theirs) {
+        if settled > 0 {
+          sides.auto_merged = Some(text);
+          sides.autosolved = settled;
+        }
+      }
+    }
   }
   Ok(sides)
 }

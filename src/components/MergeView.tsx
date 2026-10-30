@@ -379,6 +379,13 @@ export default function MergeView(props: Props) {
                     : "merge.unordered"
               )}
         </span>
+        {/* Regions the two sides did not disagree about were applied before the view opened,
+            so this says how much of the file is already settled. */}
+        {!!data.autosolved && (
+          <span className="merge-autosolved">
+            {t("merge.autosolved", { n: data.autosolved })}
+          </span>
+        )}
         <span className="merge-spacer" />
         <button
           className="merge-tool"
