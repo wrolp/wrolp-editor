@@ -117,7 +117,13 @@ export function checkReleaseReady({ root, version, tag }) {
 export function publishedVersions(repo) {
   const result = spawnSync(
     'gh',
-    ['api', `repos/${repo}/releases?per_page=100`, '--jq', '[.[] | select(.draft | not) | .tag_name] | join("\\n")'],
+    [
+      'api',
+      `repos/${repo}/releases`,
+      '--paginate',
+      '--jq',
+      '[.[] | select(.draft | not) | .tag_name] | join("\\n")',
+    ],
     { encoding: 'utf8' }
   )
   if (result.status !== 0) return null
