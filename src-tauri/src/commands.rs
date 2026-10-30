@@ -1268,7 +1268,15 @@ pub(crate) fn push_history_entry(app: &AppHandle, path: &str) -> Result<(), Stri
     },
   );
   history.truncate(50);
-  write_json(app, "history.json", &history)
+  write_json(app, "history.json", &history)?;
+  // This is the only place the recent-files list is written, and both opening and saving a
+  // file come through it. Announcing it here is what keeps the sidebar honest without the
+  // frontend having to guess which of its actions touched the list: opening a file from the
+  // Explorer, from the command line, or by handing it to the running window are all the
+  // same write, and so is a save that moves an entry back to the top.
+  use tauri::Emitter;
+  let _ = app.emit("history-changed", ());
+  Ok(())
 }
 
 #[tauri::command]

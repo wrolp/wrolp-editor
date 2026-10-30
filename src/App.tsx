@@ -780,11 +780,16 @@ export default function App() {
   useEffect(() => {
     refreshHistory();
     const unlisten = listen<string>("open-file", (event) => void tabs.openPath(event.payload));
+    // The recent-files list has one writer on the backend, which announces every write: this
+    // is how an entry appears in the History view as soon as the file is opened, instead of
+    // only after a restart. A file handed over by a second instance arrives the same way.
+    const unlistenHistory = listen("history-changed", () => refreshHistory());
     return () => {
       unlisten.then((f) => f());
+      unlistenHistory.then((f) => f());
     };
-    // `refreshHistory` and the tab handle are read for their first values only; the listener
-    // is set up once and must not be torn down and re-made when either is rebuilt.
+    // `refreshHistory` and the tab handle are read for their first values only; the listeners
+    // are set up once and must not be torn down and re-made when either is rebuilt.
   }, [refreshHistory]);
 
   // Each group has its own folder menu, so it is read on mount and again whenever the group on
