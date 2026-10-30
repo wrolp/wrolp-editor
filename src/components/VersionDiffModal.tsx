@@ -319,6 +319,10 @@ export default function VersionDiffModal(props: Props) {
             // only releases the ones it attached at unmount.
             key={`${left}|${right}`}
             pair={pair}
+            // Folded texts renumber from 1 in every hunk; these keep the gutter honest.
+            lineNumbers={
+              folded ? { left: folded.leftNumbers, right: folded.rightNumbers } : undefined
+            }
             fontSize={props.fontSize}
             renderWhitespace={props.renderWhitespace}
             wordWrap={props.wordWrap}

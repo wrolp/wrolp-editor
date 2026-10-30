@@ -101,6 +101,11 @@ export default function ComparePane({
         pair.right.oid
       )}`}
       pair={shown}
+      // A folded model renumbers its lines from 1 in every hunk; these keep the gutter naming
+      // the lines of the file the user actually has.
+      lineNumbers={
+        folded ? { left: folded.leftNumbers, right: folded.rightNumbers } : undefined
+      }
       fontSize={fontSize}
       renderWhitespace={renderWhitespace}
       wordWrap={wrap}

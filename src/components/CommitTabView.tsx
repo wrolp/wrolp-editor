@@ -350,6 +350,10 @@ function CommitFileDiff({
         <DiffView
           key={file.path}
           pair={pair}
+          // Folded texts renumber from 1 in every hunk; these keep the gutter honest.
+          lineNumbers={
+            folded ? { left: folded.leftNumbers, right: folded.rightNumbers } : undefined
+          }
           fontSize={fontSize}
           renderWhitespace={renderWhitespace}
           wordWrap={wordWrap}

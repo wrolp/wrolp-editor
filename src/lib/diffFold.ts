@@ -39,6 +39,16 @@ export interface FoldedPair {
   hunks: number;
   /** Whether the fold dropped anything at all. */
   folded: boolean;
+  /**
+   * The original line number behind each line of `left`, in the same order.
+   *
+   * A folded model is a different document, so its own line numbers start at 1 in every hunk
+   * and say nothing about where the text came from. The caller hands these back to the editor
+   * so the gutter keeps naming the lines of the file the user actually has.
+   */
+  leftNumbers: number[];
+  /** The same for `right`. */
+  rightNumbers: number[];
 }
 
 /** Lines kept on each side of a change. Three is what `git diff` shows and what a reader scans. */
@@ -111,14 +121,37 @@ export function foldPair(
     groups.push({ left: wLeft, right: wRight });
   }
   if (groups.length === 0) {
-    return { left, right, hiddenLeft: 0, hiddenRight: 0, hunks: 0, folded: false };
+    return {
+      left,
+      right,
+      hiddenLeft: 0,
+      hiddenRight: 0,
+      hunks: 0,
+      folded: false,
+      // Nothing was cut, so every line still sits at its own number.
+      leftNumbers: leftLines.map((_, i) => i + 1),
+      rightNumbers: rightLines.map((_, i) => i + 1),
+    };
   }
-  const taken = (lines: string[], w: Window) => lines.slice(w.from - 1, w.to).join("\n");
-  const leftText = groups.map((g) => taken(leftLines, g.left)).filter((s) => s.length > 0).join("\n");
-  const rightText = groups
-    .map((g) => taken(rightLines, g.right))
-    .filter((s) => s.length > 0)
-    .join("\n");
+  /**
+   * One side's kept runs, each with the original line every line of it came from. The numbers
+   * are built here rather than recovered later: only this function knows which window a line
+   * of the folded text belongs to.
+   */
+  const parts = (lines: string[], windows: Window[]) => {
+    const out: { text: string; numbers: number[] }[] = [];
+    for (const w of windows) {
+      const slice = lines.slice(w.from - 1, w.to);
+      const text = slice.join("\n");
+      if (text.length === 0) continue;
+      out.push({ text, numbers: slice.map((_, i) => w.from + i) });
+    }
+    return out;
+  };
+  const leftParts = parts(leftLines, groups.map((g) => g.left));
+  const rightParts = parts(rightLines, groups.map((g) => g.right));
+  const leftText = leftParts.map((p) => p.text).join("\n");
+  const rightText = rightParts.map((p) => p.text).join("\n");
   const kept = (text: string) => (text.length === 0 ? 0 : text.split("\n").length);
   const keptLeft = kept(leftText);
   const keptRight = kept(rightText);
@@ -129,5 +162,7 @@ export function foldPair(
     hiddenRight: Math.max(0, rightLines.length - keptRight),
     hunks: groups.length,
     folded: keptLeft < leftLines.length || keptRight < rightLines.length,
+    leftNumbers: leftParts.flatMap((p) => p.numbers),
+    rightNumbers: rightParts.flatMap((p) => p.numbers),
   };
 }

@@ -40,6 +40,12 @@ interface Props {
    * rendered; the global setting stays the default this view starts from.
    */
   wrap?: { on: boolean; onToggle: () => void };
+  /**
+   * The original line number behind each line of each side, when the texts have been folded.
+   * A folded model is a different document whose gutter would otherwise count from 1 in every
+   * hunk; absent means the texts are the files themselves and their own numbers are right.
+   */
+  lineNumbers?: { left: number[]; right: number[] };
 }
 
 /**
@@ -64,11 +70,46 @@ export default function DiffView({
   onChanges,
   fold,
   wrap,
+  lineNumbers,
 }: Props) {
   const statsRef = useRef(onStats);
   statsRef.current = onStats;
   const changesRef = useRef(onChanges);
   changesRef.current = onChanges;
+  /** The mounted diff editor, so the gutter can be re-pointed when the fold changes. */
+  const diffRef = useRef<MonacoDiffEditor | null>(null);
+  const numbersRef = useRef(lineNumbers);
+  numbersRef.current = lineNumbers;
+
+  /**
+   * Point each side's gutter at the original line behind it.
+   *
+   * `lineNumbers` as a function is the only way to do this without rewriting the text: the
+   * alternative — putting the number into the line — would make it editable content and show
+   * up in a copy. The argument is 1-based, and beyond the map there is nothing better to say
+   * than the line's own number.
+   */
+  const applyLineNumbers = (instance: MonacoDiffEditor | null) => {
+    if (!instance) return;
+    const maps = numbersRef.current;
+    const sides: ["left" | "right", number[] | undefined][] = [
+      ["left", maps?.left],
+      ["right", maps?.right],
+    ];
+    for (const [side, numbers] of sides) {
+      const target = side === "left" ? instance.getOriginalEditor() : instance.getModifiedEditor();
+      if (!numbers || numbers.length === 0) {
+        target.updateOptions({ lineNumbers: "on" });
+        continue;
+      }
+      const widest = String(Math.max(...numbers)).length;
+      target.updateOptions({
+        lineNumbers: (line: number) =>
+          line >= 1 && line <= numbers.length ? String(numbers[line - 1]) : String(line),
+        lineNumbersMinChars: Math.max(3, widest),
+      });
+    }
+  };
 
   /**
    * Derived from the pair *in order*: swapping the two sides has to yield different URIs.
@@ -111,6 +152,12 @@ export default function DiffView({
   useEffect(() => {
     statsRef.current({ added: 0, removed: 0 });
   }, [base]);
+
+  // Re-point both gutters whenever the fold changes. The models are rebuilt with the folded
+  // texts, but `lineNumbers` is an editor option and lives on the editor, not the model.
+  useEffect(() => {
+    applyLineNumbers(diffRef.current);
+  }, [lineNumbers]);
 
   return (
     <div className="diff-view" title={t("cmp.readOnly")}>
@@ -173,6 +220,7 @@ export default function DiffView({
           theme="vs-dark"
           loading={<div className="editor-empty">{t("app.loading")}</div>}
           onMount={(instance) => {
+            diffRef.current = instance;
             // `tabSize` and friends live in monaco's IGlobalEditorOptions, which the diff
             // editor's construction options do not include, so they are applied to the two
             // embedded editors instead. Built as a variable: passing a literal here would
@@ -180,6 +228,7 @@ export default function DiffView({
             const indent = { tabSize, insertSpaces, detectIndentation };
             instance.getModifiedEditor().updateOptions(indent);
             instance.getOriginalEditor().updateOptions(indent);
+            applyLineNumbers(instance);
             // The first computation can land before this listener is attached, so the
             // totals are read once here as well as on every later update.
             report(instance);
