@@ -3015,6 +3015,42 @@ body.resizing .editor-host {
   font-size: 12px;
 }
 
+/* The pane a file that could not be read as text gets: the reason, and two ways out. */
+.unopenable {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  background: var(--bg);
+  text-align: center;
+  line-height: 1.8;
+}
+.unopenable-name {
+  color: var(--text-strong);
+  font-weight: 600;
+  font-size: 16px;
+  word-break: break-all;
+}
+.unopenable-reason {
+  color: var(--muted);
+  font-size: 13px;
+}
+.unopenable-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.unopenable-hint {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 /* ---------- Comparison view ----------
    A header naming both sides above Monaco's own split. The two columns are a 1fr 1fr
    grid, matching Monaco's default side-by-side split, so each name sits over the
@@ -3874,6 +3910,12 @@ body.resizing .editor-host {
   font-size: 13px;
   line-height: 1.8;
   text-align: center;
+}
+.gal-undrawable-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
 }
 /* Neighbours of the picture on screen, decoded ahead of time. Kept out of layout so a
    five-picture warm-up cannot change what is on screen. */

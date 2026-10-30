@@ -47,6 +47,9 @@ pub fn run() {
     .invoke_handler(tauri::generate_handler![
       commands::take_startup_files,
       commands::open_file,
+      commands::open_in_system,
+      commands::read_export_asset,
+      commands::write_export,
       commands::stat_file,
       commands::save_file,
       rename::rename_path,

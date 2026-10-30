@@ -5934,6 +5934,7 @@ dependencies = [
  "aes-gcm",
  "arboard",
  "argon2",
+ "base64 0.22.1",
  "chrono",
  "encoding_rs",
  "getrandom 0.2.17",

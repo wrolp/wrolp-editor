@@ -708,6 +708,12 @@ export const api = {
   /** `record: false` keeps a session restore from rewriting the recent-files history. */
   openFile: (path: string, record = true, encoding?: string) =>
     invoke<OpenedFile>("open_file", { path, record, encoding: encoding ?? null }),
+  /** Hand a file to the OS's default application. Validated on the backend, not via scope. */
+  openInSystem: (path: string) => invoke<void>("open_in_system", { path }),
+  /** Read one image a document references, as base64, under the asset-protocol scope. */
+  readExportAsset: (path: string) => invoke<string>("read_export_asset", { path }),
+  /** Write an exported document (.docx/.pdf); base64 so big bytes stay off the JSON wire. */
+  writeExport: (path: string, data: string) => invoke<void>("write_export", { path, data }),
   /**
    * Metadata only, so a background check of every open file stays cheap.
    *

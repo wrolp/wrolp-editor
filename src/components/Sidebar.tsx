@@ -708,6 +708,8 @@ interface Props extends Omit<
   onRemoveHistoryMany: (paths: string[]) => void;
   /** Ask to forget every opened file; the caller owns the confirmation dialog. */
   onClearHistory: () => void;
+  /** Hand a file to the OS's default application (validated on the backend). */
+  onOpenSystem: (path: string) => void;
   /** Folders this group's Explorer has been pointed at, newest first. */
   folderHistory: FolderHistoryEntry[];
   /** Forgets one folder so it stops being offered. */
@@ -787,6 +789,7 @@ export default function Sidebar(props: Props) {
     onRemoveHistory,
     onRemoveHistoryMany,
     onClearHistory,
+    onOpenSystem,
     folderHistory,
     onRemoveFolder,
     onReveal,
@@ -1812,6 +1815,18 @@ export default function Sidebar(props: Props) {
                       <IconCompare size={14} />
                     </span>
                     {t("cmp.menu")}
+                  </div>
+                  <div
+                    className="ctx-item"
+                    onClick={() => {
+                      onOpenSystem(menu.path);
+                      setMenu(null);
+                    }}
+                  >
+                    <span className="ctx-icon">
+                      <IconOpenFolder size={14} />
+                    </span>
+                    {t("side.menuOpenSystem")}
                   </div>
                 </>
               )}

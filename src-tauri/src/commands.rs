@@ -33,6 +33,29 @@ fn is_binary_ext(path: &str) -> bool {
     None => false,
   }
 }
+
+/// A file that decoded "successfully" but is really binary: no BOM, yet NUL bytes. UTF-16 is
+/// the one kind of legal text that carries NULs, and it always announces itself with a BOM,
+/// so the absence of one is what lets this reject PDFs, ZIPs and EXEs instead of showing them
+/// as a mojibake buffer that a save would write straight back over the original.
+pub(crate) fn is_binary_content(bytes: &[u8]) -> bool {
+  encoding_rs::Encoding::for_bom(bytes).is_none() && bytes.iter().take(8192).any(|b| *b == 0)
+}
+
+/// Whether a path can be handed to the OS's default app. Split out of the command so the
+/// checks (but not the actual launch) are unit-testable.
+fn check_openable(raw: &str) -> Result<PathBuf, String> {
+  let path = draft::normalize_path(raw);
+  if path.is_empty() {
+    return Err("path_empty".into());
+  }
+  let file = Path::new(&path);
+  let meta = std::fs::metadata(file).map_err(|e| format!("file_access:{e}"))?;
+  if !meta.is_file() {
+    return Err("file_not_file".into());
+  }
+  Ok(PathBuf::from(path))
+}
 /// Name used before a group was understood as a named set of tabs rather than a folder.
 const LEGACY_GROUPS_FILE: &str = "workspaces.json";
 
@@ -759,6 +782,12 @@ pub fn open_file(
   // unopenable) or succeeds into a mojibake buffer that must never be written back. It is
   // read for its metadata only, and the frontend renders it through the preview.
   let binary = is_binary_ext(&normalized);
+  // A picture is handled above; for everything else, NUL bytes without a BOM mean the file
+  // is not text and the legacy-encoding fallback would only produce a buffer that must never
+  // be saved. This must run after the picture check, or a PNG would lose its preview identity.
+  if !binary && is_binary_content(&source.bytes) {
+    return Err("binary_content".into());
+  }
   // A per-file encoding override wins over the global default, so a file that needs
   // GBK forced on it is honoured before we decode rather than after.
   let global = match encoding.filter(|e| !e.trim().is_empty()) {
@@ -792,6 +821,16 @@ pub fn open_file(
     encrypted: false,
     locked: false,
   })
+}
+
+/// Open a file with the OS's default application. The frontend offers this for files the
+/// editor cannot read (too large, undecodable, a foreign container) and for any file the user
+/// would rather hand to something else. The path is validated here; the webview's `open-path`
+/// capability stays scoped to the three config folders, so this is the only way out.
+#[tauri::command]
+pub fn open_in_system(path: String) -> Result<(), String> {
+  let file = check_openable(&path)?;
+  tauri_plugin_opener::open_path(&file, None::<&str>).map_err(|e| format!("open_system:{e}"))
 }
 
 /// Current mtime and size, for the check that asks whether another program wrote the file.
@@ -1020,6 +1059,52 @@ pub fn allow_asset_dir(app: AppHandle, dir: String) -> Result<(), String> {
     .asset_protocol_scope()
     .allow_directory(path, true)
     .map_err(|e| format!("asset_scope:{e}"))
+}
+
+/// The largest single image an export will inline, and the largest file an export will write.
+pub(crate) const EXPORT_ASSET_MAX: u64 = 12 * 1024 * 1024;
+pub(crate) const EXPORT_MAX_BYTES: u64 = 64 * 1024 * 1024;
+
+/// Read one image a document references, as base64. The frontend has already granted the
+/// image's directory to the asset protocol for the preview, so the same scope is the lock
+/// here — an export cannot turn into a "read any file" back door, and it reads nothing the
+/// preview could not have shown anyway.
+#[tauri::command]
+pub fn read_export_asset(app: AppHandle, path: String) -> Result<String, String> {
+  let normalized = draft::normalize_path(&path);
+  let file = Path::new(&normalized);
+  if !app.asset_protocol_scope().is_allowed(file) {
+    return Err("asset_scope_refused".into());
+  }
+  let meta = std::fs::metadata(file).map_err(|e| format!("file_access:{e}"))?;
+  if meta.len() > EXPORT_ASSET_MAX {
+    return Err("export_asset_too_large".into());
+  }
+  let bytes = std::fs::read(file).map_err(|e| format!("file_read:{e}"))?;
+  use base64::Engine as _;
+  Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
+/// Write an exported document (.docx, .pdf) to disk. Base64 rather than a byte array because
+/// the invoke payload is JSON and a number array for a few megabytes is both slow and bloated.
+/// The file is written atomically so a failed export never leaves a half-written document.
+#[tauri::command]
+pub fn write_export(path: String, data: String) -> Result<(), String> {
+  use base64::Engine as _;
+  let bytes = base64::engine::general_purpose::STANDARD
+    .decode(data.as_bytes())
+    .map_err(|_| "export_decode".to_string())?;
+  if bytes.len() as u64 > EXPORT_MAX_BYTES {
+    return Err("export_too_large".into());
+  }
+  let normalized = draft::normalize_path(&path);
+  let file = Path::new(&normalized);
+  if let Some(parent) = file.parent() {
+    if !parent.as_os_str().is_empty() {
+      std::fs::create_dir_all(parent).map_err(|e| format!("export_write:{e}"))?;
+    }
+  }
+  write_atomic(file, &bytes).map_err(|e| format!("export_write:{e}"))
 }
 
 /// Renders a diagram with a locally installed program, returning SVG.
@@ -1820,6 +1905,39 @@ mod tests {
     ] {
       assert!(is_binary_ext(name), "{name} should be treated as a picture");
     }
+  }
+
+  /// A BOM is a real declaration of text; NUL bytes without one mean binary, so a PDF or a
+  /// ZIP is refused rather than shown as a mojibake buffer a save would write straight back.
+  #[test]
+  fn nul_without_bom_is_binary_content() {
+    assert!(!is_binary_content(b"hello world"));
+    // UTF-16LE with its BOM: legal text, and the one case of text that contains NULs.
+    assert!(!is_binary_content(&[0xFF, 0xFE, b'a', 0x00, b'b', 0x00]));
+    // A PNG body: the signature is NUL-free, the chunk data is not.
+    let mut png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+    png.extend_from_slice(&[0, 0, 0, 0]);
+    assert!(is_binary_content(&png));
+    // Arbitrary bytes with a NUL among them.
+    assert!(is_binary_content(&[0x01, 0x02, 0x00, 0x03]));
+    // A NUL beyond the 8 KiB sniff window is ignored, so a big text file is not refused.
+    let mut long = vec![b'x'; 9000];
+    long.push(0);
+    assert!(!is_binary_content(&long));
+  }
+
+  /// The checks run before anything is launched, so they are exercisable without starting a
+  /// program. Only the empty-path and missing-file cases are safe to assert here: "is a
+  /// directory" depends on the machine's layout.
+  #[test]
+  fn open_in_system_rejects_bad_paths() {
+    assert_eq!(check_openable("").unwrap_err(), "path_empty");
+    assert!(
+      check_openable(r"Z:\wrolp-definitely-not-here\nothing.txt")
+        .unwrap_err()
+        .starts_with("file_access:"),
+      "a path that does not exist is a file_access error"
+    );
   }
 
   #[test]

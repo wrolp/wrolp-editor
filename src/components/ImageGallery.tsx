@@ -222,15 +222,26 @@ function Undrawable({ path }: { path: string }) {
   return (
     <div className="gal-undrawable">
       <div>{t("gal.unsupported")}</div>
-      <button
-        className="btn small"
-        onClick={(e) => {
-          e.stopPropagation();
-          void revealItemInDir(path).catch(() => {});
-        }}
-      >
-        {t("img.openSystem")}
-      </button>
+      <div className="gal-undrawable-actions">
+        <button
+          className="btn small"
+          onClick={(e) => {
+            e.stopPropagation();
+            void api.openInSystem(path).catch(() => {});
+          }}
+        >
+          {t("side.menuOpenSystem")}
+        </button>
+        <button
+          className="btn small"
+          onClick={(e) => {
+            e.stopPropagation();
+            void revealItemInDir(path).catch(() => {});
+          }}
+        >
+          {t("img.openSystem")}
+        </button>
+      </div>
     </div>
   );
 }

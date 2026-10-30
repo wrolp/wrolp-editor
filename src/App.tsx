@@ -23,6 +23,8 @@ import CommitTabView from "./components/CommitTabView";
 import DraftRestoreSummary from "./components/DraftRestoreSummary";
 import ComparePickerDialog from "./components/ComparePickerDialog";
 import ClearHistoryDialog from "./components/ClearHistoryDialog";
+import RunConfirmDialog from "./components/RunConfirmDialog";
+import UnopenablePane from "./components/UnopenablePane";
 import CloseConfirmDialog from "./components/CloseConfirmDialog";
 import ReloadConfirmDialog from "./components/ReloadConfirmDialog";
 import DeletedFileDialog from "./components/DeletedFileDialog";
@@ -61,6 +63,7 @@ import {
   basename,
   dirname,
   isBitmapImage,
+  isExecutableExt,
   isHtml,
   isMarkdown,
   isPreviewableImage,
@@ -272,7 +275,7 @@ function eolLabel(value: string | null): string {
 /** The line ending a save of this tab writes. Empty for a tab that is not a text file: a
  * picture has no text to end, and Settings and comparison tabs are not files. */
 function eolShownFor(tab: Tab | null, defaultEol: string): string {
-  if (!tab || !isFileTab(tab) || tab.isBinary) return "";
+  if (!tab || !isFileTab(tab) || tab.isBinary || tab.unopenable) return "";
   return eolLabel(lineEndingFor(tab, defaultEol));
 }
 
@@ -436,6 +439,8 @@ export default function App() {
   const [localSettingsRoot, setLocalSettingsRoot] = useState<string | null>(null);
   /** The clear-history confirmation, shown before the whole recent-files list is dropped. */
   const [confirmingClear, setConfirmingClear] = useState(false);
+  /** The file whose "open with the default app" is paused on the run-confirmation. */
+  const [runConfirm, setRunConfirm] = useState<{ path: string; name: string } | null>(null);
 
   const editorRef = useRef<EditorHandle | null>(null);
   const draft = useDraft(toast);
@@ -1425,7 +1430,7 @@ export default function App() {
   const compareCandidates = useCallback(
     (left: CompareRef) =>
       tabs.tabs
-        .filter((tab) => isFileTab(tab) && !tab.isBinary && !isLockedBlank(tab))
+        .filter((tab) => isFileTab(tab) && !tab.isBinary && !tab.unopenable && !isLockedBlank(tab))
         .filter((tab) => !(left.kind === "buffer" && tab.id === left.tabId))
         .filter((tab) => !(left.kind === "disk" && pathKey(tab.path) === pathKey(left.path)))
         .map((tab) => ({
@@ -1576,6 +1581,22 @@ export default function App() {
       window.removeEventListener("blur", onBlur);
     };
   }, [tabMenu]);
+
+  /**
+   * Hand a file to the OS's default application. Anything whose extension means "program,
+   * not document" gets a confirmation first, because one click on a checked-out `.bat` or
+   * `.js` would run it. The actual launch is one backend command, never a widened capability.
+   */
+  const askOpenInSystem = useCallback(
+    (path: string) => {
+      if (isExecutableExt(path)) {
+        setRunConfirm({ path, name: basename(path) });
+        return;
+      }
+      api.openInSystem(path).catch((e) => toast(errorMessage(e)));
+    },
+    [toast]
+  );
 
   const runTabAction = useCallback(
     async (action: "reveal" | "copy" | "sidebar") => {
@@ -1759,6 +1780,7 @@ export default function App() {
         tab.merge ||
         tab.commit ||
         tab.isBinary ||
+        tab.unopenable ||
         tab.encrypted ||
         isLockedBlank(tab) ||
         !tab.dirty ||
@@ -2197,6 +2219,11 @@ const defaultModeFor = useCallback(
   /** A comparison owns the pane; the text editor is only hidden behind it. */
   const showDiff = !!editorTab?.compare;
   /**
+   * A file that could not be read as text: the editor is hidden and an UnopenablePane takes
+   * the space, so the failure and its two exits are the whole story rather than a toast.
+   */
+  const showUnopenable = !!tabs.fileTab?.unopenable;
+  /**
    * A picture that is being shown as text, and the editor is not what should be on screen.
    * Reachable by switching the layout — which used to be a silent no-op from the user's
    * point of view, since the pane simply stayed empty. The hint names the cause and offers
@@ -2350,6 +2377,7 @@ const defaultModeFor = useCallback(
           }
           onOpenPath={tabs.openPath}
           onCompare={(path) => void startCompare({ kind: "disk", path })}
+          onOpenSystem={askOpenInSystem}
           onCompareVersion={(path, oid) => void openVersionDiff(path, oid)}
           onRestoreVersion={(path, oid) => void restoreFromList(path, oid)}
           onRename={(target, name) => renameEntry(target.path, name)}
@@ -2440,7 +2468,13 @@ const defaultModeFor = useCallback(
               className="editor-host"
               style={{
                 display:
-                  showSettings || showGallery || !showEditor || showDiff || showMerge || showCommit
+                  showSettings ||
+                  showGallery ||
+                  !showEditor ||
+                  showDiff ||
+                  showMerge ||
+                  showCommit ||
+                  showUnopenable
                     ? "none"
                     : "block",
               }}
@@ -2486,6 +2520,17 @@ const defaultModeFor = useCallback(
                 </div>
               )}
             </div>
+          )}
+
+          {/* A file that could not be read takes the pane, like a comparison, but the editor
+              behind it is hidden rather than removed. */}
+          {showUnopenable && tabs.fileTab?.unopenable && (
+            <UnopenablePane
+              name={tabs.fileTab.name}
+              path={tabs.fileTab.path}
+              error={tabs.fileTab.unopenable.error}
+              onNotice={toast}
+            />
           )}
 
           {/* A comparison takes the pane but never replaces the editor above: that one
@@ -2706,6 +2751,22 @@ const defaultModeFor = useCallback(
                 </span>
                 {t("title.menuReveal")}
               </div>
+              {/* Any file on disk can be handed to the OS's default app, not just the ones the
+                  editor cannot read. An unsaved buffer has no file to hand over. */}
+              {!isUntitled(menuTabPath) && (
+                <div
+                  className="ctx-item"
+                  onClick={() => {
+                    if (menuTabPath) askOpenInSystem(menuTabPath);
+                    setTabMenu(null);
+                  }}
+                >
+                  <span className="ctx-icon">
+                    <IconOpenFolder size={14} />
+                  </span>
+                  {t("tab.menuOpenSystem")}
+                </div>
+              )}
               <div
                 className="ctx-item"
                 onClick={() => {
@@ -3028,6 +3089,18 @@ const defaultModeFor = useCallback(
               .catch((e) => toast(errorMessage(e)));
           }}
           onCancel={() => setConfirmingClear(false)}
+        />
+      )}
+
+      {runConfirm && (
+        <RunConfirmDialog
+          name={runConfirm.name}
+          onRun={() => {
+            const target = runConfirm;
+            setRunConfirm(null);
+            api.openInSystem(target.path).catch((e) => toast(errorMessage(e)));
+          }}
+          onCancel={() => setRunConfirm(null)}
         />
       )}
 

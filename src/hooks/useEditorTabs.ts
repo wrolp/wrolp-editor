@@ -42,6 +42,20 @@ interface RestoreResult {
 }
 
 /**
+ * The error codes that mean "the editor cannot read this file as text", which is what sends
+ * a file to the default app instead of a toast that vanishes. Everything else — permission
+ * denied, a read failure, not a file, a misconfigured encoding — is transient or fixable, so
+ * it still just toasts. The raw error string carries `code` or `code:detail`; the code is
+ * everything before the first colon.
+ */
+const UNOPENABLE_CODES = new Set([
+  "file_too_large",
+  "file_undecodable",
+  "encrypted_foreign_format",
+  "binary_content",
+]);
+
+/**
  * How a save is asked for. `overwrite` answers the "the file changed on disk" question yes in
  * advance; `quiet` holds back the notice, which the automatic save has no click to attach one to;
  * `note` is the word about this save that *Create version* typed, and it goes onto the version the
@@ -462,8 +476,10 @@ export function useEditorTabs({
       }
 
       // A picture is never restored into: the "buffer" here is the empty stand-in, and
-      // writing text over an image would destroy it.
-      if (tabsRef.current.find((t) => t.id === req.tabId)?.isBinary) {
+      // writing text over an image would destroy it. An unopenable file has no buffer at all,
+      // so a draft restored onto it would invent unsaved content for a file with none.
+      const reqTab = tabsRef.current.find((t) => t.id === req.tabId);
+      if (reqTab?.isBinary || reqTab?.unopenable) {
         await api.clearDraft(req.path).catch((e) => toast(errorMessage(e)));
         return false;
       }
@@ -614,8 +630,42 @@ export function useEditorTabs({
       try {
         disk = await api.openFile(raw, record, encodingRef.current);
       } catch (e) {
-        if (record) toast(errorMessage(e));
-        return false;
+        // A restore (record: false) never leaves a placeholder behind: a session that comes
+        // back up must not re-stage files that failed yesterday.
+        if (!record) return false;
+        const err = String(e);
+        const code = err.split(":", 1)[0];
+        if (!UNOPENABLE_CODES.has(code)) {
+          toast(errorMessage(e));
+          return false;
+        }
+        // A placeholder is a real tab keyed by its path: reopening the same file activates it
+        // instead of stacking a second one, the same way a normal open reuses a file tab.
+        const existing = tabsRef.current.find(
+          (t) => isFileTab(t) && pathKey(t.path) === pathKey(raw)
+        );
+        if (existing) {
+          await activate(existing.id);
+          return true;
+        }
+        const target: Tab = {
+          id: nextId(),
+          // The path as it was asked for, not re-normalized: this tab is never saved, drafted
+          // or versioned, so its path only has to display, locate and open.
+          path: raw,
+          name: basename(raw),
+          language: langOf(raw),
+          original: "",
+          dirty: false,
+          unopenable: { error: err },
+          encoding: "",
+          bom: false,
+          bytes: null,
+          fileSettings: EMPTY_FILE_SETTINGS,
+        };
+        setTabs((prev) => [...prev, target]);
+        await activate(target.id);
+        return true;
       }
       const opened = tabsRef.current.find(
         (t) => isFileTab(t) && pathKey(t.path) === pathKey(disk.path)
@@ -1058,7 +1108,7 @@ export function useEditorTabs({
   /** Serializable view of the open tabs, for the group store. */
   const snapshotTabs = useCallback((): { tabs: GroupTab[]; active: string } => {
     const h = editorRef.current;
-    const live = tabsRef.current.filter(isFileTab);
+    const live = tabsRef.current.filter((t) => isFileTab(t) && !t.unopenable);
     const tabs = live.map((tab) => {
       const model = h?.monaco.editor.getModel(h.monaco.Uri.parse(modelUri(tab.path)));
       return toStoredTab({
@@ -1623,7 +1673,7 @@ export function useEditorTabs({
     const h = editorRef.current;
     // A picture has no buffer to write. Saving one would write the empty text that stands
     // in for it and destroy the file, so this is refused rather than merely discouraged.
-    if (!tab || !isFileTab(tab) || tab.isBinary || !h) return false;
+    if (!tab || !isFileTab(tab) || tab.isBinary || tab.unopenable || !h) return false;
     // An encrypted file with no key behind it cannot be written: the backend refuses it, and
     // for a tab that was never unlocked the buffer is empty, so writing it would be writing
     // nothing over a document. Ask for the password and run the save again once it is
@@ -1772,7 +1822,7 @@ export function useEditorTabs({
     (tab: Tab): boolean => {
       // A picture has no buffer, a lock has no key, and an untitled buffer has no file: the first
       // two cannot be written and the third would have to be asked for a name.
-      if (!isFileTab(tab) || !tab.dirty || tab.isBinary || tab.locked || isUntitled(tab.path))
+      if (!isFileTab(tab) || !tab.dirty || tab.isBinary || tab.unopenable || tab.locked || isUntitled(tab.path))
         return true;
       // A file another program has changed, or one that is gone from the disk, already has a
       // question in front of the user. Answering it by writing is their call, not a timer's — and
@@ -2235,7 +2285,7 @@ export function useEditorTabs({
   const saveAsEncrypted = useCallback(
     async (id: number) => {
       const tab = tabsRef.current.find((t) => t.id === id);
-      if (!tab || !isFileTab(tab) || tab.isBinary) return;
+      if (!tab || !isFileTab(tab) || tab.isBinary || tab.unopenable) return;
       const content = liveContent(tab) ?? tab.initialValue ?? tab.original;
       const target = await pickSaveAs(tab.name);
       if (!target) return;
@@ -2336,7 +2386,7 @@ export function useEditorTabs({
         // A picture has no text in it: the "buffer" behind one is the empty stand-in for its
         // bytes, so there is nothing here to keep and the preview going blank is the whole
         // of what happened.
-        if (!isFileTab(tab) || isUntitled(tab.path) || tab.mtime === undefined || tab.isBinary) {
+        if (!isFileTab(tab) || isUntitled(tab.path) || tab.mtime === undefined || tab.isBinary || tab.unopenable) {
           continue;
         }
         // A lock with no text behind it has nothing to compare and nothing to keep: every

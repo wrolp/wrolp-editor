@@ -29,6 +29,12 @@ export interface Tab {
    */
   isBinary?: boolean;
   /**
+   * The editor could not read this file as text (too large, undecodable, a foreign container,
+   * or binary content). `original` is empty and nothing here is ever saved, drafted or
+   * versioned; the tab exists so the failure can be read and handed to another app.
+   */
+  unopenable?: { error: string };
+  /**
    * A read-only side-by-side diff. The text is a snapshot taken when the comparison was
    * started: the pair has no model of its own, so it is never dirty and never carries a draft.
    */

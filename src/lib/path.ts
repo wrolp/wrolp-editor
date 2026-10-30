@@ -415,6 +415,20 @@ const BITMAP_EXT = new Set([
   "heic",
 ]);
 
+/**
+ * Extensions the OS treats as programs, not documents: "open with the default app" on one of
+ * these *runs* it. They get a confirmation before anything is launched, because a checked-out
+ * repository can hand the user a `.bat` or `.js` that one click executes.
+ */
+const EXECUTABLE_EXT = new Set([
+  "exe", "bat", "cmd", "com", "scr", "msi", "ps1", "vbs", "js", "jse", "wsf", "lnk", "reg",
+]);
+
+/** True when opening this path with the default app would execute it rather than open it. */
+export function isExecutableExt(path: string): boolean {
+  return EXECUTABLE_EXT.has(extOf(path).toLowerCase());
+}
+
 /** A raster image, as opposed to SVG, which is text that renders as a picture. */
 export function isBitmapImage(path: string): boolean {
   return BITMAP_EXT.has(extOf(path));
