@@ -449,6 +449,17 @@ export default function App() {
   const [confirmingClear, setConfirmingClear] = useState(false);
   /** The file whose "open with the default app" is paused on the run-confirmation. */
   const [runConfirm, setRunConfirm] = useState<{ path: string; name: string } | null>(null);
+  /**
+   * A PDF export in flight: what it is doing and how far it got. The first export of a
+   * picture-heavy document spends its time reading each image through the backend, and a
+   * click that does nothing visible for several seconds reads as a broken command.
+   */
+  const [exportJob, setExportJob] = useState<{
+    stage: "render" | "print";
+    done: number;
+    total: number;
+  } | null>(null);
+  const exportAbort = useRef<AbortController | null>(null);
 
   const editorRef = useRef<EditorHandle | null>(null);
   const draft = useDraft(toast);
@@ -1615,11 +1626,24 @@ export default function App() {
     async (tab: Tab) => {
       if (!isMarkdown(tab.path)) return;
       const text = tabs.tabText(tab.id) ?? tab.original;
+      const controller = new AbortController();
+      exportAbort.current = controller;
+      setExportJob({ stage: "render", done: 0, total: 0 });
       try {
-        const missing = await printMarkdown(text, tab.path);
+        const missing = await printMarkdown(text, tab.path, {
+          signal: controller.signal,
+          onProgress: (done, total) => setExportJob({ stage: "render", done, total }),
+          onStage: (stage) => setExportJob((job) => (job ? { ...job, stage } : job)),
+        });
         if (missing.length > 0) toast(t("export.missingImages", { n: missing.length }));
       } catch (e) {
-        toast(errorMessage(e));
+        // Cancelling is the user's own answer; reporting it back would only be noise.
+        if (!(e instanceof DOMException && e.name === "AbortError")) {
+          toast(errorMessage(e));
+        }
+      } finally {
+        exportAbort.current = null;
+        setExportJob(null);
       }
     },
     [tabs.tabText, toast]
@@ -3419,6 +3443,28 @@ const defaultModeFor = useCallback(
             }}
           />
         )
+      )}
+
+      {/* A PDF export spends its first run reading every picture through the backend; this
+          says so, and offers the way out. The button is disabled once the system dialog is
+          opening, because from there the dialog's own Cancel is the only thing that works. */}
+      {exportJob && (
+        <div className="export-progress" role="status">
+          <span>
+            {exportJob.stage === "print"
+              ? t("export.openingPrint")
+              : exportJob.total > 0
+                ? t("export.progress", { done: exportJob.done, total: exportJob.total })
+                : t("export.preparing")}
+          </span>
+          <button
+            className="btn small"
+            onClick={() => exportAbort.current?.abort()}
+            disabled={exportJob.stage === "print"}
+          >
+            {t("close.cancel")}
+          </button>
+        </div>
       )}
 
       <Toast

@@ -4804,6 +4804,32 @@ body.resizing .editor-host {
 }
 
 /* ---------- Toast ---------- */
+/* A PDF export can take a while on its first run — every picture is a separate backend read —
+   so the wait is shown with the way out of it, just above where the toast lands. */
+.export-progress {
+  position: fixed;
+  left: 50%;
+  bottom: 88px;
+  transform: translateX(-50%);
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 80vw;
+  padding: 8px 10px 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--toast-bg);
+  color: var(--text-strong);
+  font-size: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
+}
+.export-progress span {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .toast {
   position: fixed;
   bottom: 40px;
