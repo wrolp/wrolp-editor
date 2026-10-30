@@ -1815,7 +1815,10 @@ export function useEditorTabs({
   const autoSaveRef = useRef(autoSave);
   autoSaveRef.current = autoSave ?? autoSaveRef.current;
   /** One pending write per tab, keyed by its id. */
-  const autoSaveTimers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
+  // `number`, not `ReturnType<typeof setTimeout>`: with `@types/node` in the tree that
+  // resolves to Node's `Timeout`, while `window.setTimeout` — the one used here — returns a
+  // number, and the two are not interchangeable.
+  const autoSaveTimers = useRef(new Map<number, number>());
 
   /** Why this tab must not be written by the timer, or `false` when it may. */
   const autoSaveBlocked = useCallback(

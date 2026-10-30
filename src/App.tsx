@@ -77,6 +77,7 @@ import {
   rekeyPath,
 } from "./lib/path";
 import { printMarkdown } from "./lib/markdownExport";
+import { renderDocx, saveDocx } from "./lib/docxExport";
 import {
   isFileTab,
   isLockedBlank,
@@ -100,6 +101,7 @@ import {
   pickFile,
   pickFiles,
   pickFolder,
+  pickSaveAs,
   revealItemInDir,
   type FolderHistoryEntry,
   type GitCommitFile,
@@ -1619,6 +1621,34 @@ export default function App() {
     [tabs.tabText, toast]
   );
 
+  /**
+   * Export the markdown to a `.docx`. The document is rendered first and the destination is
+   * asked for afterwards: a render that fails should not leave the user answering a save
+   * dialog for a file that will never be written.
+   */
+  const exportWordTab = useCallback(
+    async (tab: Tab) => {
+      if (!isMarkdown(tab.path)) return;
+      const text = tabs.tabText(tab.id) ?? tab.original;
+      try {
+        const { blob, missing } = await renderDocx(text, tab.path);
+        if (blob.size > 10 * 1024 * 1024) {
+          toast(t("export.tooLarge"));
+          return;
+        }
+        const suggested = tab.path.replace(/\.[^./\\]+$/, "") + ".docx";
+        const target = await pickSaveAs(basename(suggested));
+        if (!target) return;
+        await saveDocx(blob, target);
+        if (missing.length > 0) toast(t("export.missingImages", { n: missing.length }));
+        toast(t("export.done", { name: basename(target) }));
+      } catch (e) {
+        toast(errorMessage(e));
+      }
+    },
+    [tabs.tabText, toast]
+  );
+
   const runTabAction = useCallback(
     async (action: "reveal" | "copy" | "sidebar") => {
       const path = menuTabPath;
@@ -2806,6 +2836,20 @@ const defaultModeFor = useCallback(
                     <IconFile size={14} />
                   </span>
                   {t("export.print")}
+                </div>
+              )}
+              {menuTabIsFile && isMarkdown(menuTabPath) && (
+                <div
+                  className="ctx-item"
+                  onClick={() => {
+                    setTabMenu(null);
+                    if (menuTab) void exportWordTab(menuTab);
+                  }}
+                >
+                  <span className="ctx-icon">
+                    <IconFile size={14} />
+                  </span>
+                  {t("export.word")}
                 </div>
               )}
               <div
