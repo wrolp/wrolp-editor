@@ -31,18 +31,49 @@ export function dirtyPaths(root) {
 }
 
 /**
- * Compare two `x.y.z` numerically, ignoring a `-prerelease` suffix.
+ * Compare two versions the way semver ranks them: numeric core, then a prerelease below the
+ * release it previews, then identifier by identifier with digits compared as numbers.
  *
- * Ignoring the suffix is deliberate: a `-rc` and the release it previews then compare equal, so
- * the gate asks for a fresh number rather than letting one version's assets be swapped twice.
+ * The prerelease half is what makes the `--pre` path work: `0.0.2-rc1` has the same core as
+ * `0.0.2`, and without ranking them the gate would call the release "not ahead" of its own
+ * candidates and refuse it.
+ *
+ * One semver consequence worth knowing when naming a candidate: `rc10` is a single alphanumeric
+ * identifier and is compared as text, so it ranks below `rc9`. Spell it `rc.10` and the number
+ * becomes its own numeric identifier, which compares as one.
  */
 export function compareVersions(a, b) {
-  const nums = (v) => v.replace(/^v/, '').split('-')[0].split('.').map((n) => parseInt(n, 10) || 0)
-  const left = nums(a)
-  const right = nums(b)
-  for (let i = 0; i < Math.max(left.length, right.length); i++) {
-    const diff = (left[i] ?? 0) - (right[i] ?? 0)
+  const parse = (value) => {
+    const text = value.replace(/^v/, '').split('+')[0]
+    const dash = text.indexOf('-')
+    const core = (dash < 0 ? text : text.slice(0, dash)).split('.').map((n) => parseInt(n, 10) || 0)
+    const pre = dash < 0 ? null : text.slice(dash + 1).split('.')
+    return { core, pre }
+  }
+  const left = parse(a)
+  const right = parse(b)
+  for (let i = 0; i < Math.max(left.core.length, right.core.length); i++) {
+    const diff = (left.core[i] ?? 0) - (right.core[i] ?? 0)
     if (diff) return diff
+  }
+  if (left.pre === null && right.pre === null) return 0
+  if (left.pre === null) return 1
+  if (right.pre === null) return -1
+  for (let i = 0; i < Math.max(left.pre.length, right.pre.length); i++) {
+    const x = left.pre[i]
+    const y = right.pre[i]
+    if (x === undefined) return -1 // a prefix of the other ranks below it
+    if (y === undefined) return 1
+    const xn = /^\d+$/.test(x)
+    const yn = /^\d+$/.test(y)
+    if (xn && yn) {
+      const diff = Number(x) - Number(y)
+      if (diff) return diff
+    } else if (xn !== yn) {
+      return xn ? -1 : 1 // numeric identifiers rank below alphanumeric ones
+    } else if (x !== y) {
+      return x < y ? -1 : 1
+    }
   }
   return 0
 }
