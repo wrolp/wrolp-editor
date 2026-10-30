@@ -13,12 +13,18 @@ interface Props {
   identity: string;
   fontSize: number;
   renderWhitespace: "none" | "boundary" | "selection" | "all" | "trailing";
-  wordWrap: boolean;
+  /** The remembered fold state, so the next comparison opens the way the last was left. */
+  foldDefault: boolean;
+  /** The wrap state to start from: the remembered choice, or the global setting if none. */
+  wrapDefault: boolean;
   tabSize: number;
   insertSpaces: boolean;
   detectIndentation: boolean;
   scrollBeyondLastLine: boolean;
   onStats: (stats: DiffStats) => void;
+  /** Remember a switch when it is flipped: how a diff is read is a habit, not a property. */
+  onFoldChange: (value: boolean) => void;
+  onWrapChange: (value: boolean) => void;
 }
 
 /**
@@ -34,28 +40,28 @@ export default function ComparePane({
   identity,
   fontSize,
   renderWhitespace,
-  wordWrap,
+  foldDefault,
+  wrapDefault,
   tabSize,
   insertSpaces,
   detectIndentation,
   scrollBeyondLastLine,
   onStats,
+  onFoldChange,
+  onWrapChange,
 }: Props) {
-  const [fold, setFold] = useState(false);
+  const [fold, setFold] = useState(foldDefault);
   const [changes, setChanges] = useState<readonly FoldChange[] | null>(null);
   /**
-   * Word wrap starts from the global setting and follows it when that setting changes, while a
-   * click on the switch stays a per-view choice until then: wrapping is a question about what is
-   * on screen, not about the file.
+   * The wrap state starts from what was remembered (or the global setting when nothing was
+   * remembered) and follows nothing else afterwards: a click is a choice about how this user
+   * reads diffs, and a later change to the global wrap is about editing, not reading.
    */
-  const [wrap, setWrap] = useState(wordWrap);
-  useEffect(() => {
-    setWrap(wordWrap);
-  }, [wordWrap]);
+  const [wrap, setWrap] = useState(wrapDefault);
 
-  // A different pair is a different question: start unfolded and drop the ranges.
+  // A different pair is a different question: drop the ranges, but keep the switches. The
+  // pair changed, not the person reading it.
   useEffect(() => {
-    setFold(false);
     setChanges(null);
   }, [identity]);
   // The same pair re-read: the ranges belonged to the text that was replaced.
@@ -111,9 +117,20 @@ export default function ComparePane({
           ? { left: folded.hiddenLeft, right: folded.hiddenRight }
           : null,
         nothingHidden: fold && ready && !folded?.folded,
-        onToggle: () => setFold((value) => !value),
+        onToggle: () => {
+          const next = !fold;
+          setFold(next);
+          onFoldChange(next);
+        },
       }}
-      wrap={{ on: wrap, onToggle: () => setWrap((value) => !value) }}
+      wrap={{
+        on: wrap,
+        onToggle: () => {
+          const next = !wrap;
+          setWrap(next);
+          onWrapChange(next);
+        },
+      }}
     />
   );
 }

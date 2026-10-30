@@ -149,6 +149,13 @@ pub struct Settings {
   /// another. On by default, because stacking comparisons is how the tab strip fills up with
   /// read-only snapshots nobody asked to keep.
   pub compare_reuse_tab: bool,
+  /// The comparison view's own switches, remembered rather than reset for every pair: only
+  /// the changed lines, and wrapping long ones. How somebody reads a diff is not a property
+  /// of one diff, and re-deciding it on each open was the only reason to remember it.
+  pub compare_fold: bool,
+  /// `None` means "keep following `word_wrap`", so an install that never touched the switch
+  /// behaves exactly as it did before this setting existed.
+  pub compare_wrap: Option<bool>,
   /// What a reopened session does with a draft that differs from the file on disk: `auto`
   /// loads it without asking, `ask` raises the Restore / Discard dialog for each file.
   /// `auto` is the default because the draft is the only copy of that typing, and a dialog
@@ -284,6 +291,8 @@ impl Default for Settings {
       language: "en".into(),
       restore_session: true,
       compare_reuse_tab: true,
+      compare_fold: false,
+      compare_wrap: None,
       draft_restore: "auto".into(),
       sidebar_root: String::new(),
       expand_folders: false,
@@ -419,6 +428,8 @@ impl Settings {
       },
       restore_session: self.restore_session,
       compare_reuse_tab: self.compare_reuse_tab,
+      compare_fold: self.compare_fold,
+      compare_wrap: self.compare_wrap,
       draft_restore: if DRAFT_RESTORE.contains(&self.draft_restore.as_str()) {
         self.draft_restore.clone()
       } else {

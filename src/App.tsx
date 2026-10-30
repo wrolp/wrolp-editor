@@ -173,6 +173,10 @@ const DEFAULT_SETTINGS: Settings = {
   // A new comparison takes over the comparison tab on screen instead of stacking another one;
   // the setting is there for reading two diffs side by side.
   compareReuseTab: true,
+  // The comparison opens unfolded and, until its own switch is touched, follows the global
+  // wrap: both are remembered once the user makes them a choice.
+  compareFold: false,
+  compareWrap: null,
   // A draft is the only copy of typing that never reached the disk, so startup puts it back
   // and stays out of the way; `ask` is for users who want to see each one first.
   draftRestore: "auto",
@@ -2597,12 +2601,16 @@ const defaultModeFor = useCallback(
                 identity={editorTab.path}
                 fontSize={settings.fontSize}
                 renderWhitespace={renderWhitespaceMode}
-                wordWrap={wordWrap}
+                // Remembered per user, not per pair: the diff opens the way it was last left.
+                foldDefault={settings.compareFold}
+                wrapDefault={settings.compareWrap ?? wordWrap}
                 tabSize={tabSize}
                 insertSpaces={insertSpaces}
                 detectIndentation={detectIndentation}
                 scrollBeyondLastLine={settings.scrollBeyondLastLine}
                 onStats={setDiffStats}
+                onFoldChange={(value) => saveSettings({ compareFold: value })}
+                onWrapChange={(value) => saveSettings({ compareWrap: value })}
               />
             </div>
           )}

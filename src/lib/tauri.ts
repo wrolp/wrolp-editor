@@ -120,6 +120,10 @@ export interface Settings {
   restoreSession: boolean;
   /** Replace the comparison tab on screen with the next comparison instead of opening another. */
   compareReuseTab: boolean;
+  /** The comparison view remembers whether it showed only the changed lines. */
+  compareFold: boolean;
+  /** `null` keeps following `wordWrap`; a boolean is an explicit choice of its own. */
+  compareWrap: boolean | null;
   /**
    * What a reopened session does with a draft the file on disk does not have: `auto` loads
    * it without asking, `ask` raises the Restore / Discard dialog per file. `auto` is the
