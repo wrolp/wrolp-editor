@@ -4,6 +4,11 @@
 //   node scripts/upload-release.mjs [--tag v0.0.2] [--notes "..."] [--repo owner/name]
 //                                   [--draft] [--pre] [--dry-run]
 //
+// The tag defaults to `v<version>` and has to exist locally on HEAD, with a clean working tree:
+// see `scripts/release-gate.mjs` for why both halves are checked again here rather than trusted
+// from the build. The version also has to be ahead of the newest release already published, or
+// this would swap the asset people download while their updater still calls them up to date.
+//
 // The repository is read from `git remote get-url origin` unless --repo is given. The release
 // carries the installer and latest.json — the updater manifest names the asset and carries its
 // signature — and nothing else; the standalone `.sig` stays local.
@@ -19,6 +24,7 @@ import { spawnSync } from 'node:child_process'
 import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { loadReleaseNotes } from './release-notes.mjs'
+import { checkReleaseReady, compareVersions, publishedVersions } from './release-gate.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const root = join(__dirname, '..')
@@ -82,10 +88,37 @@ const tag = tagOverride || `v${version}`
 const megabytes = (statSync(installer).size / 1024 / 1024).toFixed(1)
 const notesText = notesOverride || loadReleaseNotes() || `Release ${version}`
 
+// Checked again on the way out: anything could have been edited between building and uploading,
+// and this is the half that reaches other people's machines.
+const ready = checkReleaseReady({ root, version, tag })
+if (ready.problems.length) {
+  for (const problem of ready.problems) console.error(`[upload] ${problem}`)
+  console.error('[upload] nothing was sent.')
+  process.exit(1)
+}
+
+// The updater compares versions, so one that is not ahead of what is already published would be
+// read as "up to date" by every client while `--clobber` swapped the very asset they download.
+const published = publishedVersions(repo)
+if (published === null) {
+  console.error(`[upload] cannot read the releases already published for ${repo}.`)
+  console.error('[upload] check `gh auth status` and the network; nothing was sent rather than guess.')
+  process.exit(1)
+}
+const newest = published.reduce((best, name) => (compareVersions(name, best) > 0 ? name : best), '')
+if (newest && compareVersions(tag, newest) <= 0) {
+  console.error(`[upload] ${tag} is not ahead of ${newest}, which is published already.`)
+  console.error('[upload] bump tauri.conf.json, package.json and Cargo.toml, commit, tag, build again.')
+  process.exit(1)
+}
+
 if (dryRun) {
   console.log(`[upload] dry run: nothing will be sent.`)
   console.log(`[upload] repo:  ${repo}`)
-  console.log(`[upload] tag:   ${tag}${draft ? ' (draft)' : ''}${pre ? ' (prerelease)' : ''}`)
+  console.log(
+    `[upload] tag:   ${tag} at ${ready.commit.slice(0, 7)}, ahead of ${newest || 'nothing published yet'}` +
+      `${draft ? ' (draft)' : ''}${pre ? ' (prerelease)' : ''}`
+  )
   console.log(`[upload] file:  ${installer} (${megabytes} MB)`)
   console.log(`[upload] file:  ${latestPath}`)
   console.log(`[upload] notes: ${notesText}`)
@@ -101,10 +134,14 @@ if (spawnSync('gh', ['--version'], { stdio: 'ignore' }).status !== 0) {
 
 const view = spawnSync('gh', ['release', 'view', tag, '--repo', repo], { stdio: 'ignore' })
 if (view.status !== 0) {
-  console.log(`[upload] release ${tag} not found — creating it ...`)
+  console.log(`[upload] release ${tag} not found — creating it at ${ready.commit.slice(0, 7)} ...`)
   const createArgs = [
     'gh', 'release', 'create', tag,
     '--repo', repo,
+    // Without this, a release created on an existing tag lands on the default branch's head on
+    // GitHub — which need not be the commit that was built here. GitHub ignores it when the tag
+    // is already there, so pushing the tag first stays the normal path.
+    '--target', ready.commit,
     '--title', tag,
     '--notes', notesText,
   ]
@@ -113,6 +150,7 @@ if (view.status !== 0) {
   const created = spawnSync(createArgs[0], createArgs.slice(1), { stdio: 'inherit' })
   if (created.status !== 0) {
     console.error('[upload] failed to create the release.')
+    console.error(`[upload] if the tag is not on GitHub yet: git push origin ${tag}`)
     process.exit(1)
   }
 } else {

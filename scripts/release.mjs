@@ -4,6 +4,10 @@
 // package.json and Cargo.toml is caught before the build rather than shipped as a mislabelled
 // release: bump all three by hand, then run this.
 //
+// The build is also gated on the release being describable afterwards — a clean working tree and
+// a local `v<version>` tag on HEAD, which is what `scripts/release-gate.mjs` checks and why.
+// Building without signing stays free of that: `npm run tauri build`.
+//
 // The signing key lives at `.tauri/priv.key` (untracked) and its public half is in
 // tauri.conf.json. Without the private half no `.sig` is produced, so the build could not be
 // served to existing installs — the script refuses rather than leaving a release that silently
@@ -20,6 +24,7 @@ import { createRequire } from 'node:module'
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { checkReleaseReady } from './release-gate.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const root = join(__dirname, '..')
@@ -39,6 +44,16 @@ if (drift.length) {
     console.error(`[release] ${file} says ${found}, tauri.conf.json says ${version}`)
   }
   console.error('[release] Bump every version before building; refusing to label a build wrongly.')
+  process.exit(1)
+}
+
+// The tag is decided here rather than at upload time so that both halves of `npm run publish`
+// gate on the same one, and the release points at the commit this build came from.
+const tag = `v${version}`
+const ready = checkReleaseReady({ root, version, tag })
+if (ready.problems.length) {
+  for (const problem of ready.problems) console.error(`[release] ${problem}`)
+  console.error('[release] refusing to build a release nothing could point at.')
   process.exit(1)
 }
 
