@@ -15,6 +15,15 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import monaco from "../lib/monaco";
 import { t } from "../lib/i18n";
 import { INLINE_SVG_SANITIZE, SANITIZE, SVG_SANITIZE } from "../lib/markdownHtml";
+import {
+  LOCAL_ASSET_SELECTOR,
+  NOT_A_LOCAL_PATH,
+  decodeRef,
+  dirOf,
+  joinToLocal,
+  resolveLocalAsset,
+  splitFragment,
+} from "../lib/markdownAsset";
 import { useMenuPlacement } from "../hooks/useMenuPlacement";
 import { IconTreeChevron } from "./icons";
 import { api, errorMessage, openUrl } from "../lib/tauri";
@@ -997,11 +1006,6 @@ function monacoLanguage(token: string): string | null {
 }
 
 /** Extensions worth spending an asset grant on. Anything else is left alone. */
-const IMAGE_EXT = /\.(?:png|jpe?g|gif|webp|avif|bmp|ico|svg|tiff?|heic)$/i;
-
-/** The same, for a document that embeds a recording rather than a picture. */
-const MEDIA_EXT = /\.(?:mp4|m4v|webm|mov|avi|mkv|ogv|mp3|wav|ogg|oga|opus|flac|aac|m4a)$/i;
-
 let mermaidModule: Promise<typeof import("mermaid")> | null = null;
 
 /**
@@ -1090,52 +1094,8 @@ function fenceKey(lang: string, source: string): string {
   return hashKey(`${lang}\n${source}`);
 }
 
-function dirOf(filePath: string): string {
-  const cut = filePath.replace(/[\\/][^\\/]*$/, "");
-  return cut || filePath;
-}
-
 /** The four schemes the opener plugin may hand to a default application. */
 const EXTERNAL_SCHEME = /^(?:https?|mailto|tel):/i;
-
-/**
- * A reference that is not a file beside the document: it names a scheme, a share (`//server/x`),
- * a drive (`C:\x`) or a root (`/x`). The last two are how a whole drive would be reached, and a
- * document has no business naming either.
- */
-const NOT_A_LOCAL_PATH = /^(?:[a-z][a-z0-9+.-]*:|\/\/|\/|#)/i;
-
-/**
- * The file part of a reference and its `#fragment`, split the way a browser splits it. A query
- * stays with the file part, since nothing in a local file answers one.
- */
-function splitFragment(ref: string): [string, string] {
-  const at = ref.indexOf("#");
-  return at === -1 ? [ref, ""] : [ref.slice(0, at), ref.slice(at + 1)];
-}
-
-/** Undo a percent-escaping, or hand back the raw text when it is not well formed. */
-function decodeRef(part: string): string {
-  try {
-    return decodeURIComponent(part);
-  } catch {
-    return part;
-  }
-}
-
-/**
- * Walk `ref` from the document's folder, `..` included. Null when the walk ends above the root
- * it started from, which is a fold the document does not actually live in.
- */
-function joinToLocal(ref: string, baseDir: string): string | null {
-  const segments = (baseDir ? `${baseDir}\\` : "").split(/[\\/]+/).filter(Boolean);
-  for (const part of ref.replace(/\//g, "\\").split("\\")) {
-    if (part === "" || part === ".") continue;
-    if (part === "..") segments.pop();
-    else segments.push(part);
-  }
-  return segments.length > 1 ? segments.join("\\") : null;
-}
 
 /**
  * The file a link points at beside the document: its `#fragment` dropped, percent-decoded, then
@@ -1191,32 +1151,6 @@ function findHeadingBySlug(body: HTMLElement, want: string): HTMLElement | null 
   }
   return null;
 }
-
-/**
- * Resolve an embedded asset's src against the document's folder, or return null when it is
- * not a local reference. Absolute URLs, data URIs, protocol-relative and root-absolute
- * links, and Windows paths spelled in the markdown ("C:\x.png") all return null: the
- * first group already resolves on its own, and the rest is what `NOT_A_LOCAL_PATH` refuses
- * for links too.
- *
- * Percent-decoded, for the same reason `resolveLocalTarget` is: the src arrives here out of the
- * sanitiser's serialized string, and that serialization escapes every non-ASCII name — a picture
- * called `架构图.svg` reaches this as `%E6%9E%B6%E6%9E%84%E5%9B%BE.svg`. Joining the escaped form
- * hands `convertFileSrc` a `%` to escape a second time, and the asset protocol then answers 404
- * for a file that is sitting right beside the document.
- */
-function resolveLocalAsset(src: string | null, baseDir: string): string | null {
-  if (!src) return null;
-  if (baseDir && NOT_A_LOCAL_PATH.test(src)) return null;
-  const file = splitFragment(src)[0].split(/[?#]/)[0];
-  if (!IMAGE_EXT.test(file) && !MEDIA_EXT.test(file)) return null;
-  const decoded = decodeRef(file);
-  if (NOT_A_LOCAL_PATH.test(decoded)) return null;
-  return joinToLocal(decoded, baseDir);
-}
-
-/** Every element in a preview that can point at a file beside the document. */
-const LOCAL_ASSET_SELECTOR = "img, video, audio, source";
 
 /** Swap every local picture/recording reference for an asset URL the backend has allowed. */
 function rewriteAssetSources(html: string, markdownPath: string): string {

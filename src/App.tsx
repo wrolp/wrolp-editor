@@ -37,6 +37,7 @@ import {
   IconClose,
   IconCompare,
   IconCopy,
+  IconFile,
   IconFolder,
   IconLock,
   IconMinimap,
@@ -75,6 +76,7 @@ import {
   openableExtensions,
   rekeyPath,
 } from "./lib/path";
+import { printMarkdown } from "./lib/markdownExport";
 import {
   isFileTab,
   isLockedBlank,
@@ -1598,6 +1600,25 @@ export default function App() {
     [toast]
   );
 
+  /**
+   * Print a markdown tab through the system print dialog, which on Windows offers "Save as
+   * PDF". The buffer is used rather than the file on disk, so what comes out is what the
+   * preview is showing, unsaved edits included.
+   */
+  const printMarkdownTab = useCallback(
+    async (tab: Tab) => {
+      if (!isMarkdown(tab.path)) return;
+      const text = tabs.tabText(tab.id) ?? tab.original;
+      try {
+        const missing = await printMarkdown(text, tab.path);
+        if (missing.length > 0) toast(t("export.missingImages", { n: missing.length }));
+      } catch (e) {
+        toast(errorMessage(e));
+      }
+    },
+    [tabs.tabText, toast]
+  );
+
   const runTabAction = useCallback(
     async (action: "reveal" | "copy" | "sidebar") => {
       const path = menuTabPath;
@@ -2769,6 +2790,22 @@ const defaultModeFor = useCallback(
                     <IconOpenFolder size={14} />
                   </span>
                   {t("tab.menuOpenSystem")}
+                </div>
+              )}
+              {/* Only a markdown document has a printable rendering; the other file types
+                  would need a converter of their own. */}
+              {menuTabIsFile && isMarkdown(menuTabPath) && (
+                <div
+                  className="ctx-item"
+                  onClick={() => {
+                    setTabMenu(null);
+                    if (menuTab) void printMarkdownTab(menuTab);
+                  }}
+                >
+                  <span className="ctx-icon">
+                    <IconFile size={14} />
+                  </span>
+                  {t("export.print")}
                 </div>
               )}
               <div
