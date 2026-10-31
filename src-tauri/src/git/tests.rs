@@ -12,7 +12,7 @@ use super::index::{amend_commit, commit, discard, stage, unstage};
 use super::local::{assume_unchanged, local_ignore, local_state, local_unignore, local_view};
 use super::remote::{
   conflict_sides_of, delete_resolution, fetch_core, merge_abort, pull_core, push_core,
-  resolve_conflict, write_resolution, Sink,
+  remove_remote, resolve_conflict, save_remote, write_resolution, Sink,
 };
 use super::repos::scan_repos;
 use super::status::{status_of, summary_of};
@@ -1551,4 +1551,60 @@ fn head_commit_reports_the_message_the_amend_box_prefills() {
   let head = head_commit(&root(&fixture)).unwrap().unwrap();
   assert_eq!(head.message.trim_end(), "first line\n\nbody");
   assert_eq!(head.short.len(), 8);
+}
+
+#[test]
+fn remotes_can_be_added_edited_and_removed() {
+  let fixture = fixture("remotes-manage");
+  let _repo = init(&fixture);
+  let added = save_remote(
+    &root(&fixture),
+    "origin",
+    "https://example.com/a.git",
+    &locks(),
+  )
+  .unwrap();
+  assert_eq!(added.len(), 1);
+  assert_eq!(added[0].name, "origin");
+  assert_eq!(added[0].url, "https://example.com/a.git");
+  assert_eq!(added[0].host.as_deref(), Some("example.com"));
+
+  // The same name is an edit, not a second remote.
+  let edited = save_remote(&root(&fixture), "origin", "git@example.com:b.git", &locks()).unwrap();
+  assert_eq!(edited.len(), 1);
+  // User info is stripped from what the panel displays, but the config keeps the exact URL.
+  assert_eq!(edited[0].url, "example.com:b.git");
+  let reopened = Repository::open(&fixture.dir).unwrap();
+  assert_eq!(
+    reopened.find_remote("origin").unwrap().url().unwrap(),
+    "git@example.com:b.git"
+  );
+  drop(reopened);
+
+  let removed = remove_remote(&root(&fixture), "origin", &locks()).unwrap();
+  assert!(removed.is_empty());
+  assert!(Repository::open(&fixture.dir)
+    .unwrap()
+    .find_remote("origin")
+    .is_err());
+}
+
+#[test]
+fn a_remote_needs_a_valid_name_and_a_url() {
+  let fixture = fixture("remotes-invalid");
+  let _repo = init(&fixture);
+  for name in ["", "a b", "-origin", "a/b"] {
+    assert_eq!(
+      save_remote(&root(&fixture), name, "https://example.com/a.git", &locks()).unwrap_err(),
+      "git_remote_name"
+    );
+  }
+  assert_eq!(
+    save_remote(&root(&fixture), "origin", "   ", &locks()).unwrap_err(),
+    "git_remote_url"
+  );
+  assert_eq!(
+    remove_remote(&root(&fixture), "origin", &locks()).unwrap_err(),
+    "git_remote_missing"
+  );
 }

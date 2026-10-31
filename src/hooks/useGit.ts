@@ -85,6 +85,9 @@ export interface GitController {
   switchBranch: (name: string) => Promise<boolean>;
   deleteBranch: (name: string, force?: boolean) => Promise<{ ok: boolean; unmerged: boolean }>;
   init: () => Promise<void>;
+  /** Add a remote, or move an existing one to a new URL. */
+  saveRemote: (name: string, url: string) => Promise<boolean>;
+  removeRemote: (name: string) => Promise<boolean>;
   fetchRemote: (remote?: string | null) => Promise<void>;
   pullRemote: (remote?: string | null) => Promise<GitPullOutcome | null>;
   pushRemote: (remote?: string | null) => Promise<boolean>;
@@ -240,6 +243,37 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
       if (mine === logSeq.current) setLogLoading(false);
     }
   }, []);
+
+  /**
+   * Add a remote or point an existing one at a new URL. The backend answers with the whole list,
+   * so the selector in the panel follows without a second read.
+   */
+  const saveRemote = useCallback(async (name: string, url: string) => {
+    const root = rootRef.current;
+    if (!root) return false;
+    try {
+      setRemotes(await api.gitRemoteSave(root, name, url));
+      return true;
+    } catch (e) {
+      onErrorRef.current(errorMessage(e));
+      return false;
+    }
+  }, []);
+
+  /** Drop a remote. Its remote-tracking refs go with it, so the branch list is re-read. */
+  const removeRemote = useCallback(async (name: string) => {
+    const root = rootRef.current;
+    if (!root) return false;
+    try {
+      setRemotes(await api.gitRemoteRemove(root, name));
+      void loadBranches();
+      void loadLog();
+      return true;
+    } catch (e) {
+      onErrorRef.current(errorMessage(e));
+      return false;
+    }
+  }, [loadBranches, loadLog]);
 
   /**
    * Walk the rest of the history in one go.
@@ -760,6 +794,8 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
     switchBranch,
     deleteBranch,
     init,
+    saveRemote,
+    removeRemote,
     remotes,
     progress,
     auth,

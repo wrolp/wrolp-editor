@@ -23,6 +23,7 @@ import { LOG_PAGE_CHOICES, type GitController } from "../hooks/useGit";
 import type { GitRepoRow } from "../hooks/useGitRepos";
 import { buildGraph } from "../lib/gitGraph";
 import GitAuthDialog from "./GitAuthDialog";
+import GitRemotesDialog from "./GitRemotesDialog";
 import GitRowMenu from "./GitRowMenu";
 import GraphCell from "./GitGraphRow";
 import {
@@ -36,6 +37,7 @@ import {
   IconPull,
   IconPush,
   IconReload,
+  IconRemote,
   IconRevert,
   IconStage,
   IconStop,
@@ -167,6 +169,8 @@ export default function GitPanel({
   // view still costs nothing.
   const [logOpen, setLogOpen] = useState(true);
   const [logAsked, setLogAsked] = useState(false);
+  /** The repository whose remote addresses are being edited. */
+  const [remotesOpen, setRemotesOpen] = useState(false);
   const [deleteAsk, setDeleteAsk] = useState<string | null>(null);
   const [forceDeleteAsk, setForceDeleteAsk] = useState<string | null>(null);
   const [commitOpen, setCommitOpen] = useState<string | null>(null);
@@ -226,6 +230,7 @@ export default function GitPanel({
     setIdentityName("");
     setIdentityEmail("");
     setRemote(null);
+    setRemotesOpen(false);
   }, [repoRoot]);
 
   useEffect(() => {
@@ -617,6 +622,15 @@ export default function GitPanel({
             }}
           >
             <IconEyeOff size={13} />
+          </button>
+          <button
+            className="git-icon-btn"
+            title={t("git.remotes.manage")}
+            aria-label={t("git.remotes.manage")}
+            disabled={!repoRoot}
+            onClick={() => setRemotesOpen(true)}
+          >
+            <IconRemote size={13} />
           </button>
           <button
             ref={folderBtnRef}
@@ -1361,6 +1375,17 @@ export default function GitPanel({
             {t("git.switchFolder")}
           </div>
         </div>
+      )}
+
+      {remotesOpen && repoRoot && (
+        <GitRemotesDialog
+          name={splitPath(repoRoot).name}
+          remotes={git.remotes}
+          onSave={(name, url) => git.saveRemote(name, url)}
+          onRemove={(name) => git.removeRemote(name)}
+          onClose={() => setRemotesOpen(false)}
+          onError={onError}
+        />
       )}
 
       {commitMenu && (

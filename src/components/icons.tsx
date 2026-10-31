@@ -471,6 +471,21 @@ export function IconFetch({ size = 14 }: IconProps) {
   );
 }
 
+/**
+ * A remote: the same cloud the fetch arrow sits under, with a plug instead of an arrow — it names
+ * the address, not a direction of travel.
+ */
+export function IconRemote({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <path d="M7.4 10.6C5.8 10.6 4.8 9.3 5.3 7.8C5.8 6.3 7.4 5.7 8.6 6.3C9 4.6 10.5 3.6 12.3 3.9C14.1 4.2 15.4 5.4 15.8 7C17.4 6.6 18.8 7.6 19 9.1C19.1 10.1 18.5 10.6 17.6 10.6Z" />
+      <path d="M12 11.6v3.2" />
+      <path d="M9.8 16h4.4" />
+      <path d="M10.8 19h2.4" />
+    </svg>
+  );
+}
+
 export function IconPull({ size = 14 }: IconProps) {
   return (
     <svg {...base(size)}>

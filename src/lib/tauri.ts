@@ -989,6 +989,11 @@ export const api = {
   gitDeleteBranch: (root: string, name: string, force = false) =>
     invoke<void>("git_delete_branch", { root, name, force }),
   gitRemotes: (root: string) => invoke<GitRemote[]>("git_remotes", { root }),
+  /** Add a remote, or move an existing one to a new URL; returns the updated list. */
+  gitRemoteSave: (root: string, name: string, url: string) =>
+    invoke<GitRemote[]>("git_remote_save", { root, name, url }),
+  gitRemoteRemove: (root: string, name: string) =>
+    invoke<GitRemote[]>("git_remote_remove", { root, name }),
   /** Long operations take an `opId` so `git_cancel` can stop them, and stream progress. */
   gitFetch: (
     root: string,

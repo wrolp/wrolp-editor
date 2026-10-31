@@ -28,7 +28,7 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | Batch rename | Multi-select rows or rename a whole folder at once; one pattern (`{name}`, `{ext}`, `{n}`) or a regular expression with a replacement, a live preview, and an order — name, extension, modified time or manual — that `{n}` counts. See [Batch rename](#batch-rename) |
 | Version history | Off by default. On, every save by hand records what the file said, and any two of them — a version against a version, or either against what is open — can be compared side by side, folded down to the changes, or put back into the editor. One file's saves can be excluded, or forced in, from its tab menu. See [Version history](#version-history) |
 | Source control | Explorer rows carry their git letter — a dimmed `!` for paths git ignores, with the row and its icon stepped back — and folders the count of changes beneath them. A fourth sidebar view for the real repositories behind the group's folder — found in subdirectories up to a configurable depth, or added by hand — with staged and unstaged changes, per-file diffs, stage / unstage / discard, commits with history, branches, conflict resolution including a three-pane merge editor. See [Source control](#source-control) |
-| Remotes | Fetch, pull (fast-forward or merge) and push over HTTPS or SSH, with progress and a Cancel button. Credentials live in `state/git.json`, never in Settings or its backups |
+| Remotes | Fetch, pull (fast-forward or merge) and push over HTTPS or SSH, with progress and a Cancel button. Remote addresses can be added, edited and removed from the panel. Credentials live in `state/git.json`, never in Settings or its backups |
 | Single instance | Launching a second time hands the path to the running window, adds a tab and focuses it |
 | Settings | Context-menu switch, editor font size, minimap, UI language; persisted and applied live. The context-menu page also shows the command the entry currently launches, and warns when it points at a different build or when this is a debug build |
 | Language | English by default, switchable to 中文 from a dropdown in Settings. All strings, including messages coming from the Rust side, resolve through one key table |
@@ -219,7 +219,7 @@ history (`versioning_state`, `set_version_override`, `add_version`, `get_version
 `remembered_password_count`, `clear_remembered_passwords`), and git (`git_status`, `git_repo_info`,
 `git_init`, `git_diff`, `git_stage`, `git_unstage`, `git_discard`, `git_commit`, `git_log`,
 `git_commit_files`, `git_branches`, `git_create_branch`, `git_switch_branch`, `git_delete_branch`,
-`git_remotes`, `git_fetch`, `git_pull`, `git_push`, `git_cancel`, `git_conflict_sides`,
+`git_remotes`, `git_remote_save`, `git_remote_remove`, `git_fetch`, `git_pull`, `git_push`, `git_cancel`, `git_conflict_sides`,
 `git_resolve_conflict`, `git_write_resolution`, `git_delete_resolution`, `git_merge_abort`, plus
 `git_auth_*` for the credential and host-key store).
 
@@ -447,7 +447,9 @@ private store per file and never touches the folders you edit.
   the working tree has changes: a branch switch that half-succeeds is worse than one that asks you
   to commit or discard first.
 - **Remotes.** Fetch, pull and push use libgit2 over the system's WinHTTP stack for HTTPS and
-  libssh2 for SSH. Progress is shown while it runs and can be cancelled. Pull fast-forwards when it
+  libssh2 for SSH. Progress is shown while it runs and can be cancelled. The panel's *Remote
+  addresses* dialog adds, edits and removes remotes — it writes the git config and nothing else;
+  an address's user name and token are never shown. Pull fast-forwards when it
   can; otherwise it merges, and a conflict opens a `Conflicts` list where each path can be taken as
   ours, as theirs, or opened in a three-pane merge editor: ours on the left, theirs on the right,
   and the result in the middle. Each marked block can take ours, theirs, or both, with undo; Apply

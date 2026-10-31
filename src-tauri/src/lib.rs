@@ -141,6 +141,8 @@ pub fn run() {
       git::auth::git_trust_host,
       git::auth::git_forget_host,
       git::remote::git_remotes,
+      git::remote::git_remote_save,
+      git::remote::git_remote_remove,
       git::remote::git_fetch,
       git::remote::git_pull,
       git::remote::git_push,

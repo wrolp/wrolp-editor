@@ -2559,6 +2559,80 @@ body.resizing .editor-host {
   align-items: flex-start;
   gap: 8px;
 }
+/* Remote addresses: one row per remote, an edit box that opens in place, and an add row. */
+.modal.remotes {
+  width: 560px;
+  max-height: 80vh;
+  overflow-y: auto;
+}
+.remote-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+}
+.remote-item + .remote-item {
+  border-top: 1px solid var(--border);
+}
+.remote-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+}
+.remote-name {
+  flex: 0 0 auto;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--text-strong);
+}
+.remote-url {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+  font-size: 11px;
+  color: var(--muted);
+}
+.remote-row .btn {
+  flex: 0 0 auto;
+}
+.remote-edit {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 8px;
+}
+.remote-edit .settings-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.remote-add {
+  margin-top: 16px;
+}
+.remote-add h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.remote-add-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.remote-add-name {
+  flex: 0 0 110px;
+}
+.remote-add-row .settings-text {
+  min-width: 0;
+}
 .git-commit-btn {
   margin-left: auto;
   padding: 5px 12px;

@@ -28,7 +28,7 @@
 | 批量重命名 | 多选若干行，或整个目录一次改完；用一条规则（`{name}`、`{ext}`、`{n}`）或正则加替换，逐行预览；可按名称、扩展名、修改时间或手动排序，`{n}` 按这个顺序编号。详见[批量重命名](#批量重命名) |
 | 版本记录 | 默认关闭。打开后每次手动保存都记下文件当时的内容；任意两条可以并排比对（版本与版本、或任一版本与当前编辑区），可以只看变更，也可以取回编辑器。单个文件可在标签右键菜单里排除或强制纳入，详见[版本记录](#版本记录) |
 | 源码管理 | 资源管理器行上显示 git 字母——被 git 忽略的路径是一个变暗的 `!`，整行与图标一起退到背景里——文件夹显示其下改动数；侧栏第四个视图，操作分组目录背后的一组真实仓库——按可配置深度扫描子目录，也可手动添加——支持暂存与未暂存改动、逐文件 diff、暂存 / 取消暂存 / 丢弃、提交与历史、分支、冲突解决（含三栏合并编辑器）。详见[源码管理](#源码管理) |
-| 远程同步 | 通过 HTTPS 或 SSH 执行 fetch / pull（快进或合并）/ push，带进度与取消按钮。凭据放在 `state/git.json`，不进入设置也不进入配置备份 |
+| 远程同步 | 通过 HTTPS 或 SSH 执行 fetch / pull（快进或合并）/ push，带进度与取消按钮；远程地址可在面板里添加、编辑与移除。凭据放在 `state/git.json`，不进入设置也不进入配置备份 |
 | 单实例 | 再次启动时把路径交给已运行的窗口，新增标签并聚焦 |
 | 设置 | 右键菜单开关、编辑器字号、minimap、界面语言；即时生效并持久化。右键菜单页还会显示当前注册表实际启动的命令，指向别的构建或当前是 debug 构建时给出警告 |
 | 语言 | 默认英文，可在设置里下拉切换成中文。所有文案（含 Rust 侧返回的报错）都走同一张 key 表 |
@@ -192,7 +192,7 @@ wrolp/
 `remembered_password_count`、`clear_remembered_passwords`），以及 git（`git_status`、`git_repo_info`、
 `git_init`、`git_diff`、`git_stage`、`git_unstage`、`git_discard`、`git_commit`、`git_log`、
 `git_commit_files`、`git_branches`、`git_create_branch`、`git_switch_branch`、`git_delete_branch`、
-`git_remotes`、`git_fetch`、`git_pull`、`git_push`、`git_cancel`、`git_conflict_sides`、
+`git_remotes`、`git_remote_save`、`git_remote_remove`、`git_fetch`、`git_pull`、`git_push`、`git_cancel`、`git_conflict_sides`、
 `git_resolve_conflict`、`git_write_resolution`、`git_delete_resolution`、`git_merge_abort`，
 以及凭据与主机密钥存储用的 `git_auth_*`）。
 
@@ -354,6 +354,7 @@ wrolp/
 - **分支**。分支按钮列出本地与远程跟踪分支，可从当前提交新建、切换、确认后删除；有未合并提交的分支会再问一次才删除。选中远程跟踪分支会创建同名的本地分支并把它设为上游。索引或工作区有改动
   时拒绝切换：半成功的一次切换比先请你提交或丢弃更糟。
 - **远程**。fetch / pull / push 在 HTTPS 下走系统 WinHTTP、SSH 下走 libssh2。运行中显示进度并可取消。
+  面板的「远程地址」对话框可添加、编辑与移除远程；它只写 git 配置，地址里的用户名与令牌不会显示。
   pull 能快进就快进，否则合并；冲突会打开 `冲突` 列表，每个路径可以取我方、取对方，或打开三栏合并编辑器：
   左边我的、右边他们的、中间是可编辑的合并结果。每个冲突块可以取我的、取他们的或两者都要，支持撤销；
   Apply 会按文件自己的编码、BOM 与换行写回，并把路径标记为已解决。写入冲突标记

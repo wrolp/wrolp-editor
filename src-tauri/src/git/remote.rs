@@ -53,7 +53,7 @@ pub struct GitProgress {
   pub text: Option<String>,
 }
 
-#[derive(Serialize, Clone)]
+#[derive(Serialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct RemoteInfo {
   pub name: String,
@@ -106,13 +106,18 @@ pub struct ConflictSides {
 #[tauri::command]
 pub fn git_remotes(root: String) -> Result<Vec<RemoteInfo>, String> {
   let opened = discover(&root)?;
-  let names = opened.repo.remotes().map_err(|e| fail("remote", e))?;
+  list_remotes(&opened.repo)
+}
+
+/// Every configured remote, with its URL stripped of user info for display.
+fn list_remotes(repo: &Repository) -> Result<Vec<RemoteInfo>, String> {
+  let names = repo.remotes().map_err(|e| fail("remote", e))?;
   let mut out = Vec::new();
   for index in 0..names.len() {
     let Ok(Some(name)) = names.get(index) else {
       continue;
     };
-    let Ok(remote) = opened.repo.find_remote(name) else {
+    let Ok(remote) = repo.find_remote(name) else {
       continue;
     };
     let url = remote.url().map(str::to_string).unwrap_or_default();
@@ -123,6 +128,90 @@ pub fn git_remotes(root: String) -> Result<Vec<RemoteInfo>, String> {
     });
   }
   Ok(out)
+}
+
+/// A name git can use as a config section for a remote. Rejects the shapes `git remote add`
+/// rejects: empty, a leading `-` (which would read as a flag), whitespace or control characters,
+/// and the characters that would leave the `remote "<name>"` section or escape the config path.
+fn remote_name_ok(name: &str) -> bool {
+  !name.is_empty()
+    && !name.starts_with('-')
+    && !name.contains("..")
+    && name
+      .chars()
+      .all(|c| !c.is_whitespace() && !c.is_control() && !"/\\~^:?*[".contains(c))
+}
+
+/// Add a remote, or point an existing one at a new URL. Returns the whole list so the panel can
+/// show the result without a second read.
+#[tauri::command]
+pub fn git_remote_save(
+  root: String,
+  name: String,
+  url: String,
+  locks: State<'_, GitLocks>,
+) -> Result<Vec<RemoteInfo>, String> {
+  save_remote(&root, &name, &url, &locks)
+}
+
+pub(crate) fn save_remote(
+  root: &str,
+  name: &str,
+  url: &str,
+  locks: &GitLocks,
+) -> Result<Vec<RemoteInfo>, String> {
+  let name = name.trim();
+  let url = url.trim();
+  if !remote_name_ok(name) {
+    return Err("git_remote_name".into());
+  }
+  if url.is_empty() {
+    return Err("git_remote_url".into());
+  }
+  let opened = discover(root)?;
+  let _guard = locks.acquire(&opened.workdir)?;
+  let repo = &opened.repo;
+  if repo.find_remote(name).is_ok() {
+    repo
+      .remote_set_url(name, url)
+      .map_err(|e| fail("remote", e))?;
+    // A separate push URL would keep pushing to the old place; the edit is about one address.
+    // No pushurl configured is the usual case, and libgit2 reports the absent key as an error —
+    // that is the state this call wanted to reach, so only a real failure is passed on.
+    if let Err(error) = repo.remote_set_pushurl(name, None) {
+      if error.code() != git2::ErrorCode::NotFound {
+        return Err(fail("remote", error));
+      }
+    }
+  } else {
+    repo.remote(name, url).map_err(|e| fail("remote", e))?;
+  }
+  list_remotes(repo)
+}
+
+#[tauri::command]
+pub fn git_remote_remove(
+  root: String,
+  name: String,
+  locks: State<'_, GitLocks>,
+) -> Result<Vec<RemoteInfo>, String> {
+  remove_remote(&root, &name, &locks)
+}
+
+pub(crate) fn remove_remote(
+  root: &str,
+  name: &str,
+  locks: &GitLocks,
+) -> Result<Vec<RemoteInfo>, String> {
+  let opened = discover(root)?;
+  let _guard = locks.acquire(&opened.workdir)?;
+  let repo = &opened.repo;
+  let name = name.trim();
+  if repo.find_remote(name).is_err() {
+    return Err("git_remote_missing".into());
+  }
+  repo.remote_delete(name).map_err(|e| fail("remote", e))?;
+  list_remotes(repo)
 }
 
 #[tauri::command]
