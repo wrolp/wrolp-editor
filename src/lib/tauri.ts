@@ -515,7 +515,7 @@ export type GitScope = "workdir" | "index" | "commit";
 
 /** One step of a network operation, streamed while it runs. */
 export interface GitProgress {
-  /** starting | receiving | message | merging | writing | done */
+  /** starting | receiving | sending | message | merging | writing | done */
   phase: string;
   received: number;
   total: number;

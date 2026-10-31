@@ -110,6 +110,8 @@ function progressText(progress: GitProgress): string {
       return progress.total > 0
         ? t("git.progressReceiving", { received: progress.received, total: progress.total })
         : t("git.progressReceivingUnknown", { bytes: progress.bytes });
+    case "sending":
+      return t("git.progressSending", { sent: progress.received, total: progress.total });
     case "message":
       return progress.text ?? "";
     case "merging":

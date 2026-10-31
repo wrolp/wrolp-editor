@@ -488,7 +488,11 @@ pub(crate) fn push_core(
   );
   {
     let rejected = Arc::clone(&rejected);
+    let cancel = Arc::clone(&cancel);
     callbacks.push_update_reference(move |refname, status| {
+      if cancel.load(Ordering::Relaxed) {
+        return Err(git2::Error::from_str("git_canceled"));
+      }
       if let Some(status) = status {
         if let Ok(mut list) = rejected.lock() {
           list.push(format!("{refname}: {status}"));
@@ -498,6 +502,11 @@ pub(crate) fn push_core(
     });
   }
   preflight(remote.url().unwrap_or_default(), &cancel)?;
+  // The connect probe is cancellable; a click that landed while it waited must stop here rather
+  // than let the handshake start anyway.
+  if cancel.load(Ordering::Relaxed) {
+    return Err("git_canceled".into());
+  }
   let mut options = PushOptions::new();
   options.remote_callbacks(callbacks);
   sink(starting());
@@ -505,6 +514,11 @@ pub(crate) fn push_core(
   // `remote_fail` still handles everything else, including authentication.
   if let Err(e) = remote.push(&[refspec.as_str()], Some(&mut options)) {
     return Err(hostkey_note(&hostkey).unwrap_or_else(|| remote_fail("push", e, &cancel)));
+  }
+  // A cancel that landed as the last object went out is still a cancel: the caller asked to stop,
+  // and reporting success would leave the panel claiming an upload the user already gave up on.
+  if cancel.load(Ordering::Relaxed) {
+    return Err("git_canceled".into());
   }
   if let Some(reason) = rejected.lock().ok().and_then(|list| list.first().cloned()) {
     return Err(format!("git_push_rejected:{reason}"));
@@ -629,7 +643,13 @@ fn callbacks(
 
   {
     let auth = auth.clone();
+    let cancel = Arc::clone(&cancel);
     callbacks.credentials(move |url, username, allowed| {
+      // A cancel that lands while the transport is negotiating ends the attempt at the next
+      // question it asks, instead of waiting for a server that is not answering.
+      if cancel.load(Ordering::Relaxed) {
+        return Err(git2::Error::from_str("git_canceled"));
+      }
       let host = auth::host_of(url).unwrap_or_default();
       if allowed.contains(CredentialType::USERNAME) {
         let user = username
@@ -661,7 +681,11 @@ fn callbacks(
 
   {
     let auth = auth.clone();
+    let cancel = Arc::clone(&cancel);
     callbacks.certificate_check(move |cert: &Cert<'_>, host| {
+      if cancel.load(Ordering::Relaxed) {
+        return Err(git2::Error::from_str("git_canceled"));
+      }
       let Some(hostkey) = cert.as_hostkey() else {
         return Ok(CertificateCheckStatus::CertificatePassthrough);
       };
@@ -718,6 +742,53 @@ fn callbacks(
         },
       );
       true
+    });
+  }
+
+  // What a push reports while it uploads. `transfer_progress` is the fetch side of the same
+  // idea and never fires for a push, so without this the upload is silent — and, more to the
+  // point, a cancel clicked mid-upload had no callback to stop it.
+  {
+    let sink = Arc::clone(&sink);
+    let cancel = Arc::clone(&cancel);
+    let last = Arc::new(AtomicU64::new(0));
+    callbacks.push_transfer_progress(move |current, total, bytes| {
+      // This binding cannot abort a push — its callback returns nothing — so the cancel flag is
+      // answered by the negotiation and sideband callbacks. What this adds is the upload being
+      // visible at all, instead of a progress bar that sits still while objects go out.
+      if cancel.load(Ordering::Relaxed) {
+        return;
+      }
+      let percent = if total > 0 {
+        ((current as u64 * 100) / total as u64) as u8
+      } else {
+        0
+      };
+      emit(
+        &sink,
+        &last,
+        GitProgress {
+          phase: "sending".into(),
+          received: current as u32,
+          total: total as u32,
+          bytes: bytes as u64,
+          percent,
+          text: None,
+        },
+      );
+    });
+  }
+
+  // Called once between negotiation and the upload; an error here cancels the push. This is the
+  // last point libgit2 lets a cancel stop the operation before objects start moving.
+  {
+    let cancel = Arc::clone(&cancel);
+    callbacks.push_negotiation(move |_updates| {
+      if cancel.load(Ordering::Relaxed) {
+        Err(git2::Error::from_str("git_canceled"))
+      } else {
+        Ok(())
+      }
     });
   }
 
