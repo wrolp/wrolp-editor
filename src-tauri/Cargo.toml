@@ -1,6 +1,6 @@
 [package]
 name = "wrolp-editor"
-version = "0.0.1"
+version = "0.0.2"
 description = "WROLP Editor - a simple local text editor"
 authors = ["wrolp"]
 license = "MIT"
