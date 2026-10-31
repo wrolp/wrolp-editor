@@ -1168,8 +1168,14 @@ export default function SettingsPanel({
             <div className="setting-group">
               <img className="about-logo" src={logoUrl} alt={t("app.name")} />
               <p>{t("settings.version", { version })}</p>
-              {/* The only row here that touches the network, and only when asked: an editor
-                  does not need to phone home on every start to be opened. */}
+              <SettingCheck
+                label={t("settings.autoCheckUpdates")}
+                checked={settings.autoCheckUpdates}
+                onChange={(v) => onSaveSettings({ autoCheckUpdates: v })}
+              />
+              <p className="muted">{t("settings.autoCheckUpdatesDesc")}</p>
+              {/* The app also checks on its own, but a check started here is the one whose
+                  handle can install; a background check only ever announces a version. */}
               <SettingField label={t("settings.updates")}>
                 <button
                   className="btn small"

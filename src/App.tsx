@@ -56,6 +56,7 @@ import { useEditorTabs } from "./hooks/useEditorTabs";
 import { useGit } from "./hooks/useGit";
 import { useGitRepos } from "./hooks/useGitRepos";
 import { useGroups } from "./hooks/useGroups";
+import { useUpdateCheck } from "./hooks/useUpdateCheck";
 import { useVersions } from "./hooks/useVersions";
 import { useWindowFrame } from "./hooks/useWindowFrame";
 import { useMenuPlacement } from "./hooks/useMenuPlacement";
@@ -244,6 +245,9 @@ const DEFAULT_SETTINGS: Settings = {
   // few weeks of daily ones.
   backupDir: "",
   backupRetain: 20,
+  // Checking costs one request and tells the user a new version exists; installing still waits
+  // for a click. Off is there for anyone who would rather not talk to the release endpoint.
+  autoCheckUpdates: true,
 }
 
 /**
@@ -385,6 +389,11 @@ export default function App() {
   }, [scheduleHide]);
 
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  // Asked on its own after startup and every six hours; a version it finds is announced, and
+  // the install itself stays a click in Settings → About.
+  useUpdateCheck(settings.autoCheckUpdates, (version) => {
+    toast(t("settings.updateAvailable", { version }));
+  });
   // `system` is resolved here rather than in the backend: the OS preference can change while
   // the app is open, and only the frontend is listening to it.
   const systemDark = usePrefersDark();

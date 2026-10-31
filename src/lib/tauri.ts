@@ -245,6 +245,8 @@ export interface Settings {
   backupDir: string;
   /** How many snapshots are kept. Older ones are removed when a new one is written. */
   backupRetain: number;
+  /** Check the release endpoint after startup and every six hours; installing stays manual. */
+  autoCheckUpdates: boolean;
 }
 
 /**

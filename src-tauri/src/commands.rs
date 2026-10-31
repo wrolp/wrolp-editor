@@ -275,6 +275,9 @@ pub struct Settings {
   /// How many backups are kept. Older snapshots are deleted when a newer one is written, which is
   /// also what keeps an automatic snapshot from growing the folder without bound.
   pub backup_retain: u32,
+  /// Ask the release endpoint whether a newer version exists after startup and every six hours.
+  /// On by default; only the check is automatic, installing stays a click.
+  pub auto_check_updates: bool,
 }
 
 /// Used when settings.json is absent or a key is missing, so a first run must not
@@ -331,6 +334,7 @@ impl Default for Settings {
       git_scan_depth: 2,
       backup_dir: String::new(),
       backup_retain: crate::backup::DEFAULT_RETAIN,
+      auto_check_updates: true,
     }
   }
 }
@@ -564,6 +568,7 @@ impl Settings {
       } else {
         self.backup_retain.min(crate::backup::MAX_RETAIN)
       },
+      auto_check_updates: self.auto_check_updates,
     }
   }
 }
