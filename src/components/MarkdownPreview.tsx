@@ -1041,7 +1041,17 @@ async function renderMermaid(source: string, key: string, theme: string): Promis
     // arrive as a dark slab inside a light preview. "default" is mermaid light theme.
     theme: theme === "light" ? "default" : "dark",
     htmlLabels: false,
-    flowchart: { htmlLabels: false },
+    flowchart: {
+      htmlLabels: false,
+      // Tighter than the defaults: a wide `flowchart LR` spends its width on the gaps between
+      // ranks, and 50px of empty space per rank adds up. Measured on a cyclic nine-node graph,
+      // 20/15 draws it 1262x226 where the defaults draw 1382x287 — the same drawing, 9% narrower
+      // and 21% shorter. ELK was measured too and drew it 1880 wide, so dagre stays.
+      curve: "linear",
+      nodeSpacing: 15,
+      rankSpacing: 20,
+      padding: 8,
+    },
   });
   // The id has to be unique per render and safe as a DOM id.
   const { svg } = await mermaid.render(`mmd-${key}`, source);
@@ -1063,7 +1073,7 @@ async function renderMermaid(source: string, key: string, theme: string): Promis
  * selector and mermaid looks its drawing up by id, so an id built from this string
  * fails outright. The id uses the plain fence.key, which is already an id-safe digest.
  */
-const RENDER_VERSION = 2;
+const RENDER_VERSION = 3;
 function cacheKey(key: string, theme: string): string {
   return key + String.fromCharCode(64) + theme + String.fromCharCode(64) + RENDER_VERSION;
 }
