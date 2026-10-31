@@ -1,10 +1,12 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
 } from "react";
 import { formatClock, formatWhen, t, translateError } from "../lib/i18n";
 import { pathKey } from "../lib/types";
@@ -100,6 +102,21 @@ function splitPath(path: string): { name: string; dir: string } {
   const cut = path.lastIndexOf("/");
   if (cut < 0) return { name: path, dir: "" };
   return { name: path.slice(cut + 1), dir: path.slice(0, cut) };
+}
+
+/** How many actions fit in the header row; the rest move into the overflow menu. */
+const HEAD_ACTIONS = 8;
+
+/**
+ * One button in the panel header. `anchor` is whatever was clicked, so an action that opens a
+ * menu can put it under the control the user actually pressed — the row's button or the "…".
+ */
+interface HeadAction {
+  key: string;
+  label: string;
+  icon: ReactNode;
+  disabled?: boolean;
+  run: (anchor: HTMLElement) => void;
 }
 
 function progressText(progress: GitProgress): string {
@@ -199,6 +216,16 @@ export default function GitPanel({
   const folderMenuRef = useRef<HTMLDivElement>(null);
   const folderBtnRef = useRef<HTMLButtonElement>(null);
   const folderMenuAt = useMenuPlacement(folderMenu, folderMenuRef);
+  /** The header row and what it measures itself against when deciding what still fits. */
+  const headRowRef = useRef<HTMLDivElement>(null);
+  const headBranchRef = useRef<HTMLButtonElement>(null);
+  const moreBtnRef = useRef<HTMLButtonElement>(null);
+  const [fitted, setFitted] = useState(HEAD_ACTIONS);
+  const [headMenu, setHeadMenu] = useState<{ x: number; y: number } | null>(null);
+  const headMenuRef = useRef<HTMLDivElement>(null);
+  const headMenuAt = useMenuPlacement(headMenu, headMenuRef);
+  /** The list as it is this render, for the measurement effect, which must not re-run per render. */
+  const headActionsRef = useRef<HeadAction[]>([]);
 
   useEffect(() => {
     if (!folderMenu) return;
@@ -210,6 +237,17 @@ export default function GitPanel({
     window.addEventListener("mousedown", close);
     return () => window.removeEventListener("mousedown", close);
   }, [folderMenu]);
+
+  useEffect(() => {
+    if (!headMenu) return;
+    const close = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (headMenuRef.current?.contains(target) || moreBtnRef.current?.contains(target)) return;
+      setHeadMenu(null);
+    };
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [headMenu]);
 
   // A different folder is a different repository; a half-typed message and a pending discard
   // question from the old one must not carry over.
@@ -444,6 +482,106 @@ export default function GitPanel({
     return head.branch ?? "HEAD";
   })();
 
+  /** The recent-folders menu, opened under whichever control asked for it. */
+  const openFolderMenu = (anchor: HTMLElement) => {
+    if (folderMenu) {
+      setFolderMenu(null);
+      return;
+    }
+    // With no history there is nothing to choose between, so the picker is the whole gesture;
+    // once there is, the list opens and the picker is its last entry.
+    if (folderHistory.length === 0) {
+      onSwitchWorkspace();
+      return;
+    }
+    const rect = anchor.getBoundingClientRect();
+    setFolderMenu({ x: rect.left, y: rect.bottom + 2 });
+  };
+
+  /**
+   * The header's actions, in the order they appear. The row shows as many as fit and moves the
+   * rest into the "…" menu one at a time, right to left — a fixed row is what turns a narrow
+   * panel into a wall of squeezed icons.
+   */
+  const headActions: HeadAction[] = [
+    {
+      key: "fetch",
+      label: t("git.fetch"),
+      icon: <IconFetch size={13} />,
+      disabled: busy || !activeRemote,
+      run: () => void git.fetchRemote(activeRemote),
+    },
+    {
+      key: "pull",
+      label: t("git.pull"),
+      icon: <IconPull size={13} />,
+      disabled: busy || !activeRemote,
+      run: () => void doPull(),
+    },
+    {
+      key: "push",
+      label: t("git.push"),
+      icon: <IconPush size={13} />,
+      disabled: busy || !activeRemote,
+      run: () => void doPush(),
+    },
+    {
+      key: "refresh",
+      label: t("git.refresh"),
+      icon: <IconReload size={13} />,
+      run: () => void git.refresh(),
+    },
+    {
+      key: "local",
+      label: t("git.local.settings"),
+      icon: <IconEyeOff size={13} />,
+      run: () => {
+        if (repoRoot) onOpenLocalSettings(repoRoot);
+      },
+    },
+    {
+      key: "remotes",
+      label: t("git.remotes.manage"),
+      icon: <IconRemote size={13} />,
+      disabled: !repoRoot,
+      run: () => setRemotesOpen(true),
+    },
+    {
+      key: "folder",
+      label: t("git.switchFolder"),
+      icon: <IconFolder size={13} />,
+      run: (anchor) => openFolderMenu(anchor),
+    },
+    {
+      key: "add",
+      label: t("git.repos.add"),
+      icon: <span className="git-plus">＋</span>,
+      run: () => onAddRepo(),
+    },
+  ];
+  headActionsRef.current = headActions;
+
+  // How many of them fit. The branch button keeps its own width (capped in CSS), so the space is
+  // simply what the row has left; 22px per button plus its 1px gap, and one slot for "…" once
+  // something is hidden. A resize of the sidebar or the window re-runs this.
+  useLayoutEffect(() => {
+    const row = headRowRef.current;
+    if (!row) return;
+    const measure = () => {
+      const branch = headBranchRef.current?.offsetWidth ?? 0;
+      const counter = row.querySelector<HTMLElement>(".git-counter")?.offsetWidth ?? 0;
+      const space = Math.max(0, row.clientWidth - branch - counter - (counter > 0 ? 12 : 8));
+      const total = headActionsRef.current.length;
+      let fit = Math.floor(space / 23);
+      if (fit < total) fit = Math.floor(Math.max(0, space - 24) / 23);
+      setFitted(Math.min(total, Math.max(0, fit)));
+    };
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(row);
+    return () => observer.disconnect();
+  }, [repoRoot, branchLabel, head?.ahead, head?.behind]);
+
   const errorCode = git.error ? git.error.split(":")[0] : "";
 
   if (!workspaceRoot && repoRows.length === 0) {
@@ -544,8 +682,9 @@ export default function GitPanel({
       ) : (
         <>
       <div className="git-head">
-        <div className="git-head-row">
+        <div className="git-head-row" ref={headRowRef}>
           <button
+            ref={headBranchRef}
             className={`git-branch-btn${branchesOpen ? " active" : ""}`}
             title={head?.upstream ? t("git.upstream", { name: head.upstream }) : branchLabel}
             onClick={() => {
@@ -578,94 +717,43 @@ export default function GitPanel({
               )}
             </span>
           )}
-          <span className="git-sync">
-            <button
-              className="git-icon-btn"
-              title={t("git.fetch")}
-              aria-label={t("git.fetch")}
-              disabled={busy || !activeRemote}
-              onClick={() => void git.fetchRemote(activeRemote)}
-            >
-              <IconFetch size={13} />
-            </button>
-            <button
-              className="git-icon-btn"
-              title={t("git.pull")}
-              aria-label={t("git.pull")}
-              disabled={busy || !activeRemote}
-              onClick={() => void doPull()}
-            >
-              <IconPull size={13} />
-            </button>
-            <button
-              className="git-icon-btn"
-              title={t("git.push")}
-              aria-label={t("git.push")}
-              disabled={busy || !activeRemote}
-              onClick={() => void doPush()}
-            >
-              <IconPush size={13} />
-            </button>
-          </span>
-          <button
-            className="git-icon-btn"
-            title={t("git.refresh")}
-            aria-label={t("git.refresh")}
-            onClick={() => void git.refresh()}
-          >
-            <IconReload size={13} />
-          </button>
-          <button
-            className="git-icon-btn"
-            title={t("git.local.settings")}
-            aria-label={t("git.local.settings")}
-            onClick={() => {
-              if (repoRoot) onOpenLocalSettings(repoRoot);
-            }}
-          >
-            <IconEyeOff size={13} />
-          </button>
-          <button
-            className="git-icon-btn"
-            title={t("git.remotes.manage")}
-            aria-label={t("git.remotes.manage")}
-            disabled={!repoRoot}
-            onClick={() => setRemotesOpen(true)}
-          >
-            <IconRemote size={13} />
-          </button>
-          <button
-            ref={folderBtnRef}
-            className="git-icon-btn"
-            title={t("git.switchFolderHint")}
-            aria-label={t("git.switchFolder")}
-            aria-haspopup="menu"
-            aria-expanded={!!folderMenu}
-            onClick={(event) => {
-              if (folderMenu) {
-                setFolderMenu(null);
-                return;
-              }
-              // With no history there is nothing to choose between, so the picker is the whole
-              // gesture; once there is, the list opens and the picker is its last entry.
-              if (folderHistory.length === 0) {
-                onSwitchWorkspace();
-                return;
-              }
-              const rect = event.currentTarget.getBoundingClientRect();
-              setFolderMenu({ x: rect.left, y: rect.bottom + 2 });
-            }}
-          >
-            <IconFolder size={13} />
-          </button>
-          <button
-            className="git-icon-btn git-add-repo"
-            title={t("git.repos.add")}
-            aria-label={t("git.repos.add")}
-            onClick={onAddRepo}
-          >
-            ＋
-          </button>
+          <div className="git-head-actions">
+            {headActions.slice(0, fitted).map((action) => (
+              <button
+                key={action.key}
+                // Only the folder control keeps a ref: its menu is closed by a press on it, and
+                // that press can land either here or on the "…" button that replaced it.
+                ref={action.key === "folder" ? folderBtnRef : undefined}
+                className={`git-icon-btn${action.key === "add" ? " git-add-repo" : ""}`}
+                title={action.label}
+                aria-label={action.label}
+                disabled={action.disabled}
+                onClick={(event) => action.run(event.currentTarget)}
+              >
+                {action.icon}
+              </button>
+            ))}
+            {fitted < headActions.length && (
+              <button
+                ref={moreBtnRef}
+                className="git-icon-btn"
+                title={t("git.moreActions")}
+                aria-label={t("git.moreActions")}
+                aria-haspopup="menu"
+                aria-expanded={!!headMenu}
+                onClick={(event) => {
+                  if (headMenu) {
+                    setHeadMenu(null);
+                    return;
+                  }
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  setHeadMenu({ x: rect.left, y: rect.bottom + 2 });
+                }}
+              >
+                <span className="git-plus">…</span>
+              </button>
+            )}
+          </div>
         </div>
         {status && (
           <div className="git-root" title={status.repo.root}>
@@ -1376,6 +1464,31 @@ export default function GitPanel({
           >
             {t("git.switchFolder")}
           </div>
+        </div>
+      )}
+
+      {headMenu && (
+        <div
+          className="ctx-menu git-more-menu"
+          ref={headMenuRef}
+          style={{ display: "block", left: headMenuAt.left, top: headMenuAt.top }}
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          {headActions.slice(fitted).map((action) => (
+            <div
+              key={action.key}
+              className={`ctx-item${action.disabled ? " disabled" : ""}`}
+              onClick={() => {
+                if (action.disabled) return;
+                setHeadMenu(null);
+                // The "…" is the control this row was opened from, so a submenu lands under it.
+                action.run(moreBtnRef.current ?? document.body);
+              }}
+            >
+              <span className="ctx-icon">{action.icon}</span>
+              {action.label}
+            </div>
+          ))}
         </div>
       )}
 

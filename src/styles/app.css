@@ -1900,7 +1900,10 @@ body.resizing .editor-host {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  flex: 1 1 auto;
+  /* Its width is what the actions are measured against, so it must not stretch or shrink with
+     them: the name ellipsizes at the cap and the row belongs to the toolbar. */
+  flex: 0 0 auto;
+  max-width: 50%;
   min-width: 0;
   padding: 4px 6px;
   background: transparent;
@@ -1967,10 +1970,24 @@ body.resizing .editor-host {
   color: var(--text-disabled);
   cursor: default;
 }
-.git-sync {
+/* The header toolbar: as many icon buttons as fit, then "…" for the rest. */
+.git-head-actions {
   display: flex;
+  align-items: center;
   gap: 1px;
   margin-left: auto;
+  flex: 0 0 auto;
+}
+.git-plus {
+  font-size: 13px;
+  line-height: 1;
+}
+.ctx-item.disabled {
+  color: var(--text-disabled);
+  cursor: default;
+}
+.ctx-item.disabled:hover {
+  background: transparent;
 }
 .git-remote {
   margin-top: 4px;
