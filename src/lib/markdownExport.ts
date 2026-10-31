@@ -2,6 +2,7 @@ import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { SANITIZE } from "./markdownHtml";
 import { IMAGE_EXT, LOCAL_ASSET_SELECTOR, dirOf, resolveLocalAsset } from "./markdownAsset";
+import { basename } from "./path";
 import { api } from "./tauri";
 
 /** A rendered document plus the local files whose bytes could not be included. */
@@ -221,7 +222,13 @@ export async function printMarkdown(
   root.innerHTML = html;
   document.body.appendChild(root);
   document.body.classList.add("printing");
+  // The print dialog takes its default file name from the document title. Left as the app's
+  // name, "Save as PDF" offers "WROLP Editor.pdf" no matter which document was printed.
+  const previousTitle = document.title;
+  const fileName = basename(docPath);
+  document.title = fileName.replace(/\.[^./\\]+$/, "") || fileName;
   const done = () => {
+    document.title = previousTitle;
     document.body.classList.remove("printing");
     root.remove();
     window.removeEventListener("afterprint", done);
