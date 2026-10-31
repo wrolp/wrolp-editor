@@ -21,7 +21,7 @@
 
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs'
+import { readFileSync, existsSync, readdirSync, rmSync, statSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { checkReleaseReady } from './release-gate.mjs'
@@ -71,6 +71,21 @@ const passPath = keyPath + '.pass'
 if (existsSync(passPath)) {
   env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD = readFileSync(passPath, 'utf8').trim()
 }
+
+// A release is the one build that must not carry anything from an earlier one. `target/` is
+// reused by cargo, and resources the build script does not watch — the icon set, tauri.conf.json —
+// can otherwise stay stale inside the exe; `dist/` is the same idea for the frontend bundle.
+// Costly on purpose: this is the step that makes "rebuilt and it is still the old icon" impossible.
+console.log('[release] cleaning previous build output ...')
+const clean = spawnSync('cargo', ['clean'], {
+  stdio: 'inherit',
+  cwd: join(root, 'src-tauri'),
+})
+if (clean.status !== 0) {
+  console.error('[release] cargo clean failed; refusing to build on top of old artefacts.')
+  process.exit(clean.status ?? 1)
+}
+rmSync(join(root, 'dist'), { recursive: true, force: true })
 
 // `npx` is a `.cmd` shim on Windows, which needs a shell — and Node's DEP0190 forbids an
 // args array together with `shell: true`, because the arguments would be joined into one

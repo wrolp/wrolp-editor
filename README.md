@@ -116,8 +116,8 @@ Only the NSIS target is configured (`bundle.targets: ["nsis"]`).
 ### Publish a release
 
 ```bash
-npm run release   # build the installer; refuses unless the three version fields agree, the tree
-                  # is clean, and v<version> is a local tag sitting on HEAD
+npm run release   # clean target/ and dist/, then build the installer; refuses unless the three
+                  # version fields agree, the tree is clean, and v<version> is a local tag on HEAD
 npm run upload    # publish v<version>: the same checks again, plus a version ahead of what is live
 # or: npm run publish
 ```

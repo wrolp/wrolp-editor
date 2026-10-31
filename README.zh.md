@@ -113,7 +113,7 @@ npm run tauri build
 ### 发布
 
 ```bash
-npm run release   # 打安装包；三个版本号不一致、工作树不干净、或 v<version> 不是指向 HEAD 的本地 tag，就直接退出
+npm run release   # 先清理 target/ 与 dist/，再打安装包；三个版本号不一致、工作树不干净、或 v<version> 不是指向 HEAD 的本地 tag，就直接退出
 npm run upload    # 发布 v<version>：同样再查一遍，还要求版本号高于线上已发布的最新一个
 # 或：npm run publish
 ```
