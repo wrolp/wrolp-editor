@@ -194,7 +194,9 @@ const EN: Table = {
   "settings.warnDebug": "This is a debug build: it loads the Vite dev server, so the context menu only opens files while `npm run tauri dev` is running.",
   "settings.generalHeading": "General",
   "settings.language": "Language",
-  "settings.languageDesc": "Interface language, saved with the other settings",
+  "settings.language.system": "Follow the system",
+  "settings.languageDesc":
+    "Interface language, saved with the other settings. Follow the system picks 中文 on a Chinese Windows and English elsewhere.",
   "settings.fontSize": "Editor font size",
   "settings.sidebarFont": "Sidebar text size",
   "settings.sidebarFontDesc": "The file tree, the recent-files names and the folder menu. The sidebar's tabs, buttons and row tooltips keep their own sizes.",
@@ -1439,7 +1441,9 @@ const ZH: Table = {
   "settings.warnDebug": "这是 debug 构建：它加载 Vite dev server，所以只有 `npm run tauri dev` 在跑时右键菜单才能打开文件。",
   "settings.generalHeading": "常规",
   "settings.language": "界面语言",
-  "settings.languageDesc": "界面显示语言，与其他设置一起保存",
+  "settings.language.system": "跟随系统",
+  "settings.languageDesc":
+    "界面显示语言，与其他设置一起保存。「跟随系统」在中文 Windows 上用中文，其它语言环境用英文。",
   "settings.fontSize": "编辑器字号",
   "settings.sidebarFont": "侧栏文字大小",
   "settings.sidebarFontDesc": "影响文件树、最近打开的名称和文件夹菜单。侧栏的标签页、按钮和行内提示气泡保持各自的大小。",
@@ -1950,18 +1954,36 @@ const ZH: Table = {
 const TABLES: Record<Lang, Table> = { en: EN, zh: ZH };
 
 /**
- * Languages offered in Settings. Labels stay in their own language on purpose, and the
- * value must be a key of TABLES plus a field of the backend's Settings.language.
+ * Languages offered in Settings. Labels stay in their own language on purpose; `system` is not a
+ * table but a rule (`resolveLang`), and every other value must be a key of TABLES. The backend
+ * stores whatever it is given, so adding a language needs no change there.
  */
-export const LANGUAGES: { value: Lang; label: string }[] = [
+export const LANGUAGES: { value: string; label: string }[] = [
+  { value: "system", label: "Follow the system" },
   { value: "en", label: "English" },
   { value: "zh", label: "中文" },
 ];
 
 let current: Lang = "en";
 
+/**
+ * The language a stored setting means.
+ *
+ * `system` follows the OS locale — a Chinese Windows opens in Chinese without anyone choosing
+ * it — and anything unknown falls back to English, the same rule the backend applies to an
+ * empty field. Resolved where the setting is applied rather than stored, so the choice stays
+ * "follow the system" instead of freezing whichever language the system happened to be.
+ */
+export function resolveLang(setting: string): Lang {
+  if (setting === "system") {
+    const locale = typeof navigator === "undefined" ? "" : navigator.language;
+    return locale.toLowerCase().startsWith("zh") ? "zh" : "en";
+  }
+  return setting in TABLES ? (setting as Lang) : "en";
+}
+
 export function setLang(lang: string): void {
-  current = lang in TABLES ? (lang as Lang) : "en";
+  current = resolveLang(lang);
 }
 
 export function getLang(): Lang {

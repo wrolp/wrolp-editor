@@ -140,8 +140,8 @@ pub struct Settings {
   /// Defaults to the 12 px the tree was pinned at before this existed, so installing the build
   /// changes nothing until somebody moves the number.
   pub sidebar_font: f64,
-  /// UI language code, e.g. "en" or "zh". Unknown values are stored as-is; the frontend
-  /// falls back to English, so adding a language needs no change here.
+  /// UI language code: "en", "zh" or "system" (follow the OS). Anything else is stored as "en",
+  /// so a hand-edited or removed language never leaves the interface without a table.
   pub language: String,
   /// Reopen the tabs of the active group on startup.
   pub restore_session: bool,
@@ -291,7 +291,7 @@ impl Default for Settings {
       sidebar_view: "explorer".into(),
       sidebar_width: 240.0,
       sidebar_font: 12.0,
-      language: "en".into(),
+      language: "system".into(),
       restore_session: true,
       compare_reuse_tab: true,
       compare_fold: false,
@@ -425,10 +425,12 @@ impl Settings {
       } else {
         12.0
       },
-      language: if self.language.is_empty() {
-        "en".into()
-      } else {
-        self.language
+      // A fresh install follows the OS; a value this build does not know — hand-edited, or a
+      // language that was removed — reads as English rather than leaving the UI to guess.
+      language: match self.language.as_str() {
+        "" => "system".into(),
+        "system" | "en" | "zh" => self.language.clone(),
+        _ => "en".into(),
       },
       restore_session: self.restore_session,
       compare_reuse_tab: self.compare_reuse_tab,
@@ -2241,19 +2243,27 @@ mod tests {
   }
 
   #[test]
-  fn language_defaults_to_english_and_otherwise_passes_through() {
+  fn language_follows_the_system_by_default_and_only_keeps_known_codes() {
+    assert_eq!(Settings::default().language, "system");
+    // A settings.json written before the key existed takes the same Default, which is what makes
+    // a fresh install open in the OS language without anybody visiting Settings.
+    let s: Settings = serde_json::from_str("{\"fontSize\":16.0}").expect("parse partial settings");
+    assert_eq!(s.filled().language, "system");
+    for good in ["system", "en", "zh"] {
+      assert_eq!(
+        Settings {
+          language: good.into(),
+          ..Default::default()
+        }
+        .filled()
+        .language,
+        good
+      );
+    }
+    // A value this build has no table for reads as English rather than being passed through.
     assert_eq!(
       Settings {
-        language: "zh".into(),
-        ..Default::default()
-      }
-      .filled()
-      .language,
-      "zh"
-    );
-    assert_eq!(
-      Settings {
-        language: String::new(),
+        language: "fr".into(),
         ..Default::default()
       }
       .filled()
@@ -2262,14 +2272,13 @@ mod tests {
     );
     assert_eq!(
       Settings {
-        language: "fr".into(),
+        language: String::new(),
         ..Default::default()
       }
       .filled()
       .language,
-      "fr"
+      "system"
     );
-    assert_eq!(Settings::default().language, "en");
   }
 
   #[test]

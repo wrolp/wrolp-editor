@@ -538,12 +538,25 @@ export default function SettingsPanel({
                 >
                   {LANGUAGES.map((option) => (
                     <option key={option.value} value={option.value}>
-                      {option.label}
+                      {option.value === "system" ? t("settings.language.system") : option.label}
                     </option>
                   ))}
                 </select>
               </SettingField>
               <p className="muted">{t("settings.languageDesc")}</p>
+              <SettingField label={t("settings.theme")}>
+                <select
+                  className="select"
+                  value={settings.theme}
+                  onChange={(e) => onSaveSettings({ theme: e.target.value })}
+                >
+                  {THEMES.map((option) => (
+                    <option key={option} value={option}>
+                      {t(`settings.theme.${option}`)}
+                    </option>
+                  ))}
+                </select>
+              </SettingField>
               <SettingField label={t("settings.fontSize")}>
                 <input
                   type="number"
@@ -817,19 +830,6 @@ export default function SettingsPanel({
                 />
               </SettingField>
               <p className="muted">{t("settings.autoSaveDesc")}</p>
-              <SettingField label={t("settings.theme")}>
-                <select
-                  className="select"
-                  value={settings.theme}
-                  onChange={(e) => onSaveSettings({ theme: e.target.value })}
-                >
-                  {THEMES.map((option) => (
-                    <option key={option} value={option}>
-                      {t(`settings.theme.${option}`)}
-                    </option>
-                  ))}
-                </select>
-              </SettingField>
               <p className="muted">{t("settings.persisted")}</p>
             </div>
           </div>

@@ -170,7 +170,9 @@ const DEFAULT_SETTINGS: Settings = {
   // 12 px is what the file tree was pinned at before this was a setting, so the sidebar looks the
   // same on the first run of a new build and only changes when somebody asks for a different size.
   sidebarFont: 12,
-  language: "en",
+  // Follow the OS on a fresh install, so a Chinese Windows opens in Chinese without a visit to
+  // Settings; the stored value stays "system" rather than the language it resolved to.
+  language: "system",
   restoreSession: true,
   // A new comparison takes over the comparison tab on screen instead of stacking another one;
   // the setting is there for reading two diffs side by side.
