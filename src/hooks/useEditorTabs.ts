@@ -1542,6 +1542,69 @@ export function useEditorTabs({
     [currentOffset, draft, editorRef]
   );
 
+  /**
+   * Close several tabs in one pass. `closeTab` reads the live list and writes it back, so calling
+   * it in a loop would race its own re-render and resurrect a tab; this computes the remainder
+   * once. Drafts are flushed for every closing file tab, and an active dirty tab gets its live
+   * text into the draft first, exactly as closing it alone would.
+   */
+  const closeTabs = useCallback(
+    async (ids: number[]) => {
+      const doomed = new Set(ids);
+      if (doomed.size === 0) return;
+      const list = tabsRef.current;
+      const closing = list.filter((tab) => doomed.has(tab.id));
+      if (closing.length === 0) return;
+
+      const remaining = list.filter((tab) => !doomed.has(tab.id));
+      const index = list.findIndex((tab) => doomed.has(tab.id));
+      if (activeRef.current !== null && doomed.has(activeRef.current)) {
+        // The nearest tab that is staying, preferring the one before the first closed tab.
+        const focus = remaining[Math.min(Math.max(0, index - 1), remaining.length - 1)] ?? null;
+        setActiveId(focus ? focus.id : null);
+      }
+
+      const active = closing.find((tab) => tab.id === activeRef.current);
+      if (active && isFileTab(active) && !isUntitled(active.path)) {
+        const content = editorRef.current?.editor.getValue();
+        if (content !== undefined && content !== active.original) {
+          draft.schedule(active.path, {
+            content,
+            cursor: currentOffset(),
+            original: active.original,
+          });
+        }
+      }
+      for (const tab of closing) {
+        if (isFileTab(tab)) await draft.flush(tab.path);
+      }
+
+      setTabs(remaining);
+      setStale((q) => q.filter((a) => !doomed.has(a.tabId)));
+      // An ask raised from the Explorer has no tab; only the ones tied to a closing tab go.
+      setPasswordAsk((q) => q.filter((a) => a.tabId === null || !doomed.has(a.tabId)));
+      setConflict((c) => (c && doomed.has(c.tabId) ? null : c));
+      for (const tab of closing) {
+        cursors.current.delete(pathKey(tab.path));
+        pendingCursors.current.delete(pathKey(tab.path));
+      }
+
+      // Deferred like `closeTab`: the editor may still be painting one of these until the next
+      // render, and disposing its model under it is a flash of empty text.
+      const h = editorRef.current;
+      if (h) {
+        setTimeout(() => {
+          for (const tab of closing) {
+            if (!isFileTab(tab)) continue;
+            const model = h.monaco.editor.getModel(h.monaco.Uri.parse(modelUri(tab.path)));
+            if (model && model !== h.editor.getModel()) model.dispose();
+          }
+        }, 0);
+      }
+    },
+    [currentOffset, draft, editorRef]
+  );
+
   /** Drop the whole tab set (switching groups). Drafts were flushed by the caller. */
   const clearAllTabs = useCallback(() => {
     const h = editorRef.current;
@@ -2685,6 +2748,7 @@ export function useEditorTabs({
     setMergeDirty,
     setMergeResult,
     closeTab,
+    closeTabs,
     moveTab,
     clearAllTabs,
     rekeyTabs,

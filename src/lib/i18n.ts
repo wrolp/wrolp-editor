@@ -16,6 +16,9 @@ const EN: Table = {
   "tab.empty": "No open files",
   "tab.settings": "Settings",
   "tab.close": "Close",
+  "tab.closeAll": "Close all tabs",
+  "tab.closeLeft": "Close tabs to the left",
+  "tab.closeRight": "Close tabs to the right",
   "tab.saveDirty": "Save this file",
   "tab.untitled": "Untitled-{n}",
 
@@ -988,6 +991,9 @@ const ZH: Table = {
   "tab.empty": "没有打开的文件",
   "tab.settings": "设置",
   "tab.close": "关闭",
+  "tab.closeAll": "关闭所有标签",
+  "tab.closeLeft": "关闭左侧标签",
+  "tab.closeRight": "关闭右侧标签",
   "tab.saveDirty": "保存这个文件",
   "tab.untitled": "未命名-{n}",
 

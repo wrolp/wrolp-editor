@@ -14,7 +14,7 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 
 | Area | Behaviour |
 | --- | --- |
-| Tabs | One window, many files; per-tab dirty marker, tab list dropdown, right-click menu on a tab |
+| Tabs | One window, many files; per-tab dirty marker, tab list dropdown, right-click menu on a tab with close all / close to the left / close to the right |
 | Editing | Monaco: syntax highlighting by extension, minimap, multi-model per file, cursor restored per tab |
 | Saving | `Ctrl+S` writes the file and clears its draft; a never-saved `Untitled-N` tab goes through Save As. Two cleanups are optional and off by default: trimming trailing whitespace, and adding a final line break a file is missing — both are applied to the buffer first, so the screen ends up showing the bytes written |
 | Unsaved changes | Lines that differ from the file on disk are tinted — green where text was added, amber where saved text was replaced — and the marks clear on save. The workbench has this built in; the standalone editor needs the comparison, which is `src/lib/dirtyDiff.ts` |

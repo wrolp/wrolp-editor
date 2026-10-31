@@ -443,8 +443,8 @@ export default function App() {
   const tabMenuAt = useMenuPlacement(tabMenu, tabMenuRef);
   /** The tab whose name is being edited in place, or null. */
   const [renamingTab, setRenamingTab] = useState<number | null>(null);
-  /** The tab waiting on the unsaved-changes prompt, or null. */
-  const [closeAsk, setCloseAsk] = useState<number | null>(null);
+  /** The tabs waiting on the unsaved-changes prompt, in the order they were closed. */
+  const [closeAsk, setCloseAsk] = useState<number[]>([]);
   /** The tab waiting on the reload-over-unsaved-edits prompt, or null. */
   const [reloadAsk, setReloadAsk] = useState<number | null>(null);
   /** "Review individually" in the batch dialog: walk the queue one file at a time. */
@@ -1795,15 +1795,50 @@ export default function App() {
         void tabs.closeTab(id);
         return;
       }
-      setCloseAsk(id);
+      setCloseAsk((queue) => (queue.includes(id) ? queue : [...queue, id]));
     },
     [tabs]
   );
 
+  /**
+   * Close every tab, or the ones on one side of the menu's tab.
+   *
+   * Clean tabs go in one pass. A tab with unsaved edits is queued for the same prompt a single
+   * close uses, so a batch never throws work away without asking: the prompts walk the queue,
+   * and cancelling one stops the rest.
+   */
+  const requestCloseMany = useCallback(
+    (scope: "all" | "left" | "right", anchorId: number) => {
+      const list = tabs.tabs;
+      const index = list.findIndex((tab) => tab.id === anchorId);
+      if (index < 0) return;
+      const targets =
+        scope === "all" ? list : scope === "left" ? list.slice(0, index) : list.slice(index + 1);
+      if (targets.length === 0) return;
+      const clean = targets.filter((tab) => !tab.dirty).map((tab) => tab.id);
+      const dirty = targets.filter((tab) => tab.dirty).map((tab) => tab.id);
+      if (clean.length > 0) void tabs.closeTabs(clean);
+      if (dirty.length > 0) {
+        setCloseAsk((queue) => [...queue, ...dirty.filter((id) => !queue.includes(id))]);
+      }
+    },
+    [tabs]
+  );
+
+  // A queued tab can disappear from elsewhere — closed from another menu, or its group switched
+  // away — and the prompt must not wait on a tab that is gone.
+  useEffect(() => {
+    setCloseAsk((queue) => {
+      if (queue.length === 0) return queue;
+      const alive = queue.filter((id) => tabs.tabs.some((tab) => tab.id === id));
+      return alive.length === queue.length ? queue : alive;
+    });
+  }, [tabs.tabs]);
+
   /** The prompt's answer: the tab only goes if the save it asked for actually happened. */
   const closeAfterSave = useCallback(
     async (id: number) => {
-      setCloseAsk(null);
+      setCloseAsk((queue) => queue.filter((queued) => queued !== id));
       if (await tabs.saveTab(id)) void tabs.closeTab(id);
     },
     [tabs]
@@ -1811,11 +1846,72 @@ export default function App() {
 
   const closeWithoutSaving = useCallback(
     (id: number) => {
-      setCloseAsk(null);
+      setCloseAsk((queue) => queue.filter((queued) => queued !== id));
       void tabs.closeTab(id);
     },
     [tabs]
   );
+
+  /**
+   * The close entries both tab menus share. "Left" and "right" are only offered when something
+   * actually sits on that side, so the menu never shows an action that would do nothing.
+   */
+  const closeMenuItems = (tabId: number) => {
+    const index = tabs.tabs.findIndex((tab) => tab.id === tabId);
+    return (
+      <>
+        <div className="ws-sep" />
+        <div
+          className="ctx-item"
+          onClick={() => {
+            setTabMenu(null);
+            requestClose(tabId);
+          }}
+        >
+          <span className="ctx-icon">
+            <IconClose size={14} />
+          </span>
+          {t("tab.close")}
+        </div>
+        <div
+          className="ctx-item"
+          onClick={() => {
+            setTabMenu(null);
+            requestCloseMany("all", tabId);
+          }}
+        >
+          <span className="ctx-icon">
+            <IconClose size={14} />
+          </span>
+          {t("tab.closeAll")}
+        </div>
+        {index > 0 && (
+          <div
+            className="ctx-item"
+            onClick={() => {
+              setTabMenu(null);
+              requestCloseMany("left", tabId);
+            }}
+          >
+            <span className="ctx-icon">←</span>
+            {t("tab.closeLeft")}
+          </div>
+        )}
+        {index >= 0 && index < tabs.tabs.length - 1 && (
+          <div
+            className="ctx-item"
+            onClick={() => {
+              setTabMenu(null);
+              requestCloseMany("right", tabId);
+            }}
+          >
+            <span className="ctx-icon">→</span>
+            {t("tab.closeRight")}
+          </div>
+        )}
+      </>
+    );
+  };
 
   /**
    * Reloading is answered for only when there is something to lose. A clean tab just takes the
@@ -1926,7 +2022,8 @@ export default function App() {
   // The menu acts on the right-clicked tab, which is not necessarily the active one.
   const menuTab = tabs.tabs.find((t) => t.path === menuTabPath) ?? null;
   /** The tab the unsaved-changes prompt is about; gone if it was closed from elsewhere. */
-  const closeAskTab = closeAsk === null ? null : tabs.tabs.find((t) => t.id === closeAsk) ?? null;
+  const closeAskTab =
+    closeAsk.length === 0 ? null : tabs.tabs.find((t) => t.id === closeAsk[0]) ?? null;
   /** What the comparison picker shows as its left side: the tab's name, or the file's. */
   const compareLeftName =
     compareFrom === null
@@ -2824,18 +2921,7 @@ const defaultModeFor = useCallback(
                   {t("cmp.swap")}
                 </div>
               )}
-              <div
-                className="ctx-item"
-                onClick={() => {
-                  if (menuTab) requestClose(menuTab.id);
-                  setTabMenu(null);
-                }}
-              >
-                <span className="ctx-icon">
-                  <IconClose size={14} />
-                </span>
-                {t("tab.close")}
-              </div>
+              {menuTab && closeMenuItems(menuTab.id)}
             </>
           ) : tabMenu.panel === "root" ? (
             <>
@@ -3153,6 +3239,7 @@ const defaultModeFor = useCallback(
                   )}
                 </div>
               ))}
+              {closeMenuItems(tabMenu.tabId)}
             </>
           ) : (
             <>
@@ -3277,7 +3364,7 @@ const defaultModeFor = useCallback(
           tab={closeAskTab}
           onSave={() => void closeAfterSave(closeAskTab.id)}
           onDiscard={() => closeWithoutSaving(closeAskTab.id)}
-          onCancel={() => setCloseAsk(null)}
+          onCancel={() => setCloseAsk([])}
         />
       )}
 
