@@ -8,7 +8,7 @@
 //! A missing credential aborts with `git_auth_required:<host>` and an unknown host key with
 //! `git_host_untrusted:<host>|<sha256>`; the panel turns either into a dialog and retries.
 
-use git2::build::CheckoutBuilder;
+use git2::build::{CheckoutBuilder, RepoBuilder};
 use git2::cert::Cert;
 use git2::{
   BranchType, CertificateCheckStatus, Cred, CredentialType, ErrorCode, FetchOptions, PushOptions,
@@ -290,6 +290,99 @@ pub async fn git_push(
   .await;
   ops.end(&op_id);
   joined.map_err(|e| format!("git_push:{e}"))?
+}
+
+/// Clone a remote into `<parent>/<name>`, for the folder that has no repository of its own.
+///
+/// Same callbacks as fetch: the credentials and the host-key prompt apply, progress streams, and
+/// a cancel stops the transfer. A failed clone removes the half-written folder, because the next
+/// attempt would otherwise stop at "that folder already exists".
+#[tauri::command]
+pub async fn git_clone(
+  app: AppHandle,
+  ops: State<'_, GitOps>,
+  locks: State<'_, GitLocks>,
+  url: String,
+  parent: String,
+  name: String,
+  op_id: String,
+  on_progress: Channel<GitProgress>,
+) -> Result<String, String> {
+  let auth = AuthStore::load(&app)?;
+  let cancel = ops.begin(&op_id)?;
+  let ops = ops.inner().clone();
+  let locks = locks.inner().clone();
+  let sink = channel_sink(on_progress);
+  let joined = tauri::async_runtime::spawn_blocking(move || {
+    clone_core(&url, &parent, &name, &auth, &locks, cancel, sink)
+  })
+  .await;
+  ops.end(&op_id);
+  joined.map_err(|e| format!("git_clone:{e}"))?
+}
+
+/// A folder name a clone may create: one path segment, nothing Windows would trim or refuse.
+fn clone_name_ok(name: &str) -> bool {
+  !name.is_empty()
+    && name == name.trim()
+    && name != "."
+    && name != ".."
+    && !name.ends_with('.')
+    && !name.contains(['/', '\\', ':', '*', '?', '"', '<', '>', '|'])
+    && !name.chars().any(char::is_control)
+}
+
+pub(crate) fn clone_core(
+  url: &str,
+  parent: &str,
+  name: &str,
+  auth: &AuthStore,
+  locks: &GitLocks,
+  cancel: Arc<AtomicBool>,
+  sink: Sink,
+) -> Result<String, String> {
+  let url = url.trim();
+  if url.is_empty() {
+    return Err("git_clone_url".into());
+  }
+  if !clone_name_ok(name) {
+    return Err("git_clone_name".into());
+  }
+  let parent = crate::draft::normalize_path(parent);
+  let parent_path = Path::new(&parent);
+  if parent.is_empty() || !parent_path.is_dir() {
+    return Err("git_no_folder".into());
+  }
+  let target = parent_path.join(name);
+  if target.exists() {
+    return Err("git_clone_exists".into());
+  }
+  let _guard = locks.acquire(parent_path)?;
+  preflight(url, &cancel)?;
+  if cancel.load(Ordering::Relaxed) {
+    return Err("git_canceled".into());
+  }
+
+  let hostkey: HostKeyNote = Arc::new(Mutex::new(None));
+  let callbacks = callbacks(auth, Arc::clone(&cancel), sink.clone(), Arc::clone(&hostkey));
+  let mut fetch = FetchOptions::new();
+  fetch.remote_callbacks(callbacks);
+  let mut builder = RepoBuilder::new();
+  builder.fetch_options(fetch);
+  sink(starting());
+  match builder.clone(url, &target) {
+    Ok(_) => {
+      sink(done());
+      Ok(target.to_string_lossy().to_string())
+    }
+    Err(error) => {
+      let message = hostkey_note(&hostkey).unwrap_or_else(|| remote_fail("clone", error, &cancel));
+      // A folder with half a clone in it is worse than none: it makes the retry fail for a
+      // reason that has nothing to do with the server.
+      let _ = fs::remove_dir_all(&target);
+      Err(message)
+    }
+  }
 }
 
 fn channel_sink(channel: Channel<GitProgress>) -> Sink {

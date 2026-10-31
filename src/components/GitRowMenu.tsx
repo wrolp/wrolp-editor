@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { t } from "../lib/i18n";
 import { useMenuPlacement } from "../hooks/useMenuPlacement";
 import type { GitLocalPathState } from "../lib/tauri";
-import { IconEye, IconEyeOff, IconSettings } from "./icons";
+import { IconEye, IconEyeOff, IconFile, IconSettings } from "./icons";
 
 interface Props {
   /** The path's local state, or null while the probe is still in flight. */
@@ -11,6 +11,8 @@ interface Props {
   y: number;
   onClose: () => void;
   onIgnore: () => void;
+  /** Write the pattern to the tracked `.gitignore` rather than this machine's exclude file. */
+  onIgnoreRepo: () => void;
   onAssume: (enabled: boolean) => void;
   onOpenSettings: () => void;
 }
@@ -28,6 +30,7 @@ export default function GitRowMenu({
   y,
   onClose,
   onIgnore,
+  onIgnoreRepo,
   onAssume,
   onOpenSettings,
 }: Props) {
@@ -69,12 +72,22 @@ export default function GitRowMenu({
       onMouseDown={(event) => event.stopPropagation()}
     >
       {action === "ignore" && (
-        <div className="ctx-item" onClick={onIgnore}>
-          <span className="ctx-icon">
-            <IconEyeOff size={14} />
-          </span>
-          {t("side.menuLocalIgnore")}
-        </div>
+        <>
+          <div className="ctx-item" onClick={onIgnore}>
+            <span className="ctx-icon">
+              <IconEyeOff size={14} />
+            </span>
+            {t("side.menuLocalIgnore")}
+          </div>
+          {/* The same pattern, written to the file the repository commits instead of this
+              machine's own exclude — the difference is who the rule reaches. */}
+          <div className="ctx-item" onClick={onIgnoreRepo}>
+            <span className="ctx-icon">
+              <IconFile size={14} />
+            </span>
+            {t("side.menuGitignore")}
+          </div>
+        </>
       )}
       {action === "assume" && (
         <div className="ctx-item" onClick={() => onAssume(true)}>

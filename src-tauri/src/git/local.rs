@@ -66,6 +66,13 @@ pub fn git_local_ignore(path: String, locks: State<'_, GitLocks>) -> Result<(), 
   local_ignore(&path, &locks)
 }
 
+/// Add a path to the repository's own `.gitignore` — the tracked file, shared with every clone.
+/// `git_local_ignore` is the other half: same pattern, written to `.git/info/exclude` instead.
+#[tauri::command]
+pub fn git_repo_ignore(path: String, locks: State<'_, GitLocks>) -> Result<(), String> {
+  repo_ignore(&path, &locks)
+}
+
 #[tauri::command]
 pub fn git_local_unignore(
   root: String,
@@ -318,6 +325,30 @@ pub(crate) fn local_ignore(path: &str, locks: &GitLocks) -> Result<(), String> {
     .map_err(|e| fail("ignore", e))?
   {
     return Err("git_already_ignored".into());
+  }
+  append_pattern(&file, &bytes, &pattern)
+}
+
+pub(crate) fn repo_ignore(path: &str, locks: &GitLocks) -> Result<(), String> {
+  let opened = discover_at(path)?;
+  let _guard = locks.acquire(opened.repo.commondir())?;
+  let rel = rel_of(&opened.workdir, path)?;
+  let is_dir = opened.workdir.join(&rel).is_dir();
+  let index = opened.repo.index().map_err(|e| fail("index", e))?;
+  if index_any(&index, &rel).is_some() {
+    return Err("git_tracked".into());
+  }
+  // At the work tree root, not the git dir: this file is part of the repository's contents.
+  let file = opened.workdir.join(".gitignore");
+  let bytes = match fs::read(&file) {
+    Ok(bytes) => bytes,
+    Err(e) if e.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+    Err(e) => return Err(io_error("gitignore", e)),
+  };
+  let pattern = pattern_for(&rel, is_dir);
+  // Already written by hand or by an earlier click: one wish, not an error.
+  if has_line(&bytes, &pattern) {
+    return Ok(());
   }
   append_pattern(&file, &bytes, &pattern)
 }

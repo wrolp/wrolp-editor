@@ -9,9 +9,11 @@ use super::branch::{branches_of, create_branch, delete_branch, switch_branch};
 use super::diff::diff_of;
 use super::history::{commit_files, head_commit, log_page};
 use super::index::{amend_commit, commit, discard, stage, unstage};
-use super::local::{assume_unchanged, local_ignore, local_state, local_unignore, local_view};
+use super::local::{
+  assume_unchanged, local_ignore, local_state, local_unignore, local_view, repo_ignore,
+};
 use super::remote::{
-  conflict_sides_of, delete_resolution, fetch_core, merge_abort, pull_core, push_core,
+  clone_core, conflict_sides_of, delete_resolution, fetch_core, merge_abort, pull_core, push_core,
   remove_remote, resolve_conflict, save_remote, write_resolution, Sink,
 };
 use super::repos::scan_repos;
@@ -1587,6 +1589,78 @@ fn remotes_can_be_added_edited_and_removed() {
     .unwrap()
     .find_remote("origin")
     .is_err());
+}
+
+#[test]
+fn adding_a_path_to_gitignore_writes_one_anchored_line() {
+  let fixture = fixture("repo-ignore");
+  let _repo = init(&fixture);
+  let file = write(&fixture, "build.log", "noise
+");
+  let tracked = write(&fixture, "a.txt", "one
+");
+  stage(&root(&fixture), &[tracked.clone()], &locks()).unwrap();
+  let ignore_file = fixture.dir.join(".gitignore");
+
+  repo_ignore(&file, &locks()).unwrap();
+  let text = fs::read_to_string(&ignore_file).unwrap();
+  assert!(text.lines().any(|line| line == "/build.log"), "{text}");
+
+  // Clicking twice is one wish: the line is not written again.
+  repo_ignore(&file, &locks()).unwrap();
+  let again = fs::read_to_string(&ignore_file).unwrap();
+  assert_eq!(again.matches("/build.log").count(), 1, "{again}");
+
+  // A path in the index belongs to the repository, not to an ignore file.
+  assert_eq!(
+    repo_ignore(&tracked, &locks()).unwrap_err(),
+    "git_tracked"
+  );
+}
+
+#[test]
+fn a_clone_lands_in_the_named_folder_and_refuses_an_existing_one() {
+  let origin = fixture("clone-origin");
+  let _repo = init(&origin);
+  let file = write(&origin, "a.txt", "from the remote
+");
+  stage(&root(&origin), &[file], &locks()).unwrap();
+  commit(&root(&origin), "first", None, &locks()).unwrap();
+
+  let dest = fixture("clone-dest");
+  let (sink, phases) = quiet();
+  let out = clone_core(
+    &root(&origin),
+    &root(&dest),
+    "copy",
+    &AuthStore::default(),
+    &GitLocks::default(),
+    not_canceled(),
+    sink,
+  )
+  .unwrap();
+  assert_eq!(
+    fs::read_to_string(Path::new(&out).join("a.txt")).unwrap(),
+    "from the remote
+"
+  );
+  assert!(phases.lock().unwrap().iter().any(|phase| phase == "done"));
+
+  // The name is the folder: a second clone into it is refused rather than merged into it.
+  let (sink, _) = quiet();
+  assert_eq!(
+    clone_core(
+      &root(&origin),
+      &root(&dest),
+      "copy",
+      &AuthStore::default(),
+      &GitLocks::default(),
+      not_canceled(),
+      sink,
+    )
+    .unwrap_err(),
+    "git_clone_exists"
+  );
 }
 
 #[test]

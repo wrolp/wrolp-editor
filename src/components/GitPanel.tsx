@@ -71,6 +71,8 @@ interface Props {
   onRemoveRepo: (root: string) => void;
   onRescanRepos: () => void;
   onInitWorkspace: () => Promise<void>;
+  /** Clone a remote into the group's folder, for a folder that has no repository yet. */
+  onCloneRepo: () => void;
   git: GitController;
   active: boolean;
   /** `pathKey` of open tabs holding unsaved edits: the disk text is not what the editor shows. */
@@ -158,6 +160,7 @@ export default function GitPanel({
   onRemoveRepo,
   onRescanRepos,
   onInitWorkspace,
+  onCloneRepo,
   git,
   active,
   dirtyPaths,
@@ -224,6 +227,10 @@ export default function GitPanel({
   const [headMenu, setHeadMenu] = useState<{ x: number; y: number } | null>(null);
   const headMenuRef = useRef<HTMLDivElement>(null);
   const headMenuAt = useMenuPlacement(headMenu, headMenuRef);
+  /** The "+" menu: an existing folder to add, or a remote to clone into this one. */
+  const [addMenu, setAddMenu] = useState<{ x: number; y: number } | null>(null);
+  const addMenuRef = useRef<HTMLDivElement>(null);
+  const addMenuAt = useMenuPlacement(addMenu, addMenuRef);
   /** The list as it is this render, for the measurement effect, which must not re-run per render. */
   const headActionsRef = useRef<HeadAction[]>([]);
 
@@ -248,6 +255,17 @@ export default function GitPanel({
     window.addEventListener("mousedown", close);
     return () => window.removeEventListener("mousedown", close);
   }, [headMenu]);
+
+  useEffect(() => {
+    if (!addMenu) return;
+    const close = (event: MouseEvent) => {
+      const target = event.target as Node | null;
+      if (addMenuRef.current?.contains(target)) return;
+      setAddMenu(null);
+    };
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [addMenu]);
 
   // A different folder is a different repository; a half-typed message and a pending discard
   // question from the old one must not carry over.
@@ -554,9 +572,18 @@ export default function GitPanel({
     },
     {
       key: "add",
+      // Two ways to end up with a repository in this folder: one that already exists somewhere,
+      // or one that still lives on a server. The "+" asks which instead of assuming.
       label: t("git.repos.add"),
       icon: <span className="git-plus">＋</span>,
-      run: () => onAddRepo(),
+      run: (anchor) => {
+        if (addMenu) {
+          setAddMenu(null);
+          return;
+        }
+        const rect = anchor.getBoundingClientRect();
+        setAddMenu({ x: rect.left, y: rect.bottom + 2 });
+      },
     },
   ];
   headActionsRef.current = headActions;
@@ -671,6 +698,11 @@ export default function GitPanel({
               <button className="git-small-btn" onClick={onAddRepo}>
                 {t("git.repos.add")}
               </button>
+              {workspaceRoot && (
+                <button className="git-small-btn" onClick={onCloneRepo}>
+                  {t("git.clone")}
+                </button>
+              )}
               {workspaceRoot && (
                 <button className="git-small-btn" onClick={() => void onInitWorkspace()}>
                   {t("git.init")}
@@ -1070,16 +1102,27 @@ export default function GitPanel({
 
           {stagedFiles.length > 0 && (
             <section className="git-section-block">
-              <button
-                className="git-section"
-                onClick={() => setFolded((f) => ({ ...f, staged: !f.staged }))}
-              >
-                <span className={`git-chev${folded.staged ? " rot" : ""}`}>
-                  <IconChevron size={11} />
-                </span>
-                <span>{t("git.staged")}</span>
-                <span className="git-count">{stagedFiles.length}</span>
-              </button>
+              <div className="git-section-row">
+                <button
+                  className="git-section"
+                  onClick={() => setFolded((f) => ({ ...f, staged: !f.staged }))}
+                >
+                  <span className={`git-chev${folded.staged ? " rot" : ""}`}>
+                    <IconChevron size={11} />
+                  </span>
+                  <span>{t("git.staged")}</span>
+                  <span className="git-count">{stagedFiles.length}</span>
+                </button>
+                <button
+                  className="git-section-action"
+                  title={t("git.unstageAll")}
+                  aria-label={t("git.unstageAll")}
+                  disabled={busy}
+                  onClick={() => void git.unstage(stagedFiles)}
+                >
+                  <IconUnstage size={13} />
+                </button>
+              </div>
               {!folded.staged &&
                 stagedFiles.map((file) => {
                   const { name, dir } = splitPath(file.path);
@@ -1129,16 +1172,29 @@ export default function GitPanel({
           )}
 
           <section className="git-section-block">
-            <button
-              className="git-section"
-              onClick={() => setFolded((f) => ({ ...f, changed: !f.changed }))}
-            >
-              <span className={`git-chev${folded.changed ? " rot" : ""}`}>
-                <IconChevron size={11} />
-              </span>
-              <span>{t("git.changes")}</span>
-              <span className="git-count">{changedFiles.length}</span>
-            </button>
+            <div className="git-section-row">
+              <button
+                className="git-section"
+                onClick={() => setFolded((f) => ({ ...f, changed: !f.changed }))}
+              >
+                <span className={`git-chev${folded.changed ? " rot" : ""}`}>
+                  <IconChevron size={11} />
+                </span>
+                <span>{t("git.changes")}</span>
+                <span className="git-count">{changedFiles.length}</span>
+              </button>
+              {changedFiles.length > 0 && (
+                <button
+                  className="git-section-action"
+                  title={t("git.stageAll")}
+                  aria-label={t("git.stageAll")}
+                  disabled={busy}
+                  onClick={() => void git.stage(changedFiles)}
+                >
+                  <IconStage size={13} />
+                </button>
+              )}
+            </div>
             {!folded.changed && changedFiles.length === 0 && (
               <div className="git-clean">{t("git.clean")}</div>
             )}
@@ -1467,6 +1523,40 @@ export default function GitPanel({
         </div>
       )}
 
+      {addMenu && (
+        <div
+          className="ctx-menu"
+          ref={addMenuRef}
+          style={{ display: "block", left: addMenuAt.left, top: addMenuAt.top }}
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <div
+            className="ctx-item"
+            onClick={() => {
+              setAddMenu(null);
+              onAddRepo();
+            }}
+          >
+            <span className="ctx-icon">
+              <IconFolder size={14} />
+            </span>
+            {t("git.repos.add")}
+          </div>
+          <div
+            className="ctx-item"
+            onClick={() => {
+              setAddMenu(null);
+              onCloneRepo();
+            }}
+          >
+            <span className="ctx-icon">
+              <IconRemote size={14} />
+            </span>
+            {t("git.clone")}
+          </div>
+        </div>
+      )}
+
       {headMenu && (
         <div
           className="ctx-menu git-more-menu"
@@ -1538,6 +1628,14 @@ export default function GitPanel({
             void runRowAction(
               () => git.ignoreLocal(file),
               t("side.localIgnoreDone", { name: splitPath(file.path).name })
+            );
+          }}
+          onIgnoreRepo={() => {
+            const file = rowMenu.file;
+            closeRowMenu();
+            void runRowAction(
+              () => git.ignoreInGitignore(file),
+              t("side.gitignoreDone", { name: splitPath(file.path).name })
             );
           }}
           onAssume={(enabled) => {

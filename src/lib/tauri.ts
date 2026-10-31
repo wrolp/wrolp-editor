@@ -960,6 +960,8 @@ export const api = {
   /** The repository's own exclude file and the index's assume-unchanged bit. */
   gitLocalState: (path: string) => invoke<GitLocalPathState>("git_local_state", { path }),
   gitLocalIgnore: (path: string) => invoke<void>("git_local_ignore", { path }),
+  /** Append the path to the repository's tracked `.gitignore` instead of `info/exclude`. */
+  gitRepoIgnore: (path: string) => invoke<void>("git_repo_ignore", { path }),
   gitLocalUnignore: (root: string, pattern: string) =>
     invoke<void>("git_local_unignore", { root, pattern }),
   gitAssumeUnchanged: (root: string, paths: string[], enabled: boolean) =>
@@ -1039,6 +1041,18 @@ export const api = {
       opId,
       onProgress: channel,
     });
+  },
+  /** Clone into `<parent>/<name>`; resolves with the new work tree's path. */
+  gitClone: (
+    url: string,
+    parent: string,
+    name: string,
+    opId: string,
+    onProgress: (progress: GitProgress) => void
+  ) => {
+    const channel = new Channel<GitProgress>();
+    channel.onmessage = onProgress;
+    return invoke<string>("git_clone", { url, parent, name, opId, onProgress: channel });
   },
   gitCancel: (opId: string) => invoke<void>("git_cancel", { opId }),
   gitConflictSides: (root: string, path: string) =>

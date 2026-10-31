@@ -902,6 +902,7 @@ export default function Sidebar(props: Props) {
   const localGitActions = localGit
     ? {
         ignore: !localGit.tracked && !localGit.ignored,
+        gitignore: !localGit.tracked && !localGit.ignored,
         unignore: !localGit.tracked && localGit.ignored && !!localGit.localPattern,
         assume: localGit.tracked && !localGit.assumed,
         unassume: localGit.tracked && localGit.assumed,
@@ -913,7 +914,9 @@ export default function Sidebar(props: Props) {
    * Apply one local-only change. Both outcomes are reported through `onError`, which is what
    * this panel already uses for a sentence that is not a failure (a copy, a paste).
    */
-  const runLocalGit = async (kind: "ignore" | "unignore" | "assume" | "unassume") => {
+  const runLocalGit = async (
+    kind: "ignore" | "gitignore" | "unignore" | "assume" | "unassume"
+  ) => {
     const target = menu;
     const state = localGit;
     if (!target || !state) return;
@@ -925,6 +928,9 @@ export default function Sidebar(props: Props) {
       if (kind === "ignore") {
         await api.gitLocalIgnore(target.path);
         onError(t("side.localIgnoreDone", { name }));
+      } else if (kind === "gitignore") {
+        await api.gitRepoIgnore(target.path);
+        onError(t("side.gitignoreDone", { name }));
       } else if (kind === "unignore") {
         if (!state.localPattern) return;
         await api.gitLocalUnignore(state.repoRoot, state.localPattern);
@@ -2064,6 +2070,14 @@ export default function Sidebar(props: Props) {
                         <IconEyeOff size={14} />
                       </span>
                       {t("side.menuLocalIgnore")}
+                    </div>
+                  )}
+                  {localGitActions?.gitignore && (
+                    <div className="ctx-item" onClick={() => void runLocalGit("gitignore")}>
+                      <span className="ctx-icon">
+                        <IconFile size={14} />
+                      </span>
+                      {t("side.menuGitignore")}
                     </div>
                   )}
                   {localGitActions?.unignore && (

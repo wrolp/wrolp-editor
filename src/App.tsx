@@ -6,6 +6,7 @@ import HtmlPreview from "./components/HtmlPreview";
 import Editor from "./components/Editor";
 import ComparePane from "./components/ComparePane";
 import ExportProgress from "./components/ExportProgress";
+import GitCloneDialog from "./components/GitCloneDialog";
 import MergeView from "./components/MergeView";
 import MarkdownPreview from "./components/MarkdownPreview";
 import DraftRestoreDialog from "./components/DraftRestoreDialog";
@@ -457,6 +458,8 @@ export default function App() {
   const [compareFrom, setCompareFrom] = useState<CompareRef | null>(null);
   /** The repository whose local Git settings dialog is open, or null. */
   const [localSettingsRoot, setLocalSettingsRoot] = useState<string | null>(null);
+  /** Cloning a remote into the group's folder, for a folder that has no repository yet. */
+  const [cloneOpen, setCloneOpen] = useState(false);
   /** The clear-history confirmation, shown before the whole recent-files list is dropped. */
   const [confirmingClear, setConfirmingClear] = useState(false);
   /** The file whose "open with the default app" is paused on the run-confirmation. */
@@ -2595,6 +2598,7 @@ const defaultModeFor = useCallback(
               onRemoveRepo={removeGitRepository}
               onRescanRepos={() => void repos.rescan()}
               onInitWorkspace={initGitWorkspace}
+              onCloneRepo={() => setCloneOpen(true)}
               git={git}
               active={sidebarView === "git" && sidebarVisible}
               dirtyPaths={dirtyPaths}
@@ -3279,6 +3283,21 @@ const defaultModeFor = useCallback(
           detectedEol={eolLabel(lineEndingFor(fileSettingsTab, settings.lineEnding))}
           onSave={(p, next) => tabs.setFileSettings(p, next)}
           onClose={() => setFileSettingsPath(null)}
+          onError={toast}
+        />
+      )}
+
+      {cloneOpen && rootDir && (
+        <GitCloneDialog
+          parent={rootDir}
+          onClose={() => setCloneOpen(false)}
+          onCloned={(path) => {
+            setCloneOpen(false);
+            // The scan is what puts the new repository in the list; selecting it afterwards
+            // opens the panel on it instead of leaving the user to find the row.
+            void repos.rescan().then(() => repos.select(path));
+            toast(t("git.cloneDone", { name: basename(path) }));
+          }}
           onError={toast}
         />
       )}

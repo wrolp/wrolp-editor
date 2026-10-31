@@ -2208,6 +2208,40 @@ body.resizing .editor-host {
   padding-bottom: 4px;
   border-bottom: 1px solid var(--border-soft);
 }
+/* The section header and its bulk action share one row: the header is a button, so the action
+   cannot live inside it. */
+.git-section-row {
+  display: flex;
+  align-items: center;
+  padding-right: 6px;
+}
+.git-section-row .git-section {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
+.git-section-action {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.git-section-action:hover:not(:disabled) {
+  background: var(--border-strong);
+  color: var(--text-strong);
+}
+.git-section-action:disabled {
+  color: var(--text-disabled);
+  cursor: default;
+}
 .git-section {
   display: flex;
   align-items: center;
@@ -2583,6 +2617,63 @@ body.resizing .editor-host {
   flex-direction: column;
   align-items: flex-start;
   gap: 8px;
+}
+/* Clone: two fields, the path they will create, and the transfer's progress. */
+.modal.clone {
+  width: 520px;
+}
+.clone-intro {
+  margin-bottom: 12px;
+}
+.clone-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.clone-field .settings-text {
+  width: 100%;
+}
+.clone-target {
+  margin: 0 0 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.clone-progress {
+  margin-bottom: 12px;
+}
+.clone-progress-text {
+  margin-bottom: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--muted);
+}
+.clone-progress-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.clone-progress-bar {
+  flex: 1 1 auto;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--surface-active);
+  overflow: hidden;
+}
+.clone-progress-bar span {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.15s ease;
+}
+.clone-progress-percent {
+  font-size: 11px;
+  color: var(--muted);
 }
 /* Remote addresses: one row per remote, an edit box that opens in place, and an add row. */
 .modal.remotes {

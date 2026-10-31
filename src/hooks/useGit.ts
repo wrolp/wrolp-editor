@@ -78,6 +78,8 @@ export interface GitController {
   discard: (files: GitStatusEntry[]) => Promise<boolean>;
   /** Add one path to the repository's own ignore file (`info/exclude`). */
   ignoreLocal: (file: GitStatusEntry) => Promise<boolean>;
+  /** Add one path to the tracked `.gitignore`, so every clone ignores it too. */
+  ignoreInGitignore: (file: GitStatusEntry) => Promise<boolean>;
   /** Set or clear the index's assume-unchanged bit on tracked paths. */
   setAssume: (files: GitStatusEntry[], enabled: boolean) => Promise<boolean>;
   commit: (message: string, amend?: boolean) => Promise<GitCommitResult | null>;
@@ -435,6 +437,14 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
     [run]
   );
 
+  const ignoreInGitignore = useCallback(
+    (file: GitStatusEntry) => {
+      if (!rootRef.current) return Promise.resolve(false);
+      return run("ignore", () => api.gitRepoIgnore(file.abs));
+    },
+    [run]
+  );
+
   const setAssume = useCallback(
     (files: GitStatusEntry[], enabled: boolean) => {
       const root = rootRef.current;
@@ -788,6 +798,7 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
     unstage,
     discard,
     ignoreLocal,
+    ignoreInGitignore,
     setAssume,
     commit,
     createBranch,
