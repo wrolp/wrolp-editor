@@ -4809,7 +4809,7 @@ body.resizing .editor-host {
 .export-progress {
   position: fixed;
   left: 50%;
-  bottom: 88px;
+  bottom: 72px;
   transform: translateX(-50%);
   z-index: 200;
   display: flex;
@@ -4823,6 +4823,15 @@ body.resizing .editor-host {
   color: var(--text-strong);
   font-size: 12px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.export-progress.dragged {
+  cursor: grabbing;
+}
+.export-progress button {
+  cursor: pointer;
 }
 .export-progress span {
   min-width: 0;

@@ -5,6 +5,7 @@ import ImageGallery from "./components/ImageGallery";
 import HtmlPreview from "./components/HtmlPreview";
 import Editor from "./components/Editor";
 import ComparePane from "./components/ComparePane";
+import ExportProgress from "./components/ExportProgress";
 import MergeView from "./components/MergeView";
 import MarkdownPreview from "./components/MarkdownPreview";
 import DraftRestoreDialog from "./components/DraftRestoreDialog";
@@ -3447,24 +3448,21 @@ const defaultModeFor = useCallback(
 
       {/* A PDF export spends its first run reading every picture through the backend; this
           says so, and offers the way out. The button is disabled once the system dialog is
-          opening, because from there the dialog's own Cancel is the only thing that works. */}
+          opening, because from there the dialog's own Cancel is the only thing that works.
+          It can be dragged aside while it waits. */}
       {exportJob && (
-        <div className="export-progress" role="status">
-          <span>
-            {exportJob.stage === "print"
+        <ExportProgress
+          message={
+            exportJob.stage === "print"
               ? t("export.openingPrint")
               : exportJob.total > 0
                 ? t("export.progress", { done: exportJob.done, total: exportJob.total })
-                : t("export.preparing")}
-          </span>
-          <button
-            className="btn small"
-            onClick={() => exportAbort.current?.abort()}
-            disabled={exportJob.stage === "print"}
-          >
-            {t("close.cancel")}
-          </button>
-        </div>
+                : t("export.preparing")
+          }
+          cancelLabel={t("close.cancel")}
+          onCancel={() => exportAbort.current?.abort()}
+          cancelDisabled={exportJob.stage === "print"}
+        />
       )}
 
       <Toast
