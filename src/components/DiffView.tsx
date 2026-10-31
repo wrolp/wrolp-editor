@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DiffEditor, type MonacoDiffEditor } from "@monaco-editor/react";
 import { t } from "../lib/i18n";
 import "../lib/monaco";
 import { sideKey, type ComparePair, type DiffStats } from "../lib/types";
 import type { FoldChange } from "../lib/diffFold";
-import { IconFold, IconWordWrap } from "./icons";
+import { IconFold, IconModeSplit, IconModeText, IconWordWrap } from "./icons";
 
 interface Props {
   pair: ComparePair;
@@ -46,6 +46,12 @@ interface Props {
    * hunk; absent means the texts are the files themselves and their own numbers are right.
    */
   lineNumbers?: { left: number[]; right: number[] };
+  /**
+   * The editor-like reading layout: unchanged stretches collapse into a "N hidden lines" row, a
+   * narrow pane falls back to one column, and the header gains a split/unified switch. Absent for
+   * the version dialog and the conflict comparison, whose layout stays exactly as it was.
+   */
+  layout?: boolean;
 }
 
 /**
@@ -71,7 +77,29 @@ export default function DiffView({
   fold,
   wrap,
   lineNumbers,
+  layout,
 }: Props) {
+  const hostRef = useRef<HTMLDivElement>(null);
+  /** The pane is too narrow for two columns, measured rather than guessed. */
+  const [narrow, setNarrow] = useState(false);
+  /**
+   * The reader's own choice, or null while the width decides. Clicking the switch takes over;
+   * a narrow pane opens unified without anybody asking, which is what the width is for.
+   */
+  const [splitChoice, setSplitChoice] = useState<boolean | null>(null);
+  const sideBySide = splitChoice ?? !narrow;
+
+  useEffect(() => {
+    if (!layout) return;
+    const host = hostRef.current;
+    if (!host) return;
+    const measure = () => setNarrow(host.clientWidth > 0 && host.clientWidth < 720);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(host);
+    return () => observer.disconnect();
+  }, [layout]);
+
   const statsRef = useRef(onStats);
   statsRef.current = onStats;
   const changesRef = useRef(onChanges);
@@ -80,6 +108,9 @@ export default function DiffView({
   const diffRef = useRef<MonacoDiffEditor | null>(null);
   const numbersRef = useRef(lineNumbers);
   numbersRef.current = lineNumbers;
+  /** The switch as it is *now*, so a toggle that lands before Monaco finishes mounting wins. */
+  const wrapRef = useRef(wordWrap);
+  wrapRef.current = wordWrap;
 
   /**
    * Point each side's gutter at the original line behind it.
@@ -159,6 +190,30 @@ export default function DiffView({
     applyLineNumbers(diffRef.current);
   }, [lineNumbers]);
 
+  /**
+   * Wrapping is set on the two embedded editors as well as on the diff widget.
+   *
+   * The diff editor's own `wordWrap` is not reliably pushed to both sides in this version —
+   * toggling it could leave the original column unwrapped while the modified one folded over,
+   * which is the one thing side-by-side must never do. Setting both explicitly keeps the two
+   * columns on the same setting, before and after a toggle.
+   */
+  useEffect(() => {
+    const instance = diffRef.current;
+    if (!instance) return;
+    const option = {
+      wordWrap: wordWrap ? "on" : "off",
+      // The override layers are what the diff editor itself writes (`diffWordWrap` lands in
+      // `wordWrapOverride1`), so the switch is set on the layer above it too: whatever the
+      // widget re-applies on its own options pass cannot outrank this.
+      wordWrapOverride2: wordWrap ? "on" : "off",
+    } as const;
+    instance.getOriginalEditor().updateOptions(option);
+    instance.getModifiedEditor().updateOptions(option);
+    // Also after a split/unified switch: the diff editor turns wrapping off on the original
+    // side while it is the hidden column, and does not put it back when both are shown again.
+  }, [wordWrap, sideBySide]);
+
   return (
     <div className="diff-view" title={t("cmp.readOnly")}>
       <div className="diff-head">
@@ -168,7 +223,7 @@ export default function DiffView({
         <span className="diff-name" title={pair.right.path}>
           {pair.right.name}
         </span>
-        {(fold || wrap) && (
+        {(fold || wrap || layout) && (
           <div className="diff-tools">
             {fold?.hidden && (
               <span
@@ -204,10 +259,22 @@ export default function DiffView({
                 <IconWordWrap size={14} />
               </button>
             )}
+            {layout && (
+              <button
+                className={`diff-tool${sideBySide ? " on" : ""}`}
+                onClick={() => setSplitChoice(!sideBySide)}
+                // The picture is what the click will switch *to*, like the other two switches.
+                title={t(sideBySide ? "cmp.unifiedView" : "cmp.splitView")}
+                aria-label={t(sideBySide ? "cmp.unifiedView" : "cmp.splitView")}
+                aria-pressed={sideBySide}
+              >
+                {sideBySide ? <IconModeText size={14} /> : <IconModeSplit size={14} />}
+              </button>
+            )}
           </div>
         )}
       </div>
-      <div className="diff-host">
+      <div className="diff-host" ref={hostRef}>
         <DiffEditor
           original={pair.left.content}
           modified={pair.right.content}
@@ -228,6 +295,13 @@ export default function DiffView({
             const indent = { tabSize, insertSpaces, detectIndentation };
             instance.getModifiedEditor().updateOptions(indent);
             instance.getOriginalEditor().updateOptions(indent);
+            // Both sides wrap or neither does: see the `wordWrap` effect above.
+            const wrapping = {
+              wordWrap: wrapRef.current ? "on" : "off",
+              wordWrapOverride2: wrapRef.current ? "on" : "off",
+            } as const;
+            instance.getOriginalEditor().updateOptions(wrapping);
+            instance.getModifiedEditor().updateOptions(wrapping);
             applyLineNumbers(instance);
             // The first computation can land before this listener is attached, so the
             // totals are read once here as well as on every later update.
@@ -239,13 +313,27 @@ export default function DiffView({
             automaticLayout: true,
             readOnly: true,
             originalEditable: false,
-            // Side by side is the whole point; inline would stack the two into one column.
-            renderSideBySide: true,
+            // Split by default, one column when the pane is too narrow or the reader asks for it.
+            renderSideBySide: layout ? sideBySide : true,
+            // The width is decided here rather than by Monaco's own fallback, which would keep
+            // forcing one column on a narrow pane after the reader had asked for split.
+            useInlineViewWhenSpaceIsLimited: !layout,
+            // VS Code's reading aid: unchanged stretches fold into a "N hidden lines" row that
+            // can be opened again.
+            hideUnchangedRegions: layout
+              ? { enabled: true, contextLineCount: 3, minimumLineCount: 3, revealLineCount: 20 }
+              : undefined,
+            // Defaults are on; named so a reader does not have to look them up. The revert arrow
+            // only appears while the modified side is editable, which this read-only view is not.
+            renderMarginRevertIcon: true,
             renderOverviewRuler: false,
             scrollBeyondLastLine,
             fontFamily: 'Consolas, "Cascadia Mono", "Courier New", monospace',
             renderWhitespace,
             wordWrap: wordWrap ? "on" : "off",
+            // The diff editor's own switch, so the two panes are told explicitly rather than
+            // inheriting whatever default this version applies.
+            diffWordWrap: wordWrap ? "on" : "off",
             ignoreTrimWhitespace: false,
           }}
         />

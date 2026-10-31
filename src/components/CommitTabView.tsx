@@ -363,6 +363,7 @@ function CommitFileDiff({
           scrollBeyondLastLine={scrollBeyondLastLine}
           onStats={ignoreStats}
           onChanges={fold && ready ? undefined : setChanges}
+          layout
         />
       </div>
     </div>

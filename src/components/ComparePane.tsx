@@ -115,6 +115,9 @@ export default function ComparePane({
       scrollBeyondLastLine={scrollBeyondLastLine}
       onStats={onStats}
       onChanges={fold && ready ? undefined : setChanges}
+      // The editor-like reading layout: unchanged regions fold away, and the header gains the
+      // split/unified switch (a narrow pane opens in one column on its own).
+      layout
       fold={{
         on: fold,
         canFold: ready,
