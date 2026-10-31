@@ -2474,13 +2474,21 @@ body.resizing .editor-host {
   gap: 8px;
   margin-top: 6px;
 }
+/* "0 staged" is the part that gives way when the row is narrow: it truncates, it never wraps —
+   a two-line count pushes the amend toggle and the commit button around, and neither may move. */
 .git-commit-count {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   font-size: 11px;
   color: var(--text-faint);
 }
 /* The amend toggle sits with the staged count, leaving the commit button on the right. */
 .git-amend {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 5px;
   font-size: 11px;
@@ -2651,6 +2659,7 @@ body.resizing .editor-host {
   min-width: 0;
 }
 .git-commit-btn {
+  flex: 0 0 auto;
   margin-left: auto;
   padding: 5px 12px;
   background: var(--accent-soft);
