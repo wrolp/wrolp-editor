@@ -3714,7 +3714,8 @@ body.resizing .editor-host {
    row comes and goes. The reader, the picture and the gallery each have one. */
 .pdf-tools-toggle,
 .img-tools-toggle,
-.gal-tools-toggle {
+.gal-tools-toggle,
+.md-toc-tab {
   position: absolute;
   top: 8px;
   /* Clear of the pane's scrollbar, which owns the last few pixels of the right edge. */
@@ -3743,9 +3744,11 @@ body.resizing .editor-host {
 .pdf-tools-toggle:hover,
 .img-tools-toggle:hover,
 .gal-tools-toggle:hover,
+.md-toc-tab:hover,
 .pdf-tools-toggle:focus-visible,
 .img-tools-toggle:focus-visible,
-.gal-tools-toggle:focus-visible {
+.gal-tools-toggle:focus-visible,
+.md-toc-tab:focus-visible {
   opacity: 1;
   background: var(--surface-active);
 }
@@ -5665,53 +5668,21 @@ body.resizing .editor-host {
 .md-toc-title {
   color: var(--muted);
 }
-.md-toc-toggle {
-  flex: 0 0 24px;
-  width: 24px;
-  height: 24px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: 6px;
-  background: none;
-  color: var(--text-dim);
-  cursor: pointer;
+/* The tab that brings the outline back, and puts it away again: it sits on the edge the list
+   opens from, and the list's own heading makes room for it there. */
+.md-with-toc > .md-toc-tab {
+  top: 10px;
+  right: 18px;
+  z-index: 4;
 }
-.md-toc-toggle:hover {
-  background: var(--surface-hover);
-  color: var(--text);
+.md-with-toc:not(.toc-right) > .md-toc-tab {
+  left: 10px;
+  right: auto;
 }
-/* Expanded points the chevron left, at the edge the list folds to; collapsed leaves it
-   pointing right, which is what every other chevron in the app already means. */
-.md-toc-toggle .chev {
-  display: inline-flex;
-  transform: rotate(180deg);
-  transition: transform 0.12s ease;
-}
-.md-toc.collapsed .md-toc-toggle .chev {
-  transform: none;
-}
-/* Mirrored on the right: expanded points at the edge the list folds to, collapsed points
-   back into the page. */
-.md-with-toc.toc-right .md-toc-toggle .chev {
-  transform: none;
-}
-.md-with-toc.toc-right .md-toc.collapsed .md-toc-toggle .chev {
-  transform: rotate(180deg);
-}
-/* Collapsed, the column is a rail: the toggle stays where it was, and everything else goes. */
-.md-toc.collapsed {
-  flex-basis: 36px;
-  padding: 18px 6px 24px;
-}
-.md-toc.collapsed .md-toc-head {
-  justify-content: center;
-  padding: 0;
-}
-.md-toc.collapsed .md-toc-title,
-.md-toc.collapsed ul {
-  display: none;
+/* Only the left column puts its heading under the tab; on the right the heading starts at the
+   pane's edge and the tab sits past the end of it. */
+.md-with-toc:not(.toc-right) > .md-toc > .md-toc-head {
+  padding-left: 34px;
 }
 .md-toc ul {
   list-style: none;

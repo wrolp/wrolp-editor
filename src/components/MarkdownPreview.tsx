@@ -25,7 +25,6 @@ import {
   splitFragment,
 } from "../lib/markdownAsset";
 import { useMenuPlacement } from "../hooks/useMenuPlacement";
-import { IconTreeChevron } from "./icons";
 import { api, errorMessage, openUrl } from "../lib/tauri";
 
 interface Props {
@@ -292,19 +291,22 @@ export default function MarkdownPreview({
   );
 
   /**
-   * Collapsed for this preview only. It is a reading convenience rather than a preference
-   * worth a settings field: the list is there when a document needs it and out of the way
-   * when it does not.
+   * Hidden until asked for, like the row of controls above every other pane: the outline is a
+   * reading aid, and a document read on a narrow pane needs the width more than it needs the
+   * list. The tab in the corner is what asks for it, and what puts it away again.
    */
-  const [tocOpen, setTocOpen] = useState(true);
+  const [tocOpen, setTocOpen] = useState(false);
   /** Raw heading index of the section at the top of the pane. */
   const [activeIndex, setActiveIndex] = useState(0);
   const tocRef = useRef<HTMLElement>(null);
   // Read through a ref by `updateActive`, which must stay stable: taking `showToc` as a
   // dependency would rebuild it and re-run the follow effect, resetting the scroll position
-  // every time the layout gains or loses the column.
+  // every time the layout gains or loses the column. `tocOpen` is read the same way, for the
+  // same reason and so that a closed list costs no measuring at all.
   const showTocRef = useRef(showToc);
   showTocRef.current = showToc;
+  const tocOpenRef = useRef(tocOpen);
+  tocOpenRef.current = tocOpen;
 
   /**
    * Which heading owns the top of the viewport.
@@ -321,7 +323,7 @@ export default function MarkdownPreview({
   const updateActive = useCallback(() => {
     const pane = scrollRef.current;
     const body = bodyRef.current;
-    if (!showTocRef.current || !pane || !body) return;
+    if (!showTocRef.current || !tocOpenRef.current || !pane || !body) return;
     // Same filter as `outline`: a heading with no text has no row to highlight, so it must
     // not win the position either. The raw index is kept because that is what a row stores.
     const headings = Array.from(body.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6"))
@@ -811,21 +813,10 @@ export default function MarkdownPreview({
   // scroll position is what tracks the editor, and a column inside it would move with that.
   const showOutline = showToc && outline.length > 0;
 
-  const outlineColumn = showOutline ? (
-    <nav className={`md-toc${tocOpen ? "" : " collapsed"}`} aria-label={t("preview.toc")} ref={tocRef}>
+  const outlineColumn = showOutline && tocOpen ? (
+    <nav className="md-toc" aria-label={t("preview.toc")} ref={tocRef}>
       <div className="md-toc-head">
         <span className="md-toc-title">{t("preview.toc")}</span>
-        <button
-          type="button"
-          className="md-toc-toggle"
-          title={t(tocOpen ? "preview.tocCollapse" : "preview.tocExpand")}
-          aria-expanded={tocOpen}
-          onClick={() => setTocOpen((open) => !open)}
-        >
-          <span className="chev">
-            <IconTreeChevron />
-          </span>
-        </button>
       </div>
       <ul>
         {outline.map((heading) => (
@@ -865,6 +856,20 @@ export default function MarkdownPreview({
       {tocSide === "left" ? outlineColumn : null}
       {pane}
       {tocSide === "right" ? outlineColumn : null}
+      {/* Last child on purpose: the pane has to keep its slot in this list, or a layout that
+          gains or loses the column would re-root it (see the note above). */}
+      {showOutline ? (
+        <button
+          type="button"
+          className="md-toc-tab"
+          title={t(tocOpen ? "preview.tocCollapse" : "preview.tocExpand")}
+          aria-label={t(tocOpen ? "preview.tocCollapse" : "preview.tocExpand")}
+          aria-expanded={tocOpen}
+          onClick={() => setTocOpen((open) => !open)}
+        >
+          {tocOpen ? "×" : "≡"}
+        </button>
+      ) : null}
     </div>
   );
 }
