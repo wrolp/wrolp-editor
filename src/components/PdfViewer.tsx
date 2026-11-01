@@ -7,7 +7,7 @@ import workerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 import { t, translateError } from "../lib/i18n";
 import { api } from "../lib/tauri";
 import { stepFrom, zoomText } from "../lib/zoom";
-import { IconCollapse, IconOutline, IconSliders } from "./icons";
+import { IconChevron, IconCollapse, IconOutline, IconSliders } from "./icons";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -145,19 +145,78 @@ function toBookmarks(nodes: RawOutline): Bookmark[] {
  * The outline as nested lists.
  *
  * Recursive rather than flattened: a PDF's bookmarks are a tree, and a flat column of titles
- * would lose the shape that makes a long one navigable.
+ * would lose the shape that makes a long one navigable. Every branch that has entries under it
+ * can be folded, so a reader can keep an overview of a long document instead of scrolling past
+ * every subsection.
+ *
+ * The arrow is a control of its own rather than part of the title's button: clicking it folds
+ * the branch, while clicking the title still takes the reader to the page it names — one row,
+ * two intents, neither of them guessing at the other.
  */
-function BookmarkList({ items, onGo }: { items: Bookmark[]; onGo: (dest: unknown) => void }) {
+function BookmarkList({
+  items,
+  path,
+  folded,
+  onGo,
+  onFold,
+}: {
+  items: Bookmark[];
+  /** This list's place in the tree, so one branch is remembered apart from the next. */
+  path: string;
+  /** The branches whose entries are put away, by path. */
+  folded: ReadonlySet<string>;
+  onGo: (dest: unknown) => void;
+  onFold: (path: string) => void;
+}) {
   return (
     <ul className="pdf-outline-list">
-      {items.map((item, index) => (
-        <li key={index}>
-          <button type="button" title={item.title} onClick={() => onGo(item.dest)}>
-            {item.title}
-          </button>
-          {item.items.length > 0 && <BookmarkList items={item.items} onGo={onGo} />}
-        </li>
-      ))}
+      {items.map((item, index) => {
+        const key = `${path}/${index}`;
+        const open = !folded.has(key);
+        const hasItems = item.items.length > 0;
+        const twistLabel = t(open ? "pdf.outlineCollapse" : "pdf.outlineExpand", {
+          title: item.title,
+        });
+        return (
+          <li key={key}>
+            <div className="pdf-outline-row">
+              {hasItems ? (
+                <button
+                  type="button"
+                  className={`pdf-outline-twist${open ? "" : " closed"}`}
+                  title={twistLabel}
+                  aria-label={twistLabel}
+                  aria-expanded={open}
+                  onClick={() => onFold(key)}
+                >
+                  <IconChevron size={11} />
+                </button>
+              ) : (
+                // The arrow's box is kept on every row, so a leaf's title starts where its
+                // siblings' titles do.
+                <span className="pdf-outline-twist" aria-hidden="true" />
+              )}
+              <button
+                type="button"
+                className="pdf-outline-link"
+                title={item.title}
+                onClick={() => onGo(item.dest)}
+              >
+                {item.title}
+              </button>
+            </div>
+            {hasItems && open && (
+              <BookmarkList
+                items={item.items}
+                path={key}
+                folded={folded}
+                onGo={onGo}
+                onFold={onFold}
+              />
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
 }
@@ -435,6 +494,8 @@ export default function PdfViewer({ path, paper, onSavePaper, outlineSide }: Pro
   const [outline, setOutline] = useState<Bookmark[]>([]);
   /** The bookmark column takes no width until the tab asks for it. */
   const [outlineOpen, setOutlineOpen] = useState(false);
+  /** The branches put away by the reader, by path; empty means the whole tree is open. */
+  const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set());
   const [atEnd, setAtEnd] = useState(false);
   /** The first page whose render failed, shown instead of letting the pane sit blank. */
   const [pageError, setPageError] = useState<string | null>(null);
@@ -518,6 +579,10 @@ export default function PdfViewer({ path, paper, onSavePaper, outlineSide }: Pro
   // The outline is read once per document: a document without one answers null, which is not a
   // failure but the reason the tab never appears.
   useEffect(() => {
+    // A new document starts with every branch open: the paths that folded the last one name
+    // entries that no longer exist here, and a column that opens with parts of it missing would
+    // look like the file had fewer bookmarks than it does.
+    setFolded(new Set());
     if (!doc) {
       setOutline([]);
       return;
@@ -564,6 +629,16 @@ export default function PdfViewer({ path, paper, onSavePaper, outlineSide }: Pro
     },
     [doc]
   );
+
+  /** Puts one branch of the outline away, or brings it back, without touching its siblings. */
+  const toggleFold = useCallback((key: string) => {
+    setFolded((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
 
   /**
    * The size box needs a number to show while the document is fitted, and stepping from fit
@@ -833,7 +908,13 @@ export default function PdfViewer({ path, paper, onSavePaper, outlineSide }: Pro
           style={{ order: outlineSide === "left" ? -1 : 0 }}
         >
           <div className="pdf-outline-head">{t("pdf.outline")}</div>
-          <BookmarkList items={outline} onGo={goToBookmark} />
+          <BookmarkList
+            items={outline}
+            path=""
+            folded={folded}
+            onGo={goToBookmark}
+            onFold={toggleFold}
+          />
         </nav>
       )}
     </div>

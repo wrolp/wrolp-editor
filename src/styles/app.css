@@ -3906,9 +3906,46 @@ body.resizing .editor-host {
 .pdf-outline-list .pdf-outline-list {
   padding-left: 12px;
 }
-.pdf-outline-list button {
-  display: block;
-  width: 100%;
+/* A bookmark and the arrow that folds its entries share one row. The arrow is a control of its
+   own, so clicking it folds the branch instead of jumping the reader to the page the title
+   names; the two intents stay separate rather than one guessing at the other. */
+.pdf-outline-row {
+  display: flex;
+  align-items: center;
+}
+/* The arrow's box is reserved on every row — a leaf's title then starts where its siblings'
+   titles do, and a nested outline keeps a straight left edge. */
+.pdf-outline-twist {
+  flex: 0 0 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+}
+/* A leaf's row keeps the same empty box, but it is not a control and must not highlight as one. */
+button.pdf-outline-twist:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+/* Folded points at the entries it hides, the way a tree's arrow does everywhere else; the
+   quarter turn is the same one the Explorer's folder arrows make. */
+.pdf-outline-twist svg {
+  transition: transform 120ms ease;
+}
+.pdf-outline-twist.closed svg {
+  transform: rotate(-90deg);
+}
+.pdf-outline-link {
+  flex: 1 1 auto;
+  /* Without this the title pushes the row wider instead of being cut short: a flex item will
+     not shrink below its text, and then no ellipsis happens. */
+  min-width: 0;
   padding: 3px 6px;
   border: 0;
   border-radius: 5px;
@@ -3921,7 +3958,7 @@ body.resizing .editor-host {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.pdf-outline-list button:hover {
+.pdf-outline-link:hover {
   background: var(--surface-hover);
   color: var(--text);
 }
