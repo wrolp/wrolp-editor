@@ -3792,20 +3792,42 @@ body.resizing .editor-host {
   mix-blend-mode: multiply;
   pointer-events: none;
 }
-/* Night is not a tint: the loudest thing about a page is the white of the paper, and only turning
-   the canvas over makes a dark room with light text. The tint layer is switched off, because it
-   would multiply the already inverted page darker a second time. */
+/* Night is not a tint: the loudest thing about a page is the white of the paper, and only
+   turning the page over makes a dark room with light text. The turn is a difference layer
+   against white rather than a filter on the canvas, because a layer can be cut out where a
+   picture sits while a filter cannot — the canvas is one image of text and pictures together,
+   and the cut is what `--pdf-holes` carries, one mask per page. */
 .pdf-view[data-paper="night"] .pdf-page {
-  background: #191919;
+  /* White, because the layer above turns the sheet over: this is the dark the reader sees, and
+     an unrendered frame lands on the same tone as a rendered one. */
+  background: #fff;
 }
+.pdf-view[data-paper="night"] .pdf-page::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: #ffffff;
+  mix-blend-mode: difference;
+  pointer-events: none;
+  mask-image: var(--pdf-holes, none);
+  mask-size: 100% 100%;
+  mask-repeat: no-repeat;
+  -webkit-mask-image: var(--pdf-holes, none);
+  -webkit-mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
+}
+/* A tenth of white over the turned page lifts the black to about #1a1a1a without greying the
+   text: white over white stays white. The same cut-out applies, so a picture is untouched. */
 .pdf-view[data-paper="night"] .pdf-page::after {
-  content: none;
-}
-/* Brightness before the inversion is what puts the dark at #191919 rather than pure black: the
-   paper is dimmed to 90% first, so after the turn it lands where the frame around it is, and the
-   text comes out white at full strength. The hue turn keeps colours roughly themselves. */
-.pdf-view[data-paper="night"] .pdf-canvas {
-  filter: brightness(0.9) invert(1) hue-rotate(180deg);
+  content: "";
+  background: rgba(255, 255, 255, 0.1);
+  mix-blend-mode: normal;
+  mask-image: var(--pdf-holes, none);
+  mask-size: 100% 100%;
+  mask-repeat: no-repeat;
+  -webkit-mask-image: var(--pdf-holes, none);
+  -webkit-mask-size: 100% 100%;
+  -webkit-mask-repeat: no-repeat;
 }
 .pdf-canvas {
   display: block;

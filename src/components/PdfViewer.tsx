@@ -126,6 +126,92 @@ function PaperPicker({ value, onChange }: { value: string; onChange: (value: str
   );
 }
 
+/** An affine matrix as pdf.js passes one around: `[a, b, c, d, e, f]`. */
+type Matrix = [number, number, number, number, number, number];
+
+/** `m2` applied first, then `m1` — the order pdf.js's own `Util.transform(m1, m2)` uses. */
+function compose(m1: Matrix, m2: Matrix): Matrix {
+  return [
+    m1[0] * m2[0] + m1[2] * m2[1],
+    m1[1] * m2[0] + m1[3] * m2[1],
+    m1[0] * m2[2] + m1[2] * m2[3],
+    m1[1] * m2[2] + m1[3] * m2[3],
+    m1[0] * m2[4] + m1[2] * m2[5] + m1[4],
+    m1[1] * m2[4] + m1[3] * m2[5] + m1[5],
+  ];
+}
+
+/** Past this many pictures a page is treated as a sheet of pictures, and is left whole. */
+const MAX_HOLES = 300;
+
+/**
+ * Where the pictures on a page sit, as fractions of the page.
+ *
+ * pdf.js draws a picture into the unit square under whatever matrix is in force, so walking the
+ * operator list and keeping that matrix is enough to know the outline: nothing is rendered a
+ * second time and no pixels are read. Image masks are left out on purpose — those are stencils
+ * drawn as shapes, and a shape that stays dark on a dark page would simply disappear.
+ */
+function imageRects(ops: { fnArray: number[]; argsArray: unknown[] }, viewport: pdfjs.PageViewport) {
+  const rects: { x: number; y: number; w: number; h: number }[] = [];
+  let ctm: Matrix = [1, 0, 0, 1, 0, 0];
+  const stack: Matrix[] = [];
+  for (let i = 0; i < ops.fnArray.length; i += 1) {
+    const fn = ops.fnArray[i];
+    if (fn === pdfjs.OPS.save) {
+      stack.push(ctm);
+    } else if (fn === pdfjs.OPS.restore) {
+      ctm = stack.pop() ?? ctm;
+    } else if (fn === pdfjs.OPS.transform) {
+      ctm = compose(ctm, ops.argsArray[i] as Matrix);
+    } else if (fn === pdfjs.OPS.paintFormXObjectBegin) {
+      // A form draws its content inline, behind a matrix of its own: the same save-and-transform
+      // the canvas renderer performs, so pictures nested in forms are not missed.
+      stack.push(ctm);
+      const form = (ops.argsArray[i] as [Matrix | null, unknown])[0];
+      if (form) ctm = compose(ctm, form);
+    } else if (fn === pdfjs.OPS.paintFormXObjectEnd) {
+      ctm = stack.pop() ?? ctm;
+    } else if (fn === pdfjs.OPS.paintImageXObject || fn === pdfjs.OPS.paintInlineImageXObject) {
+      const m = compose(viewport.transform as Matrix, ctm);
+      // The four corners of the unit square under the matrix, then the box around them.
+      const xs = [m[4], m[0] + m[4], m[0] + m[2] + m[4], m[2] + m[4]];
+      const ys = [m[5], m[1] + m[5], m[1] + m[3] + m[5], m[3] + m[5]];
+      const x = Math.min(...xs) / viewport.width;
+      const y = Math.min(...ys) / viewport.height;
+      const w = (Math.max(...xs) - Math.min(...xs)) / viewport.width;
+      const h = (Math.max(...ys) - Math.min(...ys)) / viewport.height;
+      if (w > 0 && h > 0) rects.push({ x, y, w, h });
+      if (rects.length > MAX_HOLES) return [];
+    }
+  }
+  return rects;
+}
+
+/**
+ * A mask that is opaque everywhere but the pictures, so the inversion layer can be cut out over
+ * them and they keep the colours they were written with.
+ *
+ * `evenodd` is what makes the inner rectangles holes, and alpha is what both the modern and the
+ * prefixed mask properties read from an image — no `mask-mode` support needed.
+ */
+function holesMask(rects: { x: number; y: number; w: number; h: number }[]): string {
+  if (!rects.length) return "";
+  const holes = rects
+    .map((r) => {
+      const x = r.x.toFixed(4);
+      const y = r.y.toFixed(4);
+      const right = (r.x + r.w).toFixed(4);
+      const bottom = (r.y + r.h).toFixed(4);
+      return `M${x} ${y}H${right}V${bottom}H${x}Z`;
+    })
+    .join("");
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1" preserveAspectRatio="none">` +
+    `<path fill="#fff" fill-rule="evenodd" d="M0 0H1V1H0Z${holes}"/></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+}
+
 /**
  * One page, drawn into a canvas.
  *
@@ -139,18 +225,23 @@ function PdfPage({
   index,
   zoom,
   width,
+  night,
   onError,
 }: {
   doc: pdfjs.PDFDocumentProxy;
   index: number;
   zoom: number | null;
   width: number;
+  /** Inverted page; the pictures on it are measured so they can be left alone. */
+  night: boolean;
   onError: (message: string) => void;
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [visible, setVisible] = useState(index < 2);
   const [height, setHeight] = useState(0);
+  /** The pictures on this page, as a mask for the inversion layer; empty until measured. */
+  const [holes, setHoles] = useState("");
 
   useEffect(() => {
     if (visible) return;
@@ -208,11 +299,35 @@ function PdfPage({
     };
   }, [doc, index, zoom, width, visible]);
 
+  // Night cuts the pictures out of the inversion layer so a photograph on the page stays the
+  // photograph it was. Measured only while the mode is on and the page is near the viewport:
+  // listing a page's operations is work, and a page nobody is looking at does not need it.
+  useEffect(() => {
+    if (!night || !visible) return;
+    let live = true;
+    void (async () => {
+      const page = await doc.getPage(index + 1);
+      const ops = await page.getOperatorList();
+      if (live) setHoles(holesMask(imageRects(ops, page.getViewport({ scale: 1 }))));
+    })().catch(() => {
+      // A page whose operations cannot be listed keeps the plain inversion; that page reports
+      // the real reason when it draws.
+    });
+    return () => {
+      live = false;
+    };
+  }, [doc, index, night, visible]);
+
   return (
     <div
       className="pdf-page"
       ref={wrapRef}
-      style={height > 0 ? { height } : undefined}
+      style={
+        {
+          ...(height > 0 ? { height } : {}),
+          ...(holes ? { "--pdf-holes": holes } : {}),
+        } as CSSProperties
+      }
       data-page={index + 1}
     >
       <canvas ref={canvasRef} className="pdf-canvas" />
@@ -389,8 +504,8 @@ export default function PdfViewer({ path, paper, onSavePaper }: Props) {
     setAutoScroll((on) => (on ? false : on));
   }, []);
 
-  // Night inverts the page rather than tinting it, so the sheet colour becomes the stylesheet's
-  // business alone: a tint layer over an inverted page would darken the text as well.
+  // Night inverts the page rather than tinting it, and the inversion is a stylesheet layer with
+  // the pictures cut out of it, so the sheet colour becomes the stylesheet's business alone.
   const night = paper === NIGHT_PAPER;
 
   return (
@@ -513,6 +628,7 @@ export default function PdfViewer({ path, paper, onSavePaper }: Props) {
                 index={index}
                 zoom={zoom}
                 width={width}
+                night={night}
                 onError={(message) => setPageError((current) => current ?? message)}
               />
             ))}
