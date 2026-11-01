@@ -3894,54 +3894,79 @@ body.resizing .editor-host {
   padding-left: 34px;
 }
 .pdf-outline-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 0 2px 6px;
   color: var(--muted);
+}
+/* The one button that works the whole tree at once: collapse when every branch is open, expand
+   when any is put away. A small glyph in the column's own header, not a row of the outline. */
+.pdf-outline-all {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.pdf-outline-all:hover {
+  background: var(--surface-hover);
+  color: var(--text);
 }
 .pdf-outline-list {
   margin: 0;
   padding: 0;
   list-style: none;
 }
-/* One step of indentation per level of the tree, so a long outline keeps its shape. */
+/* One step of indentation per level of the tree, drawn as a dotted guide: the scale a reader
+   follows down a long outline. The line runs through the parent's twist button, which is what
+   makes it read as "these entries belong to that one". */
 .pdf-outline-list .pdf-outline-list {
+  margin-left: 7px;
   padding-left: 12px;
+  border-left: 1px dotted color-mix(in srgb, var(--muted) 55%, transparent);
 }
-/* A bookmark and the arrow that folds its entries share one row. The arrow is a control of its
-   own, so clicking it folds the branch instead of jumping the reader to the page the title
-   names; the two intents stay separate rather than one guessing at the other. */
+/* A bookmark and the box that folds its entries share one row. The box is a control of its own,
+   so clicking it folds the branch instead of jumping the reader to the page the title names;
+   the two intents stay separate rather than one guessing at the other. */
 .pdf-outline-row {
   display: flex;
   align-items: center;
+  min-height: 22px;
 }
-/* The arrow's box is reserved on every row — a leaf's title then starts where its siblings'
-   titles do, and a nested outline keeps a straight left edge. */
+/* A bordered box with − for open and + for put away, the way a viewer's tree draws it. Rows
+   without entries show no box at all: their pennant sits at the left edge, under the guide. */
 .pdf-outline-twist {
   flex: 0 0 14px;
   display: flex;
   align-items: center;
   justify-content: center;
   width: 14px;
-  height: 22px;
+  height: 14px;
   padding: 0;
-  border: 0;
-  border-radius: 4px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
   background: none;
   color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  line-height: 1;
 }
-/* A leaf's row keeps the same empty box, but it is not a control and must not highlight as one. */
 button.pdf-outline-twist:hover {
   background: var(--surface-hover);
   color: var(--text);
 }
-/* Folded points at the entries it hides, the way a tree's arrow does everywhere else; the
-   quarter turn is the same one the Explorer's folder arrows make. */
-.pdf-outline-twist svg {
-  transition: transform 120ms ease;
-}
-.pdf-outline-twist.closed svg {
-  transform: rotate(-90deg);
-}
 .pdf-outline-link {
+  display: flex;
+  align-items: center;
+  gap: 5px;
   flex: 1 1 auto;
   /* Without this the title pushes the row wider instead of being cut short: a flex item will
      not shrink below its text, and then no ellipsis happens. */
@@ -3954,12 +3979,22 @@ button.pdf-outline-twist:hover {
   font: inherit;
   text-align: left;
   cursor: pointer;
+}
+.pdf-outline-link svg {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+.pdf-outline-title {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .pdf-outline-link:hover {
   background: var(--surface-hover);
+  color: var(--text);
+}
+.pdf-outline-link:hover svg {
   color: var(--text);
 }
 .pdf-pages-list {

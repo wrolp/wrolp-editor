@@ -564,6 +564,35 @@ export function IconOutline({ size = 14 }: IconProps) {
   );
 }
 
+/** The pennant a PDF viewer puts beside every entry of its outline. */
+export function IconBookmark({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <path d="M7 4h10v17l-5-4-5 4V4z" />
+    </svg>
+  );
+}
+
+/** Spread every branch open: two downward chevrons, the "expand all" glyph. */
+export function IconExpandAll({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.8}>
+      <polyline points="6 8 12 13 18 8" />
+      <polyline points="6 14 12 19 18 14" />
+    </svg>
+  );
+}
+
+/** Pull every branch in: the same glyph turned over, the "collapse all" glyph. */
+export function IconCollapseAll({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.8}>
+      <polyline points="6 11 12 6 18 11" />
+      <polyline points="6 17 12 12 18 17" />
+    </svg>
+  );
+}
+
 /**
  * The icon a tab shows once its panel is open: the direction the panel folds away to.
  *

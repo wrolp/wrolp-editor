@@ -7,7 +7,14 @@ import workerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 import { t, translateError } from "../lib/i18n";
 import { api } from "../lib/tauri";
 import { stepFrom, zoomText } from "../lib/zoom";
-import { IconChevron, IconCollapse, IconOutline, IconSliders } from "./icons";
+import {
+  IconBookmark,
+  IconCollapse,
+  IconCollapseAll,
+  IconExpandAll,
+  IconOutline,
+  IconSliders,
+} from "./icons";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -142,6 +149,22 @@ function toBookmarks(nodes: RawOutline): Bookmark[] {
 }
 
 /**
+ * Every branch path that still has entries under it, so "collapse all" can put them away at once.
+ * Mirrors the `path/${index}` keys `BookmarkList` builds, so the same `folded` set covers both.
+ */
+function allBranchKeys(items: Bookmark[], path = ""): string[] {
+  const keys: string[] = [];
+  items.forEach((item, index) => {
+    const key = `${path}/${index}`;
+    if (item.items.length > 0) {
+      keys.push(key);
+      keys.push(...allBranchKeys(item.items, key));
+    }
+  });
+  return keys;
+}
+
+/**
  * The outline as nested lists.
  *
  * Recursive rather than flattened: a PDF's bookmarks are a tree, and a flat column of titles
@@ -183,26 +206,23 @@ function BookmarkList({
               {hasItems ? (
                 <button
                   type="button"
-                  className={`pdf-outline-twist${open ? "" : " closed"}`}
+                  className="pdf-outline-twist"
                   title={twistLabel}
                   aria-label={twistLabel}
                   aria-expanded={open}
                   onClick={() => onFold(key)}
                 >
-                  <IconChevron size={11} />
+                  {open ? "−" : "+"}
                 </button>
-              ) : (
-                // The arrow's box is kept on every row, so a leaf's title starts where its
-                // siblings' titles do.
-                <span className="pdf-outline-twist" aria-hidden="true" />
-              )}
+              ) : null}
               <button
                 type="button"
                 className="pdf-outline-link"
                 title={item.title}
                 onClick={() => onGo(item.dest)}
               >
-                {item.title}
+                <IconBookmark size={13} />
+                <span className="pdf-outline-title">{item.title}</span>
               </button>
             </div>
             {hasItems && open && (
@@ -907,7 +927,25 @@ export default function PdfViewer({ path, paper, onSavePaper, outlineSide }: Pro
           // closing the column never re-mounts the document.
           style={{ order: outlineSide === "left" ? -1 : 0 }}
         >
-          <div className="pdf-outline-head">{t("pdf.outline")}</div>
+          <div className="pdf-outline-head">
+            <span>{t("pdf.outline")}</span>
+            {/* One button does both jobs: shown as collapse when everything is open, expand when
+                anything is put away. The whole tree shares a single folded set, so the swap is a
+                one-line decision rather than tracking a third "all / some / none" state. */}
+            <button
+              type="button"
+              className="pdf-outline-all"
+              title={folded.size === 0 ? t("pdf.outlineCollapseAll") : t("pdf.outlineExpandAll")}
+              aria-label={
+                folded.size === 0 ? t("pdf.outlineCollapseAll") : t("pdf.outlineExpandAll")
+              }
+              onClick={() =>
+                setFolded(folded.size === 0 ? new Set(allBranchKeys(outline)) : new Set())
+              }
+            >
+              {folded.size === 0 ? <IconCollapseAll size={13} /> : <IconExpandAll size={13} />}
+            </button>
+          </div>
           <BookmarkList
             items={outline}
             path=""
