@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import {
+  Suspense,
+  lazy,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import ImagePreview from "./components/ImagePreview";
 import ImageGallery from "./components/ImageGallery";
@@ -9,6 +18,7 @@ import ExportProgress from "./components/ExportProgress";
 import GitCloneDialog from "./components/GitCloneDialog";
 import MergeView from "./components/MergeView";
 import MarkdownPreview from "./components/MarkdownPreview";
+import PaneErrorBoundary from "./components/PaneErrorBoundary";
 import DraftRestoreDialog from "./components/DraftRestoreDialog";
 import NewGroupDialog from "./components/NewGroupDialog";
 import SettingsPanel from "./components/SettingsPanel";
@@ -121,6 +131,12 @@ import {
   type VersionSummary,
 } from "./lib/tauri";
 
+/**
+ * The reader pulls in pdf.js, which is larger than everything else the previews load put
+ * together. Loading it only when a PDF is opened keeps it out of the startup bundle.
+ */
+const PdfViewer = lazy(() => import("./components/PdfViewer"));
+
 /** The colour family of one `git status` letter, shared by the panel and the Explorer. */
 function gitTone(letter: string): GitMarkTone {
   if (letter === "!") return "ignored";
@@ -232,6 +248,9 @@ const DEFAULT_SETTINGS: Settings = {
   // The checkerboard rather than a colour: it is the one backdrop that stays readable whatever
   // is in the picture, because it is drawn from the theme the picture is being judged against.
   imageBackdrop: "checker",
+  // White paper: a document is written for a white sheet, and the tint is something a reader
+  // asks for rather than something an update turns on.
+  pdfPaper: "#ffffff",
   // An encrypted file is left unlocked for as long as it is being used, then locked: long
   // enough to read and edit without being asked again, short enough that walking away from
   // the machine does not leave the key sitting in memory indefinitely.
@@ -2417,7 +2436,12 @@ const defaultModeFor = useCallback(
    * A file that could not be read as text: the editor is hidden and an UnopenablePane takes
    * the space, so the failure and its two exits are the whole story rather than a toast.
    */
-  const showUnopenable = !!tabs.fileTab?.unopenable;
+  /**
+   * A PDF is not text, so the backend reports it as unreadable — but it is not unreadable to
+   * the reader, which draws it here instead of showing that failure.
+   */
+  const isPdf = !!tabs.fileTab && /\.pdf$/i.test(tabs.fileTab.path);
+  const showUnopenable = !!tabs.fileTab?.unopenable && !isPdf;
   /**
    * A picture that is being shown as text, and the editor is not what should be on screen.
    * Reachable by switching the layout — which used to be a silent no-op from the user's
@@ -2673,7 +2697,8 @@ const defaultModeFor = useCallback(
                   showDiff ||
                   showMerge ||
                   showCommit ||
-                  showUnopenable
+                  showUnopenable ||
+                  isPdf
                     ? "none"
                     : "block",
               }}
@@ -2730,6 +2755,21 @@ const defaultModeFor = useCallback(
               error={tabs.fileTab.unopenable.error}
               onNotice={toast}
             />
+          )}
+
+          {/* A PDF takes the pane the way a picture does: there is no text behind it to
+              edit, and the reader is the only view that means anything. */}
+          {isPdf && tabs.fileTab && !showSettings && !showGallery && (
+            <PaneErrorBoundary>
+              <Suspense fallback={<div className="pdf-loading">{t("app.loading")}</div>}>
+                <PdfViewer
+                  key={tabs.fileTab.path}
+                  path={tabs.fileTab.path}
+                  paper={settings.pdfPaper}
+                  onSavePaper={(value) => void saveSettings({ pdfPaper: value })}
+                />
+              </Suspense>
+            </PaneErrorBoundary>
           )}
 
           {/* A comparison takes the pane but never replaces the editor above: that one

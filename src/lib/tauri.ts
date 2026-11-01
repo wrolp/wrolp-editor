@@ -210,6 +210,13 @@ export interface Settings {
    */
   imageBackdrop: string;
   /**
+   * The paper a PDF page is drawn on: a lowercase `#rrggbb` colour, white when nothing is
+   * tinted, or `night` to invert the page instead. A colour is a multiply layer over the page
+   * rather than a backdrop behind it, so the black of the text stays black and only the sheet
+   * takes the colour. The backend keeps only those two shapes.
+   */
+  pdfPaper: string;
+  /**
    * Minutes an encrypted file stays unlocked without being touched. 0 means never lock
    * automatically, and is a choice rather than a missing value: the backend keeps it as
    * written, so the frontend has to carry it back or a save would reset it to the default.
@@ -991,6 +998,8 @@ export const api = {
   gitDeleteBranch: (root: string, name: string, force = false) =>
     invoke<void>("git_delete_branch", { root, name, force }),
   gitRemotes: (root: string) => invoke<GitRemote[]>("git_remotes", { root }),
+  /** A file's raw bytes, for a viewer that decodes content itself (the PDF reader). */
+  readFileBytes: (path: string) => invoke<ArrayBuffer>("read_file_bytes", { path }),
   /** Add a remote, or move an existing one to a new URL; returns the updated list. */
   gitRemoteSave: (root: string, name: string, url: string) =>
     invoke<GitRemote[]>("git_remote_save", { root, name, url }),

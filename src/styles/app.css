@@ -3661,6 +3661,160 @@ body.resizing .editor-host {
   margin-left: auto;
   color: var(--muted);
 }
+/* A PDF reader: the toolbar mirrors the picture pane's, the pages sit on the document's own
+   white paper rather than on the app's surface. It fills the pane by position, not by flex —
+   the wrap is only a flex row in split and preview-only modes, and a PDF always renders with
+   the editor hidden, where `flex: 1` would leave the pane at zero height. */
+.pdf-view {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.pdf-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--titlebar);
+  font-size: 11px;
+  color: var(--muted);
+}
+.pdf-tool {
+  min-width: 24px;
+  height: 22px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+}
+.pdf-tool:hover:not(:disabled) {
+  background: var(--surface-active);
+}
+.pdf-tool:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.pdf-auto.on {
+  color: var(--accent);
+}
+/* The size box sits between the two zoom buttons, so it reads as the value they change. */
+.pdf-size {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+.pdf-size-input {
+  width: 40px;
+  height: 22px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11px;
+  text-align: right;
+}
+.pdf-size-input:hover {
+  border-color: var(--border-strong);
+}
+.pdf-size-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.pdf-size-unit {
+  color: var(--muted);
+}
+.pdf-fit.on {
+  color: var(--accent);
+}
+.pdf-pages {
+  margin-left: 4px;
+}
+.pdf-spacer {
+  flex: 1 1 auto;
+}
+.pdf-speed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.pdf-speed input {
+  width: 96px;
+  accent-color: var(--accent);
+}
+.pdf-speed-value {
+  min-width: 24px;
+  text-align: right;
+}
+.pdf-end {
+  color: var(--muted);
+}
+.pdf-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  background: var(--sunken);
+}
+.pdf-pages-list {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+}
+.pdf-page {
+  /* A page is paper in either theme — but a reader may want a sheet that is not a light source,
+     and that choice is theirs rather than the theme's. */
+  position: relative;
+  /* Its own stacking context, so the tint below multiplies onto this page's canvas and not onto
+     the pane behind the page. */
+  isolation: isolate;
+  background: #fff;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+/* Multiply rather than a translucent wash: the white of the paper becomes the chosen colour
+   while the black of the text stays black, which is what a coloured sheet does. */
+.pdf-page::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--pdf-paper, #ffffff);
+  mix-blend-mode: multiply;
+  pointer-events: none;
+}
+/* Night is not a tint: the loudest thing about a page is the white of the paper, and only turning
+   the canvas over makes a dark room with light text. The tint layer is switched off, because it
+   would multiply the already inverted page darker a second time. */
+.pdf-view[data-paper="night"] .pdf-page {
+  background: #191919;
+}
+.pdf-view[data-paper="night"] .pdf-page::after {
+  content: none;
+}
+/* Brightness before the inversion is what puts the dark at #191919 rather than pure black: the
+   paper is dimmed to 90% first, so after the turn it lands where the frame around it is, and the
+   text comes out white at full strength. The hue turn keeps colours roughly themselves. */
+.pdf-view[data-paper="night"] .pdf-canvas {
+  filter: brightness(0.9) invert(1) hue-rotate(180deg);
+}
+.pdf-canvas {
+  display: block;
+}
+.pdf-error,
+.pdf-loading {
+  padding: 24px;
+  color: var(--muted);
+}
 /* The pane a picture sits in. The backdrop behind its transparent pixels belongs to the picture
    (`.img-frame`) rather than to this surface, so the checkering stops where the picture stops and
    its edges stay readable against the pane. */
@@ -3729,12 +3883,17 @@ body.resizing .editor-host {
 /* The picker that chooses the backdrop above, in the picture's toolbar and in Settings. Each
    control is a swatch of what it would paint, so the choice is made on the colour rather than on
    a word for it. */
-.bd-picker {
+/* A row of colour swatches. The picture's backdrop and the PDF paper ask the same question of
+   the reader — which colour — so they are one control under two names: `bd-` where a picture is
+   behind it, `pdf-paper` where a page is. */
+.bd-picker,
+.pdf-papers {
   display: flex;
   align-items: center;
   gap: 4px;
 }
-.bd-swatch {
+.bd-swatch,
+.pdf-paper {
   position: relative;
   width: 18px;
   height: 18px;
@@ -3743,10 +3902,12 @@ body.resizing .editor-host {
   border-radius: 4px;
   cursor: pointer;
 }
-.bd-swatch:hover {
+.bd-swatch:hover,
+.pdf-paper:hover {
   border-color: var(--muted);
 }
-.bd-swatch.active {
+.bd-swatch.active,
+.pdf-paper.active {
   border-color: var(--accent-soft);
   box-shadow: 0 0 0 1px var(--accent-soft);
 }
@@ -3764,7 +3925,8 @@ body.resizing .editor-host {
 }
 /* The native colour input still takes the click — that is what opens the system dialog — but
    shows nothing of its own, so the label wears the colour instead. */
-.bd-swatch.is-custom input {
+.bd-swatch.is-custom input,
+.pdf-paper.is-custom input {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -3776,7 +3938,8 @@ body.resizing .editor-host {
 }
 /* Until a colour is in force there is no colour to show, and an empty box reads as a control
    that failed to paint. A ring of every hue says what the click is for. */
-.bd-swatch.is-custom:not(.active) {
+.bd-swatch.is-custom:not(.active),
+.pdf-paper.is-custom:not(.active) {
   background-image: conic-gradient(#f43f5e, #f59e0b, #22c55e, #06b6d4, #3b82f6, #a855f7, #f43f5e);
 }
 

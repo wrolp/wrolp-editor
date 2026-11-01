@@ -239,6 +239,11 @@ pub struct Settings {
   /// or a `#rrggbb` colour picked by hand. Only the frontend draws it — this decides which
   /// values are worth handing on, since an unusable one would leave the picture on nothing.
   pub image_backdrop: String,
+  /// The paper a PDF page is drawn on: a `#rrggbb` colour, white by default, or `night` to turn
+  /// the page over. Only the frontend draws it — this decides which values are worth handing on,
+  /// since a colour it cannot parse would be dropped by the stylesheet and leave the page
+  /// reading as it did before.
+  pub pdf_paper: String,
   /// Colour scheme: system | dark | light. `system` follows the OS preference at runtime,
   /// so a machine that switches at dusk does not need the app restarted.
   pub theme: String,
@@ -322,6 +327,7 @@ impl Default for Settings {
       gallery_interval: GALLERY_INTERVAL_DEFAULT_SECONDS,
       gallery_loop: true,
       image_backdrop: IMAGE_BACKDROP_CHECKER.into(),
+      pdf_paper: PDF_PAPER_WHITE.into(),
       theme: "system".into(),
       encrypt_idle_minutes: ENCRYPT_IDLE_DEFAULT_MINUTES,
       versioning_enabled: false,
@@ -373,6 +379,10 @@ const GALLERY_INTERVAL_DEFAULT_SECONDS: u32 = 5;
 const GALLERY_INTERVAL_MAX_SECONDS: u32 = 60;
 /// The picture backdrop that comes from the theme instead of a colour.
 const IMAGE_BACKDROP_CHECKER: &str = "checker";
+/// White paper: the sheet a PDF is written for, and what "no tint" comes to.
+const PDF_PAPER_WHITE: &str = "#ffffff";
+/// Night reading: the page is inverted rather than tinted, so the value is a mode, not a colour.
+const PDF_PAPER_NIGHT: &str = "night";
 /// A key left in memory for a day is not an idle lock any more, so the setting stops there.
 const ENCRYPT_IDLE_DEFAULT_MINUTES: u32 = 10;
 const ENCRYPT_IDLE_MAX_MINUTES: u32 = 1440;
@@ -517,6 +527,13 @@ impl Settings {
       // the stylesheet cannot use would leave a transparent picture on no backdrop at all.
       image_backdrop: as_hex_color(&self.image_backdrop)
         .unwrap_or_else(|| IMAGE_BACKDROP_CHECKER.into()),
+      // A tint the stylesheet cannot parse would leave the page as it was, so a stale or
+      // hand-edited key reads as white rather than as a colour that never applies.
+      pdf_paper: if self.pdf_paper == PDF_PAPER_NIGHT {
+        PDF_PAPER_NIGHT.into()
+      } else {
+        as_hex_color(&self.pdf_paper).unwrap_or_else(|| PDF_PAPER_WHITE.into())
+      },
       // An entry is an explicit choice, so anything this build cannot show is dropped rather
       // than carried around forever — the file then falls back to `preview_layout`.
       preview_modes: {
@@ -775,6 +792,17 @@ fn open_container(
     // by `unlock_file`, at the moment it actually is.
     None => Ok(locked_file(source)),
   }
+}
+
+/// A file's raw bytes, for a viewer that decodes content itself — the PDF reader. Answered as
+/// an IPC binary response rather than JSON: a ten-megabyte document is then ten megabytes on
+/// the wire instead of forty, and the webview receives an `ArrayBuffer` it can hand straight
+/// to pdf.js. Going through the asset protocol instead would need CORS for a `fetch`, which
+/// the images never trip because `<img>` is exempt from it.
+#[tauri::command]
+pub fn read_file_bytes(path: String) -> Result<tauri::ipc::Response, String> {
+  let bytes = std::fs::read(&path).map_err(|e| format!("fs_read:{e}"))?;
+  Ok(tauri::ipc::Response::new(bytes))
 }
 
 #[tauri::command]
@@ -2240,6 +2268,47 @@ mod tests {
       .theme,
       "system"
     );
+  }
+
+  /// The paper colour is either something a stylesheet can parse, the night mode, or white itself.
+  /// A settings.json written before the key existed must open on white, and a hand-edited value
+  /// must not paint the page a colour the browser would drop.
+  #[test]
+  fn pdf_paper_keeps_only_colours_and_modes() {
+    assert_eq!(Settings::default().pdf_paper, "#ffffff");
+    let s: Settings = serde_json::from_str("{\"fontSize\":16.0}").expect("parse partial settings");
+    assert_eq!(s.filled().pdf_paper, "#ffffff");
+    // The picker writes lowercase, and a hand edit reaches the stylesheet spelled the same way.
+    assert_eq!(
+      Settings {
+        pdf_paper: "#F4ECD8".into(),
+        ..Default::default()
+      }
+      .filled()
+      .pdf_paper,
+      "#f4ecd8"
+    );
+    // Night is a mode, not a colour, and is the one non-colour value kept as written.
+    assert_eq!(
+      Settings {
+        pdf_paper: "night".into(),
+        ..Default::default()
+      }
+      .filled()
+      .pdf_paper,
+      "night"
+    );
+    for bad in ["sepia", "#f4ec", "ffffff", "#gggggg", "Night"] {
+      assert_eq!(
+        Settings {
+          pdf_paper: bad.into(),
+          ..Default::default()
+        }
+        .filled()
+        .pdf_paper,
+        "#ffffff"
+      );
+    }
   }
 
   #[test]
