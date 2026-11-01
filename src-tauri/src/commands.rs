@@ -257,6 +257,10 @@ pub struct Settings {
   /// since a colour it cannot parse would be dropped by the stylesheet and leave the page
   /// reading as it did before.
   pub pdf_paper: String,
+  /// Which side the PDF's bookmark column takes: left | right. Kept apart from the markdown
+  /// outline's side because the two are read in different panes — a reader may want the one
+  /// against the Explorer and the other away from it.
+  pub pdf_outline_side: String,
   /// Colour scheme: system | dark | light. `system` follows the OS preference at runtime,
   /// so a machine that switches at dusk does not need the app restarted.
   pub theme: String,
@@ -341,6 +345,7 @@ impl Default for Settings {
       gallery_loop: true,
       image_backdrop: IMAGE_BACKDROP_CHECKER.into(),
       pdf_paper: PDF_PAPER_WHITE.into(),
+      pdf_outline_side: "right".into(),
       theme: "system".into(),
       encrypt_idle_minutes: ENCRYPT_IDLE_DEFAULT_MINUTES,
       versioning_enabled: false,
@@ -384,9 +389,10 @@ const PER_FILE_PREVIEW: [&str; 3] = ["text", "split", "preview"];
 /// Widths the markdown preview body can take, as capped reading measures. The numbers
 /// themselves live in the stylesheet; this only names the three choices.
 const PREVIEW_WIDTH: [&str; 3] = ["narrow", "wide", "full"];
-/// Sides the markdown outline can take. Right by default: the Explorer is on the left, and a
-/// contents column against it would read as a second sidebar.
-const TOC_SIDES: [&str; 2] = ["left", "right"];
+/// Sides a column of navigation can take: the markdown outline and the PDF's bookmarks both sit
+/// on one edge or the other. Right by default: the Explorer is on the left, and a contents
+/// column against it would read as a second sidebar.
+const SIDES: [&str; 2] = ["left", "right"];
 /// A slideshow interval: long enough to look at the picture, short enough to feel like motion.
 const GALLERY_INTERVAL_DEFAULT_SECONDS: u32 = 5;
 const GALLERY_INTERVAL_MAX_SECONDS: u32 = 60;
@@ -558,8 +564,13 @@ impl Settings {
         }
         out
       },
-      toc_side: if TOC_SIDES.contains(&self.toc_side.as_str()) {
+      toc_side: if SIDES.contains(&self.toc_side.as_str()) {
         self.toc_side.clone()
+      } else {
+        "right".into()
+      },
+      pdf_outline_side: if SIDES.contains(&self.pdf_outline_side.as_str()) {
+        self.pdf_outline_side.clone()
       } else {
         "right".into()
       },
@@ -2323,6 +2334,37 @@ mod tests {
         .filled()
         .pdf_paper,
         "#ffffff"
+      );
+    }
+  }
+
+  /// A column that cannot be placed would sit nowhere. Both sides default to the right, the edge
+  /// away from the Explorer, and anything but the two known words reads as that default.
+  #[test]
+  fn outline_sides_keep_only_known_edges() {
+    assert_eq!(Settings::default().toc_side, "right");
+    assert_eq!(Settings::default().pdf_outline_side, "right");
+    let partial: Settings =
+      serde_json::from_str("{\"fontSize\":16.0}").expect("parse partial settings");
+    assert_eq!(partial.filled().pdf_outline_side, "right");
+    assert_eq!(
+      Settings {
+        pdf_outline_side: "left".into(),
+        ..Default::default()
+      }
+      .filled()
+      .pdf_outline_side,
+      "left"
+    );
+    for bad in ["Left", "top", "", "rightmost"] {
+      assert_eq!(
+        Settings {
+          pdf_outline_side: bad.into(),
+          ..Default::default()
+        }
+        .filled()
+        .pdf_outline_side,
+        "right"
       );
     }
   }

@@ -268,6 +268,9 @@ const EN: Table = {
   "settings.tocSide": "Markdown contents side",
   "settings.tocSideDesc":
     "Where the outline column sits when a Markdown file is in preview-only mode. Right keeps it away from the Explorer.",
+  "settings.pdfOutlineSide": "PDF bookmarks side",
+  "settings.pdfOutlineSideDesc":
+    "Where a PDF's bookmark column opens. The column itself is folded into a tab in the corner of the page, and only appears when that tab is clicked.",
   "settings.galleryInterval": "Slideshow pace",
   "settings.galleryIntervalDesc":
     "Seconds each picture stays on screen. A change takes effect on the next picture.",
@@ -797,6 +800,9 @@ const EN: Table = {
   "pdf.paperNight": "Night (inverted page)",
   "pdf.paperNightOff": "Leave night mode",
   "pdf.paperCustom": "Pick a colour",
+  "pdf.outline": "Bookmarks",
+  "pdf.outlineShow": "Show bookmarks",
+  "pdf.outlineHide": "Hide bookmarks",
   "pdf.end": "End of the document",
   "pdf.error": "This PDF could not be opened: {detail}",
   "img.retryAsset": "Load from file",
@@ -1569,6 +1575,9 @@ const ZH: Table = {
   "settings.tocSide": "Markdown 目录位置",
   "settings.tocSideDesc":
     "Markdown 以「只显示预览」打开时，目录列显示在哪一侧。默认靠右，不与左侧边栏并排。",
+  "settings.pdfOutlineSide": "PDF 书签位置",
+  "settings.pdfOutlineSideDesc":
+    "PDF 的书签列从哪一侧展开。书签列平时收在页面角落的一枚浮动按钮里，点了才出来。",
   "settings.galleryInterval": "轮播间隔",
   "settings.galleryIntervalDesc": "每张图片停留的秒数，切换后从下一张开始生效。",
   "settings.gallerySeconds": "{n} 秒",
@@ -1806,6 +1815,9 @@ const ZH: Table = {
   "pdf.paperNight": "夜间（反相）",
   "pdf.paperNightOff": "退出夜间",
   "pdf.paperCustom": "自定义颜色",
+  "pdf.outline": "书签",
+  "pdf.outlineShow": "显示书签",
+  "pdf.outlineHide": "隐藏书签",
   "pdf.end": "已到文档末尾",
   "pdf.error": "无法打开这个 PDF：{detail}",
   "img.retryAsset": "改用文件方式加载",

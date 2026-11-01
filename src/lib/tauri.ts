@@ -202,6 +202,11 @@ export interface Settings {
    * default, so the column does not sit against the Explorer.
    */
   tocSide: string;
+  /**
+   * Which side a PDF's bookmark column takes: `left` | `right`. Apart from `tocSide` because the
+   * two are read in different panes — a document and a drawing may want opposite edges.
+   */
+  pdfOutlineSide: string;
   /** Seconds a gallery slideshow keeps one picture on screen, 1 to 60. */
   galleryInterval: number;
   /** After the last picture, the slideshow starts over instead of stopping. */

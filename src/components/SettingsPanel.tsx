@@ -73,7 +73,9 @@ const WHITESPACE_MODES = ["none", "boundary", "selection", "all", "trailing"] as
 /** `auto` last: it is the fallback that decides by file type, not a layout of its own. */
 const PREVIEW_LAYOUTS = ["text", "split", "preview", "auto"] as const;
 const PREVIEW_WIDTHS = ["narrow", "wide", "full"] as const;
-/** Right first: it is the default, and it keeps the outline off the Explorer's edge. */
+/** Sides a navigation column can take; the markdown outline and the PDF's bookmarks both pick
+ * from this list. Right first: it is the default, and it keeps the column off the Explorer's
+ * edge. */
 const TOC_SIDES = ["right", "left"] as const;
 /** Slideshow paces, in seconds. A select rather than a number field for the same reason as
  * the idle limits: these are the paces worth offering, and a typed 0 has no meaning. */
@@ -698,6 +700,20 @@ export default function SettingsPanel({
                 </select>
               </SettingField>
               <p className="muted">{t("settings.tocSideDesc")}</p>
+              <SettingField label={t("settings.pdfOutlineSide")}>
+                <select
+                  className="select"
+                  value={settings.pdfOutlineSide}
+                  onChange={(e) => onSaveSettings({ pdfOutlineSide: e.target.value })}
+                >
+                  {TOC_SIDES.map((side) => (
+                    <option key={side} value={side}>
+                      {t(`settings.tocSide.${side}`)}
+                    </option>
+                  ))}
+                </select>
+              </SettingField>
+              <p className="muted">{t("settings.pdfOutlineSideDesc")}</p>
               <SettingField label={t("settings.galleryInterval")}>
                 <select
                   className="select"

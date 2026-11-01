@@ -7,6 +7,7 @@ import workerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 import { t, translateError } from "../lib/i18n";
 import { api } from "../lib/tauri";
 import { stepFrom, zoomText } from "../lib/zoom";
+import { IconCollapse, IconOutline, IconSliders } from "./icons";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -15,6 +16,8 @@ interface Props {
   /** A `#rrggbb` colour for the page itself, or `night` to invert it; white leaves it untouched. */
   paper: string;
   onSavePaper: (value: string) => void;
+  /** Which edge the bookmark column takes when it is open. */
+  outlineSide: "left" | "right";
 }
 
 /** Zoom levels the buttons walk, as a percentage of the page's own size. `null` means "fit". */
@@ -103,6 +106,59 @@ function PaperPicker({ value, onChange }: { value: string; onChange: (value: str
         />
       </label>
     </div>
+  );
+}
+
+/** One entry of a PDF's outline: a title, what it points at, and what sits under it. */
+interface Bookmark {
+  title: string;
+  /** A named destination, or the explicit array pdf.js resolved it to; null when it has none. */
+  dest: unknown;
+  items: Bookmark[];
+}
+
+/** The tree `getOutline` answers with, before it is cut down to what a list of links needs. */
+type RawOutline = readonly { title?: string; dest?: unknown; items?: RawOutline }[];
+
+/**
+ * The outline, keeping only entries a list can show.
+ *
+ * A title with no text is a separator or a placeholder in the file, and a row with nothing to
+ * click would read as a broken bookmark; dropping it keeps the tree's shape and its indices
+ * consistent with what is on screen.
+ */
+function toBookmarks(nodes: RawOutline): Bookmark[] {
+  const out: Bookmark[] = [];
+  for (const node of nodes) {
+    const title = (node.title ?? "").trim();
+    if (!title) continue;
+    out.push({
+      title,
+      dest: node.dest ?? null,
+      items: node.items ? toBookmarks(node.items) : [],
+    });
+  }
+  return out;
+}
+
+/**
+ * The outline as nested lists.
+ *
+ * Recursive rather than flattened: a PDF's bookmarks are a tree, and a flat column of titles
+ * would lose the shape that makes a long one navigable.
+ */
+function BookmarkList({ items, onGo }: { items: Bookmark[]; onGo: (dest: unknown) => void }) {
+  return (
+    <ul className="pdf-outline-list">
+      {items.map((item, index) => (
+        <li key={index}>
+          <button type="button" title={item.title} onClick={() => onGo(item.dest)}>
+            {item.title}
+          </button>
+          {item.items.length > 0 && <BookmarkList items={item.items} onGo={onGo} />}
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -220,6 +276,8 @@ function PdfPage({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [visible, setVisible] = useState(index < 2);
   const [height, setHeight] = useState(0);
+  /** Whether the canvas holds this page, as opposed to a frame waiting for it. */
+  const [drawn, setDrawn] = useState(false);
   /** The pictures on this page, as a mask for the inversion layer; empty until measured. */
   const [holes, setHoles] = useState("");
 
@@ -267,6 +325,9 @@ function PdfPage({
         setHeight(Math.floor(viewport.height / dpr));
         task = page.render({ canvas, canvasContext: context, viewport });
         await task.promise;
+        // Drawn for real, so the frame's height is now the page's own rather than an estimate:
+        // the measuring effect below must stop following the pane's width from here on.
+        if (live) setDrawn(true);
       } catch (e) {
         // A render this component cancelled itself is not a page that failed: the effect is
         // re-running with a new size, and reporting it would put "rendering cancelled" on a
@@ -282,6 +343,30 @@ function PdfPage({
       task?.cancel();
     };
   }, [doc, index, zoom, width, visible]);
+
+  // A page that has not been drawn yet still holds its place: the list's scrollbar, and a jump
+  // from a bookmark, both need the frame to be where the page will be rather than stacked at
+  // zero height. The number is the one the render will land on, so the frame does not resize
+  // when the page arrives.
+  useEffect(() => {
+    if (drawn || width <= 0) return;
+    let live = true;
+    void doc
+      .getPage(index + 1)
+      .then((page) => {
+        if (!live) return;
+        const base = page.getViewport({ scale: 1 });
+        const unit = zoom === null ? width / base.width : zoom / 100;
+        setHeight(Math.floor(base.height * unit));
+      })
+      .catch(() => {
+        // A page that cannot be measured keeps its zero frame; it reports the reason when it
+        // draws.
+      });
+    return () => {
+      live = false;
+    };
+  }, [doc, index, zoom, width, drawn]);
 
   // Night cuts the pictures out of the inversion layer so a photograph on the page stays the
   // photograph it was. Measured only while the mode is on and the page is near the viewport:
@@ -330,7 +415,7 @@ function PdfPage({
  * sheet of music, has to move at a pace the reader sets, and a browser's built-in viewer has no
  * way to do that.
  */
-export default function PdfViewer({ path, paper, onSavePaper }: Props) {
+export default function PdfViewer({ path, paper, onSavePaper, outlineSide }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [doc, setDoc] = useState<pdfjs.PDFDocumentProxy | null>(null);
   const [pageCount, setPageCount] = useState(0);
@@ -346,6 +431,10 @@ export default function PdfViewer({ path, paper, onSavePaper }: Props) {
   const [speed, setSpeed] = useState(SPEED_DEFAULT);
   /** The tools take no room unless they are in use; the tab in the corner brings them back. */
   const [toolsOpen, setToolsOpen] = useState(false);
+  /** The document's outline, empty when it has none — the tab then has nothing to offer. */
+  const [outline, setOutline] = useState<Bookmark[]>([]);
+  /** The bookmark column takes no width until the tab asks for it. */
+  const [outlineOpen, setOutlineOpen] = useState(false);
   const [atEnd, setAtEnd] = useState(false);
   /** The first page whose render failed, shown instead of letting the pane sit blank. */
   const [pageError, setPageError] = useState<string | null>(null);
@@ -425,6 +514,56 @@ export default function PdfViewer({ path, paper, onSavePaper }: Props) {
       void task?.destroy();
     };
   }, [path]);
+
+  // The outline is read once per document: a document without one answers null, which is not a
+  // failure but the reason the tab never appears.
+  useEffect(() => {
+    if (!doc) {
+      setOutline([]);
+      return;
+    }
+    let live = true;
+    void doc
+      .getOutline()
+      .then((tree) => {
+        if (live) setOutline(tree ? toBookmarks(tree as unknown as RawOutline) : []);
+      })
+      .catch(() => {
+        if (live) setOutline([]);
+      });
+    return () => {
+      live = false;
+    };
+  }, [doc]);
+
+  /**
+   * Follow a bookmark to the page it names.
+   *
+   * `dest` is either a name to look up or the explicit array pdf.js uses, and both end at a page
+   * number; the element for that page carries its number, so the jump is a scroll rather than a
+   * second render. A target that cannot be resolved leaves the reader where it is — a bookmark
+   * pointing outside the document is a broken link, not a broken reader.
+   */
+  const goToBookmark = useCallback(
+    async (dest: unknown) => {
+      if (!doc || dest === null) return;
+      try {
+        const target = typeof dest === "string" ? await doc.getDestination(dest) : dest;
+        if (!Array.isArray(target) || target.length === 0) return;
+        const first = target[0] as { num?: number } | number;
+        const index =
+          typeof first === "number"
+            ? first - 1
+            : await doc.getPageIndex(first as Parameters<typeof doc.getPageIndex>[0]);
+        hostRef.current
+          ?.querySelector<HTMLElement>(`[data-page="${index + 1}"]`)
+          ?.scrollIntoView({ block: "start" });
+      } catch {
+        // Nothing to say: the column stays open where it was.
+      }
+    },
+    [doc]
+  );
 
   /**
    * The size box needs a number to show while the document is fitted, and stepping from fit
@@ -536,10 +675,24 @@ export default function PdfViewer({ path, paper, onSavePaper }: Props) {
         onPointerEnter={stayOpen}
         onClick={() => setToolsOpen((open) => !open)}
       >
-        {toolsOpen ? "×" : "≡"}
+        {toolsOpen ? <IconCollapse edge="top" /> : <IconSliders />}
       </button>
+      {/* The bookmarks' own tab, on the side its column opens from. It only exists when the
+          document has an outline to show. */}
+      {outline.length > 0 && (
+        <button
+          type="button"
+          className={`pdf-outline-tab ${outlineSide}`}
+          title={t(outlineOpen ? "pdf.outlineHide" : "pdf.outlineShow")}
+          aria-label={t(outlineOpen ? "pdf.outlineHide" : "pdf.outlineShow")}
+          aria-expanded={outlineOpen}
+          onClick={() => setOutlineOpen((open) => !open)}
+        >
+          {outlineOpen ? <IconCollapse edge={outlineSide} /> : <IconOutline />}
+        </button>
+      )}
       <div
-        className={`pdf-tools${toolsOpen ? " open" : ""}`}
+        className={`pdf-tools tab-${outlineSide}${toolsOpen ? " open" : ""}`}
         onPointerEnter={stayOpen}
         onPointerLeave={(event) => {
           // A slider dragged past the row is still the row being used, so a button held down
@@ -646,12 +799,10 @@ export default function PdfViewer({ path, paper, onSavePaper }: Props) {
         className="pdf-scroll"
         ref={hostRef}
         onWheel={pauseForHand}
-        onPointerDown={() => {
-          // Reaching for the page is a decision, not a hand passing over: the tools go at once
-          // and the page gets the whole pane.
-          pauseForHand();
-          closeNow();
-        }}
+        // A single click only clears the tools; the automatic scroll keeps going. Stopping is a
+        // deliberate double click, so a reader who taps the page to read does not lose their place.
+        onDoubleClick={pauseForHand}
+        onPointerDown={closeNow}
       >
         {(error || pageError) && (
           <div className="pdf-error">{t("pdf.error", { detail: error ?? pageError ?? "" })}</div>
@@ -673,6 +824,18 @@ export default function PdfViewer({ path, paper, onSavePaper }: Props) {
           </div>
         )}
       </div>
+      {outlineOpen && outline.length > 0 && (
+        <nav
+          className={`pdf-outline ${outlineSide}`}
+          aria-label={t("pdf.outline")}
+          // Order rather than two render sites: the pages keep their DOM slot, so opening or
+          // closing the column never re-mounts the document.
+          style={{ order: outlineSide === "left" ? -1 : 0 }}
+        >
+          <div className="pdf-outline-head">{t("pdf.outline")}</div>
+          <BookmarkList items={outline} onGo={goToBookmark} />
+        </nav>
+      )}
     </div>
   );
 }

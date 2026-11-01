@@ -26,6 +26,7 @@ import {
 } from "../lib/markdownAsset";
 import { useMenuPlacement } from "../hooks/useMenuPlacement";
 import { api, errorMessage, openUrl } from "../lib/tauri";
+import { IconCollapse, IconOutline } from "./icons";
 
 interface Props {
   /** Current buffer text. */
@@ -867,7 +868,7 @@ export default function MarkdownPreview({
           aria-expanded={tocOpen}
           onClick={() => setTocOpen((open) => !open)}
         >
-          {tocOpen ? "×" : "≡"}
+          {tocOpen ? <IconCollapse edge={tocSide} /> : <IconOutline />}
         </button>
       ) : null}
     </div>

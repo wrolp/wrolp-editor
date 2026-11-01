@@ -4,6 +4,7 @@ import { t } from "../lib/i18n";
 import { api, revealItemInDir } from "../lib/tauri";
 import { stepFrom, zoomText } from "../lib/zoom";
 import BackdropPicker from "./BackdropPicker";
+import { IconCollapse, IconSliders } from "./icons";
 
 interface Props {
   path: string;
@@ -254,7 +255,7 @@ export default function ImagePreview({
         onPointerEnter={stayOpen}
         onClick={() => setToolsOpen((open) => !open)}
       >
-        {toolsOpen ? "×" : "≡"}
+        {toolsOpen ? <IconCollapse edge="top" /> : <IconSliders />}
       </button>
       <div
         className={`img-tools${toolsOpen ? " open" : ""}`}

@@ -526,3 +526,62 @@ export function IconLock({ size = 14, locked = true }: IconProps & { locked?: bo
     </svg>
   );
 }
+
+/**
+ * The controls a viewer keeps behind its corner tab: two tracks, each with a knob.
+ *
+ * Drawn rather than typed as `≡`, which reads as a list and, being a font glyph, sits at a
+ * different weight in every pane. What the tab opens is a row of sliders, a zoom box and a paper
+ * colour — controls, not contents.
+ */
+export function IconSliders({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <line x1="4" y1="7" x2="6.6" y2="7" />
+      <line x1="11.4" y1="7" x2="20" y2="7" />
+      <circle cx="9" cy="7" r="2.4" />
+      <line x1="4" y1="17" x2="12.6" y2="17" />
+      <line x1="17.4" y1="17" x2="20" y2="17" />
+      <circle cx="15" cy="17" r="2.4" />
+    </svg>
+  );
+}
+
+/**
+ * A document's outline: three entries, the last two indented under the first.
+ *
+ * The reader's bookmarks and the preview's contents are the same question asked of two kinds of
+ * file, so they share one glyph; the indent is what distinguishes a tree of headings from the
+ * flat three lines `≡` drew.
+ */
+export function IconOutline({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <line x1="4" y1="6" x2="20" y2="6" />
+      <line x1="9" y1="12" x2="20" y2="12" />
+      <line x1="9" y1="18" x2="20" y2="18" />
+    </svg>
+  );
+}
+
+/**
+ * The icon a tab shows once its panel is open: the direction the panel folds away to.
+ *
+ * Up for a row that slides off the top edge, and the same chevron turned a quarter for a column
+ * on a side. A bare `×` would say only "close", which is the tooltip's job anyway; the arrow says
+ * which edge the panel came from and where it goes back to.
+ */
+export function IconCollapse({
+  size = 14,
+  edge = "top",
+}: IconProps & { edge?: "top" | "left" | "right" }) {
+  const turn = edge === "top" ? 0 : edge === "right" ? 90 : -90;
+  return (
+    <svg {...base(size)} strokeWidth={2}>
+      {/* Turned about the icon's own centre, or the chevron would swing out of its box. */}
+      <g transform={turn ? `rotate(${turn} 12 12)` : undefined}>
+        <polyline points="6 15 12 9 18 15" />
+      </g>
+    </svg>
+  );
+}

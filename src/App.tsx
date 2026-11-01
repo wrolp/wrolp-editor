@@ -241,6 +241,9 @@ const DEFAULT_SETTINGS: Settings = {
   // Right by default: the Explorer is on the left, and a contents column beside it would read
   // as a second sidebar.
   tocSide: "right",
+  // The same reasoning for a PDF's bookmarks, on a setting of its own: the reader opens one
+  // document at a time, and the column should be somewhere it has been put on purpose.
+  pdfOutlineSide: "right",
   // A slideshow's pace and whether it starts over: five seconds is long enough to look and
   // short enough to feel like a show, and looping is what a slideshow is expected to do.
   galleryInterval: 5,
@@ -2767,6 +2770,7 @@ const defaultModeFor = useCallback(
                   path={tabs.fileTab.path}
                   paper={settings.pdfPaper}
                   onSavePaper={(value) => void saveSettings({ pdfPaper: value })}
+                  outlineSide={settings.pdfOutlineSide === "left" ? "left" : "right"}
                 />
               </Suspense>
             </PaneErrorBoundary>

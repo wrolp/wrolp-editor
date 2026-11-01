@@ -3667,7 +3667,9 @@ body.resizing .editor-host {
   inset: 0;
   z-index: 1;
   display: flex;
-  flex-direction: column;
+  /* A row, because the bookmark column is a sibling of the pages and takes an edge: the tools
+     and both tabs are absolutely positioned over it, so nothing else is in this flow. */
+  flex-direction: row;
   overflow: hidden;
 }
 .pdf-tools {
@@ -3709,10 +3711,18 @@ body.resizing .editor-host {
   padding-right: 48px;
   transition: transform 140ms ease, opacity 120ms ease, visibility 0s;
 }
+/* When the bookmark tab sits on the left it is over the row's first control, so the row clears
+   it. On the right the tabs stack vertically and the row needs no extra room. */
+.pdf-tools.tab-left.open {
+  padding-left: 46px;
+}
 /* The tab that stands in for the row: one control in a corner rather than a hidden strip along
    the top edge, so the way back is visible before anything is hovered and stays put while the
-   row comes and goes. The reader, the picture and the gallery each have one. */
+   row comes and goes. The reader, the picture and the gallery each have one. Its face is a drawn
+   icon (see `icons.tsx`), not a typed glyph: `≡` and `☰` were two spellings of the same symbol
+   and each platform drew its own weight. */
 .pdf-tools-toggle,
+.pdf-outline-tab,
 .img-tools-toggle,
 .gal-tools-toggle,
 .md-toc-tab {
@@ -3731,9 +3741,6 @@ body.resizing .editor-host {
   border-radius: 6px;
   background: var(--surface-2);
   color: var(--text);
-  font-family: inherit;
-  font-size: 13px;
-  line-height: 1;
   cursor: pointer;
   /* Faint until the pointer is on it: it is there to be found, not to draw the eye away from
      the page it sits on. */
@@ -3742,15 +3749,32 @@ body.resizing .editor-host {
   transition: opacity 120ms ease, background 120ms ease;
 }
 .pdf-tools-toggle:hover,
+.pdf-outline-tab:hover,
 .img-tools-toggle:hover,
 .gal-tools-toggle:hover,
 .md-toc-tab:hover,
 .pdf-tools-toggle:focus-visible,
+.pdf-outline-tab:focus-visible,
 .img-tools-toggle:focus-visible,
 .gal-tools-toggle:focus-visible,
 .md-toc-tab:focus-visible {
   opacity: 1;
   background: var(--surface-active);
+}
+/* The bookmarks' tab sits on the side its column opens from. On the right it stacks under the
+   tools' tab rather than beside it — two tabs in a row read as two unrelated controls, while a
+   column reads as one set of ways into the document. */
+.pdf-outline-tab {
+  z-index: 5;
+}
+.pdf-outline-tab.left {
+  left: 10px;
+  right: auto;
+}
+.pdf-outline-tab.right {
+  left: auto;
+  right: 18px;
+  top: 42px;
 }
 /* The gallery's tab keeps to the left corner: in the single view the picture below has a tab of
    its own in the right one, and two tabs a few pixels apart would be one too many. */
@@ -3836,9 +3860,70 @@ body.resizing .editor-host {
 }
 .pdf-scroll {
   flex: 1 1 auto;
+  /* A flex item whose content is a fixed-width canvas will not shrink without this, so the
+     pages would push the bookmark column off the edge instead of making room for it. */
+  min-width: 0;
   min-height: 0;
   overflow: auto;
   background: var(--sunken);
+}
+/* The bookmark column. It takes no width until the tab asks for it, and the pages keep their
+   slot either way: `order` moves the column, the DOM does not. */
+.pdf-outline {
+  flex: 0 0 220px;
+  min-height: 0;
+  overflow-y: auto;
+  /* Room for the tab in the corner above it. */
+  padding: 46px 8px 20px 12px;
+  background: var(--titlebar);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+  user-select: none;
+}
+/* The divider goes on the edge that faces the pages, so the column reads as one pane either
+   way rather than as a box sitting in the document. */
+.pdf-outline.left {
+  border-right: 1px solid var(--border);
+}
+.pdf-outline.right {
+  border-left: 1px solid var(--border);
+}
+/* On the left the tab sits over the column's own heading, which steps aside for it. */
+.pdf-outline.left > .pdf-outline-head {
+  padding-left: 34px;
+}
+.pdf-outline-head {
+  padding: 0 2px 6px;
+  color: var(--muted);
+}
+.pdf-outline-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+/* One step of indentation per level of the tree, so a long outline keeps its shape. */
+.pdf-outline-list .pdf-outline-list {
+  padding-left: 12px;
+}
+.pdf-outline-list button {
+  display: block;
+  width: 100%;
+  padding: 3px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pdf-outline-list button:hover {
+  background: var(--surface-hover);
+  color: var(--text);
 }
 .pdf-pages-list {
   display: flex;

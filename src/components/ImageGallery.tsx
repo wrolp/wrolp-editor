@@ -21,7 +21,7 @@ import {
 import { t } from "../lib/i18n";
 import { extOf } from "../lib/path";
 import { pathKey } from "../lib/types";
-import { IconReload } from "./icons";
+import { IconCollapse, IconReload, IconSliders } from "./icons";
 import ImagePreview from "./ImagePreview";
 
 type GalleryMode = "stack" | "single" | "slideshow" | "grid";
@@ -839,7 +839,7 @@ export default function ImageGallery({
         onPointerEnter={stayOpen}
         onClick={() => setToolsOpen((open) => !open)}
       >
-        {toolsOpen ? "×" : "≡"}
+        {toolsOpen ? <IconCollapse edge="top" /> : <IconSliders />}
       </button>
       <div
         className={`gal-toolbar${toolsOpen ? " open" : ""}`}
