@@ -6,6 +6,7 @@ import * as pdfjs from "pdfjs-dist/legacy/build/pdf.mjs";
 import workerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 import { t, translateError } from "../lib/i18n";
 import { api } from "../lib/tauri";
+import { stepFrom, zoomText } from "../lib/zoom";
 
 pdfjs.GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -24,31 +25,10 @@ const ZOOM_MAX = 400;
 /** Pixels per second the automatic scroll moves, the range the slider offers, and one nudge. */
 const SPEED_MIN = 10;
 const SPEED_MAX = 240;
-const SPEED_STEP = 5;
+const SPEED_STEP = 1;
 const SPEED_DEFAULT = 40;
-
-/** The number the size box shows: the pinned percentage, or what fitting comes to instead. */
-function zoomText(zoom: number | null, fitPercent: number): string {
-  if (zoom !== null) return String(zoom);
-  return fitPercent > 0 ? String(fitPercent) : "";
-}
-
-/**
- * The next rung of the ladder in `direction`, for a percentage that may not be on it.
- *
- * A typed size sits between two rungs; stepping from it lands on the neighbouring one rather
- * than snapping back to 100. A size already past the end of the ladder stays where it is, which
- * is what the matching end of the ladder means for a number the buttons did not choose.
- */
-function stepFrom(current: number, direction: 1 | -1): number {
-  const at = STEPS.indexOf(current);
-  if (at >= 0) return STEPS[Math.min(STEPS.length - 1, Math.max(0, at + direction))];
-  if (direction === 1) return STEPS.find((step) => step > current) ?? current;
-  for (let i = STEPS.length - 1; i >= 0; i -= 1) {
-    if (STEPS[i] < current) return STEPS[i];
-  }
-  return current;
-}
+/** How long the tools stay after the pointer leaves them, before they slide away. */
+const TOOLS_CLOSE_DELAY = 2500;
 
 /** Night is a mode rather than a colour: the page is inverted, not tinted. */
 const NIGHT_PAPER = "night";
@@ -288,6 +268,10 @@ function PdfPage({
         task = page.render({ canvas, canvasContext: context, viewport });
         await task.promise;
       } catch (e) {
+        // A render this component cancelled itself is not a page that failed: the effect is
+        // re-running with a new size, and reporting it would put "rendering cancelled" on a
+        // page that is about to be drawn.
+        if (!live) return;
         // A page that cannot be drawn leaves its frame empty, but the reason is worth saying:
         // a swallowed failure here is exactly the kind that would read as a blank pane.
         onError(e instanceof Error ? e.message : String(e));
@@ -360,6 +344,8 @@ export default function PdfViewer({ path, paper, onSavePaper }: Props) {
   const [width, setWidth] = useState(0);
   const [autoScroll, setAutoScroll] = useState(false);
   const [speed, setSpeed] = useState(SPEED_DEFAULT);
+  /** The tools take no room unless they are in use; the tab in the corner brings them back. */
+  const [toolsOpen, setToolsOpen] = useState(false);
   const [atEnd, setAtEnd] = useState(false);
   /** The first page whose render failed, shown instead of letting the pane sit blank. */
   const [pageError, setPageError] = useState<string | null>(null);
@@ -370,7 +356,7 @@ export default function PdfViewer({ path, paper, onSavePaper }: Props) {
   const stepBy = (direction: 1 | -1) => {
     // Stepping from "fit" starts where the pane already is, so a small first nudge from a
     // document fitted at 134% lands on 150 rather than jumping across it.
-    setZoom((current) => stepFrom(current ?? fitPercent, direction));
+    setZoom((current) => stepFrom(STEPS, current ?? fitPercent, direction));
   };
 
   /**
@@ -504,6 +490,31 @@ export default function PdfViewer({ path, paper, onSavePaper }: Props) {
     setAutoScroll((on) => (on ? false : on));
   }, []);
 
+  /**
+   * The tools leave a few seconds after the pointer does, rather than the instant it does: a
+   * hand that has gone to the page is often on its way straight back, and a row that vanishes
+   * under it reads as a slip.
+   */
+  const closeTimer = useRef<number | null>(null);
+  const stayOpen = useCallback(() => {
+    if (closeTimer.current !== null) {
+      window.clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  }, []);
+  const closeSoon = useCallback(() => {
+    stayOpen();
+    closeTimer.current = window.setTimeout(() => {
+      closeTimer.current = null;
+      setToolsOpen(false);
+    }, TOOLS_CLOSE_DELAY);
+  }, [stayOpen]);
+  const closeNow = useCallback(() => {
+    stayOpen();
+    setToolsOpen(false);
+  }, [stayOpen]);
+  useEffect(() => () => stayOpen(), [stayOpen]);
+
   // Night inverts the page rather than tinting it, and the inversion is a stylesheet layer with
   // the pictures cut out of it, so the sheet colour becomes the stylesheet's business alone.
   const night = paper === NIGHT_PAPER;
@@ -514,7 +525,29 @@ export default function PdfViewer({ path, paper, onSavePaper }: Props) {
       data-paper={night ? "night" : undefined}
       style={{ "--pdf-paper": night ? "#ffffff" : paper } as CSSProperties}
     >
-      <div className="pdf-tools">
+      {/* The only thing on the page when the tools are away: a tab in the corner that brings
+          them back, rather than a spot along the top edge that has to be found by accident. */}
+      <button
+        type="button"
+        className="pdf-tools-toggle"
+        title={toolsOpen ? t("tools.hide") : t("tools.show")}
+        aria-label={toolsOpen ? t("tools.hide") : t("tools.show")}
+        aria-expanded={toolsOpen}
+        onPointerEnter={stayOpen}
+        onClick={() => setToolsOpen((open) => !open)}
+      >
+        {toolsOpen ? "×" : "≡"}
+      </button>
+      <div
+        className={`pdf-tools${toolsOpen ? " open" : ""}`}
+        onPointerEnter={stayOpen}
+        onPointerLeave={(event) => {
+          // A slider dragged past the row is still the row being used, so a button held down
+          // keeps it open until the pointer is lifted; otherwise the row waits a moment before
+          // it leaves, in case the hand is coming straight back.
+          if (event.buttons === 0) closeSoon();
+        }}
+      >
         <button
           className="pdf-tool"
           title={t("img.zoomOut")}
@@ -525,9 +558,9 @@ export default function PdfViewer({ path, paper, onSavePaper }: Props) {
         </button>
         {/* A plain number rather than a slider: a reader who knows the size they want should be
             able to type it, and while the document is fitted the box reports what fit comes to. */}
-        <span className="pdf-size">
+        <span className="zoom-box">
           <input
-            className="pdf-size-input"
+            className="zoom-input"
             type="text"
             inputMode="numeric"
             title={t("pdf.pageSize")}
@@ -540,7 +573,7 @@ export default function PdfViewer({ path, paper, onSavePaper }: Props) {
               if (event.key === "Enter") event.currentTarget.blur();
             }}
           />
-          <span className="pdf-size-unit">%</span>
+          <span className="zoom-unit">%</span>
         </span>
         <button
           className="pdf-tool"
@@ -551,7 +584,7 @@ export default function PdfViewer({ path, paper, onSavePaper }: Props) {
           +
         </button>
         <button
-          className={`pdf-tool pdf-fit${zoom === null ? " on" : ""}`}
+          className={`pdf-tool zoom-fit${zoom === null ? " on" : ""}`}
           title={t("img.fit")}
           aria-pressed={zoom === null}
           onClick={() => setZoom(null)}
@@ -575,9 +608,9 @@ export default function PdfViewer({ path, paper, onSavePaper }: Props) {
         >
           {autoScroll ? "❚❚" : "▶"}
         </button>
-        {/* A slider for the coarse move, and buttons for the nudge between rungs of five: the
-            pace of a document read aloud is worth setting exactly, and a slider alone cannot
-            be walked one number at a time. */}
+        {/* A slider for the coarse move, and buttons for a nudge of one: the pace of a document
+            read aloud is worth setting exactly, and a slider alone cannot be walked one number
+            at a time. */}
         <span className="pdf-speed">
           <span>{t("pdf.speed")}</span>
           <button
@@ -613,7 +646,12 @@ export default function PdfViewer({ path, paper, onSavePaper }: Props) {
         className="pdf-scroll"
         ref={hostRef}
         onWheel={pauseForHand}
-        onPointerDown={pauseForHand}
+        onPointerDown={() => {
+          // Reaching for the page is a decision, not a hand passing over: the tools go at once
+          // and the page gets the whole pane.
+          pauseForHand();
+          closeNow();
+        }}
       >
         {(error || pageError) && (
           <div className="pdf-error">{t("pdf.error", { detail: error ?? pageError ?? "" })}</div>

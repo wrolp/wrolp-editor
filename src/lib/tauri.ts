@@ -14,7 +14,10 @@ export interface OpenedFile {
   bom: boolean;
   /** Size on disk in bytes. */
   bytes: number;
-  /** A picture: `content` is empty and the editor must stay out of the way. */
+  /**
+   * A file with no text to give: a picture the previews draw, or a PDF the reader draws.
+   * `content` is empty and the editor must stay out of the way.
+   */
   binary: boolean;
   /** The file on disk is an encrypted container. `mtime` and `bytes` then describe the
    * ciphertext, which is what a later save has to beat. */

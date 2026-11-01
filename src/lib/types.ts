@@ -24,8 +24,9 @@ export interface Tab {
   initialValue?: string;
   isSettings?: boolean;
   /**
-   * A picture rather than a document. Its buffer is never decoded, so `original` is empty
-   * and any edit would be nonsense: the file is only ever drawn, never saved from the tab.
+   * A file with no text buffer: a picture the previews draw, or a PDF the reader draws. Its
+   * bytes are never decoded, so `original` is empty and any edit would be nonsense: the file
+   * is only ever drawn, never saved from the tab.
    */
   isBinary?: boolean;
   /**

@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { t } from "../lib/i18n";
 import { api, revealItemInDir } from "../lib/tauri";
+import { stepFrom, zoomText } from "../lib/zoom";
 import BackdropPicker from "./BackdropPicker";
 
 interface Props {
@@ -27,14 +28,15 @@ interface Props {
   onBrowseFolder?: (path: string) => void;
 }
 
+/** Zoom levels the buttons walk, as a percentage of the picture's own pixels. */
 const STEPS = [25, 50, 75, 100, 150, 200, 400];
-
-function nextStep(current: number | null, direction: 1 | -1): number {
-  if (current === null) return direction === 1 ? 100 : STEPS[0];
-  const at = STEPS.indexOf(current);
-  if (at < 0) return 100;
-  return STEPS[Math.min(STEPS.length - 1, Math.max(0, at + direction))];
-}
+/** The range a typed percentage is held to, so a mistyped zero cannot lose the picture. */
+const ZOOM_MIN = 5;
+const ZOOM_MAX = 800;
+/** What `.img-stage` pads the picture on every side; fit is measured inside it. */
+const STAGE_PAD = 14;
+/** How long the tools stay after the pointer leaves them, before they slide away. */
+const TOOLS_CLOSE_DELAY = 2500;
 
 function dirOf(filePath: string): string {
   const cut = filePath.replace(/[\\/][^\\/]*$/, "");
@@ -82,6 +84,108 @@ export default function ImagePreview({
   /** null means "fit the pane"; a number is a percentage of the image's own size. */
   const [step, setStep] = useState<number | null>(null);
   const [dims, setDims] = useState({ width: 0, height: 0 });
+  /** The room the picture is fitted into, watched rather than assumed. */
+  const stageRef = useRef<HTMLDivElement>(null);
+  const [stage, setStage] = useState({ width: 0, height: 0 });
+  /** The text in the size box while it is being typed; committed on Enter or on leaving it. */
+  const [zoomDraft, setZoomDraft] = useState("");
+  /** The tools take no room unless they are in use; the tab in the corner brings them back. */
+  const [toolsOpen, setToolsOpen] = useState(false);
+
+  useEffect(() => {
+    const node = stageRef.current;
+    if (!node) return;
+    const measure = () => setStage({ width: node.clientWidth, height: node.clientHeight });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  /**
+   * The scale that fits the picture into the room it is given. A picture smaller than the pane
+   * is already at its own size, so this stops at 1.
+   *
+   * The size is worked out here rather than left to `max-width` / `max-height`: a percentage
+   * `max-height` against a pane whose height comes from flex layout is not resolved at all, so
+   * a tall picture used to overflow the pane instead of fitting it.
+   */
+  const fitScale =
+    stage.width > 0 && dims.width > 0 && dims.height > 0
+      ? Math.min(
+          1,
+          (stage.width - STAGE_PAD * 2) / dims.width,
+          (stage.height - STAGE_PAD * 2) / dims.height
+        )
+      : 0;
+  const fitPercent = fitScale > 0 ? Math.round(fitScale * 100) : 0;
+  /** What the pane is showing, whether the reader pinned it or the fit chose it. */
+  const shownZoom = step ?? fitPercent;
+  /** The picture's width in pixels: its own pixels times the scale, fitted or pinned. */
+  const pictureWidth =
+    dims.width > 0 && (step !== null || fitScale > 0)
+      ? Math.round(dims.width * (step !== null ? step / 100 : fitScale))
+      : 0;
+
+  const stepBy = (direction: 1 | -1) => {
+    // Stepping from "fit" starts where the pane already is, so a small first nudge from a photo
+    // fitted at 42% lands on 50 rather than jumping across it.
+    setStep((current) => stepFrom(STEPS, current ?? fitPercent, direction));
+  };
+
+  /**
+   * Reads the size box: an empty one means fit, a percentage outside the range is brought back
+   * into it, and anything that is not a number is a slip that only restores the box.
+   */
+  const applyZoomDraft = (text: string) => {
+    const typed = text.trim();
+    if (typed === "") {
+      setStep(null);
+      setZoomDraft(zoomText(null, fitPercent));
+      return;
+    }
+    const parsed = Number.parseInt(typed, 10);
+    if (Number.isNaN(parsed)) {
+      setZoomDraft(zoomText(step, fitPercent));
+      return;
+    }
+    const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, parsed));
+    // Typing the percentage that fitting already gives is fitting: the box keeps following the
+    // pane instead of pinning a size that would stop keeping up with a resize.
+    setStep(next === fitPercent ? null : next);
+    setZoomDraft(String(next));
+  };
+
+  // The box follows the size whenever it is set from elsewhere — the buttons, the fit button,
+  // a resize — so it always names what is on screen rather than a stale draft.
+  useEffect(() => {
+    setZoomDraft(zoomText(step, fitPercent));
+  }, [step, fitPercent]);
+
+  /**
+   * The tools leave a few seconds after the pointer does, rather than the instant it does: a
+   * hand that has gone to the picture is often on its way straight back, and a row that
+   * vanishes under it reads as a slip.
+   */
+  const closeTimer = useRef<number | null>(null);
+  const stayOpen = useCallback(() => {
+    if (closeTimer.current !== null) {
+      window.clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  }, []);
+  const closeSoon = useCallback(() => {
+    stayOpen();
+    closeTimer.current = window.setTimeout(() => {
+      closeTimer.current = null;
+      setToolsOpen(false);
+    }, TOOLS_CLOSE_DELAY);
+  }, [stayOpen]);
+  const closeNow = useCallback(() => {
+    stayOpen();
+    setToolsOpen(false);
+  }, [stayOpen]);
+  useEffect(() => () => stayOpen(), [stayOpen]);
   /**
    * Set when the buffer is not well-formed XML. Worth knowing before anything is rendered:
    * a browser refuses such a file however it is addressed, so this is the difference
@@ -139,29 +243,72 @@ export default function ImagePreview({
 
   return (
     <div className="img-preview">
-      <div className="img-tools">
+      {/* The only thing on the picture when the tools are away: a tab in the corner that brings
+          them back, rather than a spot along the top edge that has to be found by accident. */}
+      <button
+        type="button"
+        className="img-tools-toggle"
+        title={toolsOpen ? t("tools.hide") : t("tools.show")}
+        aria-label={toolsOpen ? t("tools.hide") : t("tools.show")}
+        aria-expanded={toolsOpen}
+        onPointerEnter={stayOpen}
+        onClick={() => setToolsOpen((open) => !open)}
+      >
+        {toolsOpen ? "×" : "≡"}
+      </button>
+      <div
+        className={`img-tools${toolsOpen ? " open" : ""}`}
+        onPointerEnter={stayOpen}
+        onPointerLeave={(event) => {
+          // A control dragged past the row is still the row being used, so a button held down
+          // keeps it open until the pointer is lifted; otherwise the row waits a moment before
+          // it leaves, in case the hand is coming straight back.
+          if (event.buttons === 0) closeSoon();
+        }}
+      >
         <button
           className="img-tool"
           title={t("img.zoomOut")}
-          onClick={() => setStep((prev) => nextStep(prev, -1))}
-          disabled={step === STEPS[0]}
+          onClick={() => stepBy(-1)}
+          disabled={shownZoom <= STEPS[0]}
         >
           −
         </button>
-        <span className="img-zoom">{step === null ? t("img.fit") : `${step}%`}</span>
+        {/* The same box the reader has: a picture is zoomed to a number as often as to a rung. */}
+        <span className="zoom-box">
+          <input
+            className="zoom-input"
+            type="text"
+            inputMode="numeric"
+            title={t("img.size")}
+            aria-label={t("img.size")}
+            placeholder={t("img.fit")}
+            value={zoomDraft}
+            onChange={(event) => setZoomDraft(event.target.value)}
+            onBlur={(event) => applyZoomDraft(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") event.currentTarget.blur();
+            }}
+          />
+          <span className="zoom-unit">%</span>
+        </span>
         <button
           className="img-tool"
           title={t("img.zoomIn")}
-          onClick={() => setStep((prev) => nextStep(prev, 1))}
-          disabled={step === STEPS[STEPS.length - 1]}
+          onClick={() => stepBy(1)}
+          disabled={shownZoom >= STEPS[STEPS.length - 1]}
         >
           +
         </button>
         <button
-          className="img-tool"
-          title={t("img.actual")}
-          onClick={() => setStep((prev) => (prev === 100 ? null : 100))}
+          className={`img-tool zoom-fit${step === null ? " on" : ""}`}
+          title={t("img.fit")}
+          aria-pressed={step === null}
+          onClick={() => setStep(null)}
         >
+          {t("img.fit")}
+        </button>
+        <button className="img-tool" title={t("img.actual")} onClick={() => setStep(100)}>
           {t("img.actual")}
         </button>
         {dims.width > 0 && (
@@ -186,12 +333,16 @@ export default function ImagePreview({
 
       <div
         className="img-stage"
+        ref={stageRef}
+        // Reaching for the picture is a decision, not a hand passing over: the tools go at once
+        // and the picture gets the whole pane.
+        onPointerDown={closeNow}
         onWheel={(e) => {
           // Ctrl+wheel only: a bare wheel over the picture would zoom the app out from under
           // the user, and this pane has nothing to scroll, so nothing would be gained.
           if (!e.ctrlKey) return;
           e.preventDefault();
-          setStep((prev) => nextStep(prev, e.deltaY < 0 ? 1 : -1));
+          stepBy(e.deltaY < 0 ? 1 : -1);
         }}
       >
         {failed || !src ? (
@@ -227,7 +378,19 @@ export default function ImagePreview({
             className="img-frame"
             src={src}
             alt=""
-            style={step === null ? undefined : { width: `${step}%`, maxWidth: "none" }}
+            style={
+              pictureWidth > 0
+                ? {
+                    // Pixels of the picture's own size, not a share of the pane: "100%" is the
+                    // picture at its real size, which is what the 100% button says. Both caps
+                    // have to go, or a picture taller than the pane stops growing while the
+                    // percentage keeps climbing.
+                    width: `${pictureWidth}px`,
+                    maxWidth: "none",
+                    maxHeight: "none",
+                  }
+                : undefined
+            }
             onLoad={(e) => {
               const img = e.currentTarget;
               setDims({ width: img.naturalWidth, height: img.naturalHeight });

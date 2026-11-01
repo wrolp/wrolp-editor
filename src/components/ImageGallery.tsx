@@ -34,6 +34,8 @@ const MODE_KEYS: Record<GalleryMode, string> = {
   grid: "gal.grid",
 };
 const INTERVALS = [2, 3, 5, 8, 10, 15, 30];
+/** How long the controls stay after the pointer leaves them, before they slide away. */
+const GALLERY_TOOLS_CLOSE_DELAY = 2500;
 /** One arrow-key press in the stacked view. Native scroll uses about this much. */
 const STACK_SCROLL_STEP = 64;
 
@@ -515,9 +517,35 @@ export default function ImageGallery({
     () => !document.hidden
   );
   const [largeCells, setLargeCells] = useState(false);
+  /** The controls take no room unless they are in use; the tab in the corner brings them back. */
+  const [toolsOpen, setToolsOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
   const stackRef = useRef<StackHandle>(null);
   const gridRef = useRef<ViewHandle>(null);
+
+  /**
+   * The controls leave a few seconds after the pointer does, rather than the instant it does:
+   * a hand that has gone to the pictures is often on its way straight back.
+   */
+  const closeTimer = useRef<number | null>(null);
+  const stayOpen = useCallback(() => {
+    if (closeTimer.current !== null) {
+      window.clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  }, []);
+  const closeSoon = useCallback(() => {
+    stayOpen();
+    closeTimer.current = window.setTimeout(() => {
+      closeTimer.current = null;
+      setToolsOpen(false);
+    }, GALLERY_TOOLS_CLOSE_DELAY);
+  }, [stayOpen]);
+  const closeNow = useCallback(() => {
+    stayOpen();
+    setToolsOpen(false);
+  }, [stayOpen]);
+  useEffect(() => () => stayOpen(), [stayOpen]);
   /**
    * The picture on screen, kept in a ref so a refresh can return to it without making the
    * listing effect depend on the index. A deleted or renamed picture is simply gone and the
@@ -789,8 +817,39 @@ export default function ImageGallery({
   const sizeText = formatBytes(totalBytes);
 
   return (
-    <div className="image-gallery" ref={rootRef} tabIndex={-1}>
-      <div className="gal-toolbar">
+    <div
+      className="image-gallery"
+      ref={rootRef}
+      tabIndex={-1}
+      onPointerDown={(event) => {
+        // Reaching for a picture puts the controls away, so the pictures get the whole pane —
+        // unless the click is on the row itself, which is the row being used.
+        if (!(event.target as Element).closest(".gal-toolbar, .gal-tools-toggle")) closeNow();
+      }}
+    >
+      {/* The only thing on the pictures when the controls are away: a tab in the corner that
+          brings them back. It keeps to the left, clear of the picture's own tab in the single
+          view below it. */}
+      <button
+        type="button"
+        className="gal-tools-toggle"
+        title={toolsOpen ? t("tools.hide") : t("tools.show")}
+        aria-label={toolsOpen ? t("tools.hide") : t("tools.show")}
+        aria-expanded={toolsOpen}
+        onPointerEnter={stayOpen}
+        onClick={() => setToolsOpen((open) => !open)}
+      >
+        {toolsOpen ? "×" : "≡"}
+      </button>
+      <div
+        className={`gal-toolbar${toolsOpen ? " open" : ""}`}
+        onPointerEnter={stayOpen}
+        onPointerLeave={(event) => {
+          // A control dragged past the row is still the row being used, so a button held down
+          // keeps it open until the pointer is lifted.
+          if (event.buttons === 0) closeSoon();
+        }}
+      >
         <div className="gal-modes" role="group" aria-label={t("gal.modes")}>
           {MODES.map((m) => (
             <button

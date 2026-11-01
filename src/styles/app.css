@@ -3650,10 +3650,7 @@ body.resizing .editor-host {
   opacity: 0.4;
   cursor: default;
 }
-.img-zoom {
-  min-width: 52px;
-  text-align: center;
-}
+
 .img-dims {
   margin-left: 4px;
 }
@@ -3685,6 +3682,80 @@ body.resizing .editor-host {
   font-size: 11px;
   color: var(--muted);
 }
+/* The reader's controls take no room unless they are in use: a row that is always there costs
+   every page a line, and a document is opened to be read. Hovering the top edge of the pane
+   slides the row back in over the page rather than above it, so nothing moves when it comes or
+   goes. The picture's row is the same control with a different set of buttons. */
+.pdf-tools,
+.img-tools {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 3;
+  transform: translateY(-100%);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: transform 140ms ease, opacity 120ms ease, visibility 0s linear 140ms;
+}
+.pdf-tools.open,
+.img-tools.open {
+  transform: none;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  /* Room for the tab that closes the row, which keeps to the same corner either way. */
+  padding-right: 48px;
+  transition: transform 140ms ease, opacity 120ms ease, visibility 0s;
+}
+/* The tab that stands in for the row: one control in a corner rather than a hidden strip along
+   the top edge, so the way back is visible before anything is hovered and stays put while the
+   row comes and goes. The reader, the picture and the gallery each have one. */
+.pdf-tools-toggle,
+.img-tools-toggle,
+.gal-tools-toggle {
+  position: absolute;
+  top: 8px;
+  /* Clear of the pane's scrollbar, which owns the last few pixels of the right edge. */
+  right: 18px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  /* Faint until the pointer is on it: it is there to be found, not to draw the eye away from
+     the page it sits on. */
+  opacity: 0.4;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  transition: opacity 120ms ease, background 120ms ease;
+}
+.pdf-tools-toggle:hover,
+.img-tools-toggle:hover,
+.gal-tools-toggle:hover,
+.pdf-tools-toggle:focus-visible,
+.img-tools-toggle:focus-visible,
+.gal-tools-toggle:focus-visible {
+  opacity: 1;
+  background: var(--surface-active);
+}
+/* The gallery's tab keeps to the left corner: in the single view the picture below has a tab of
+   its own in the right one, and two tabs a few pixels apart would be one too many. */
+.gal-tools-toggle {
+  left: 10px;
+  right: auto;
+  z-index: 6;
+}
 .pdf-tool {
   min-width: 24px;
   height: 22px;
@@ -3706,13 +3777,14 @@ body.resizing .editor-host {
 .pdf-auto.on {
   color: var(--accent);
 }
-/* The size box sits between the two zoom buttons, so it reads as the value they change. */
-.pdf-size {
+/* The size box sits between the two zoom buttons, so it reads as the value they change. The
+   reader and the picture both use it: the same box, the same two buttons, the same question. */
+.zoom-box {
   display: flex;
   align-items: center;
   gap: 2px;
 }
-.pdf-size-input {
+.zoom-input {
   width: 40px;
   height: 22px;
   padding: 0 4px;
@@ -3724,17 +3796,17 @@ body.resizing .editor-host {
   font-size: 11px;
   text-align: right;
 }
-.pdf-size-input:hover {
+.zoom-input:hover {
   border-color: var(--border-strong);
 }
-.pdf-size-input:focus {
+.zoom-input:focus {
   outline: none;
   border-color: var(--accent);
 }
-.pdf-size-unit {
+.zoom-unit {
   color: var(--muted);
 }
-.pdf-fit.on {
+.zoom-fit.on {
   color: var(--accent);
 }
 .pdf-pages {
@@ -3894,6 +3966,9 @@ body.resizing .editor-host {
   background-position: 0 0, 0 8px, 8px -8px, -8px 0;
 }
 .img-frame {
+  /* A flex item shrinks to its container unless told not to, which silently capped every zoom
+     at the pane's width: past that, the percentage climbed and the picture did not. */
+  flex: none;
   max-width: 100%;
   max-height: 100%;
   /* Nearest-neighbour would show the pixels but turns the picture to mush at 200%. What is
@@ -3975,11 +4050,19 @@ body.resizing .editor-host {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* Its controls slide up out of the pane, so the pane has to clip what leaves it. */
+  overflow: hidden;
   background: var(--bg);
   outline: none;
 }
+/* The gallery's controls take no room unless they are asked for, the same way the reader's and
+   the picture's do: a folder of pictures is opened to be looked at. */
 .gal-toolbar {
-  flex: 0 0 auto;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 5;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
@@ -3989,6 +4072,20 @@ body.resizing .editor-host {
   background: var(--titlebar);
   font-size: 11px;
   color: var(--muted);
+  transform: translateY(-100%);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: transform 140ms ease, opacity 120ms ease, visibility 0s linear 140ms;
+}
+.gal-toolbar.open {
+  transform: none;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  /* Room for the tab that closes the row, which keeps to the left corner. */
+  padding-left: 46px;
+  transition: transform 140ms ease, opacity 120ms ease, visibility 0s;
 }
 .gal-modes {
   display: flex;
@@ -4059,9 +4156,15 @@ body.resizing .editor-host {
 .gal-check input {
   margin: 0;
 }
-.gal-select {
+/* A small select in a toolbar. The shared `.select` is sized for dialogs — its 5px padding and
+   13px font inside a 22px row leave a 12px content box, which cuts the seconds off at the
+   bottom. The compound selector is what wins over `.select` wherever either rule sits in this
+   file, so the two cannot drift apart by moving a block. */
+.gal-check .gal-select {
   height: 22px;
+  min-width: 76px;
   padding: 0 4px;
+  border-radius: 5px;
   font-size: 11px;
 }
 .gal-meta {

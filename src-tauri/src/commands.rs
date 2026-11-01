@@ -22,22 +22,35 @@ pub(crate) const GROUPS_FILE: &str = "groups.json";
 const WINDOW_FILE: &str = "window.json";
 /// Raster images: bytes with no text in them, so decoding them as text fails and the file
 /// could not be opened at all. SVG is deliberately absent — it is text, and is edited as
-/// source.
+/// source. The gallery lists from this table too, so a format added here is one it can show.
 pub(crate) const BINARY_EXT: [&str; 11] = [
   "png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "ico", "tif", "tiff", "heic",
 ];
 
+/// Documents the app draws itself instead of editing: a PDF is rendered by the reader from its
+/// own bytes.
+///
+/// Kept apart from the picture table because a gallery must not offer a PDF as an image, while
+/// opening one has to succeed: a file the app can show belongs in the recent list and in a
+/// restored session, not in the unopenable pile.
+const READER_EXT: [&str; 1] = ["pdf"];
+
+/// Whether the editor has no buffer to offer for this path: a picture the previews draw, or a
+/// document the reader draws. Reading it for its metadata only is what lets `open_file` succeed.
 fn is_binary_ext(path: &str) -> bool {
   match path.rsplit_once('.') {
-    Some((_, ext)) => BINARY_EXT.contains(&ext.to_ascii_lowercase().as_str()),
+    Some((_, ext)) => {
+      let ext = ext.to_ascii_lowercase();
+      BINARY_EXT.contains(&ext.as_str()) || READER_EXT.contains(&ext.as_str())
+    }
     None => false,
   }
 }
 
 /// A file that decoded "successfully" but is really binary: no BOM, yet NUL bytes. UTF-16 is
 /// the one kind of legal text that carries NULs, and it always announces itself with a BOM,
-/// so the absence of one is what lets this reject PDFs, ZIPs and EXEs instead of showing them
-/// as a mojibake buffer that a save would write straight back over the original.
+/// so the absence of one is what lets this reject ZIPs and EXEs instead of showing them as a
+/// mojibake buffer that a save would write straight back over the original.
 pub(crate) fn is_binary_content(bytes: &[u8]) -> bool {
   encoding_rs::Encoding::for_bom(bytes).is_none() && bytes.iter().take(8192).any(|b| *b == 0)
 }
@@ -824,13 +837,13 @@ pub fn open_file(
     return open_container(&app, &state, source, record);
   }
   let normalized = source.path;
-  // A picture is not text: decoding one either fails outright (which used to make the file
-  // unopenable) or succeeds into a mojibake buffer that must never be written back. It is
-  // read for its metadata only, and the frontend renders it through the preview.
+  // A picture, or a document the reader draws, is not text: decoding one either fails outright
+  // (which used to make the file unopenable) or succeeds into a mojibake buffer that must never
+  // be written back. It is read for its metadata only, and the frontend draws it.
   let binary = is_binary_ext(&normalized);
-  // A picture is handled above; for everything else, NUL bytes without a BOM mean the file
-  // is not text and the legacy-encoding fallback would only produce a buffer that must never
-  // be saved. This must run after the picture check, or a PNG would lose its preview identity.
+  // A picture or a PDF is handled above; for everything else, NUL bytes without a BOM mean the
+  // file is not text and the legacy-encoding fallback would only produce a buffer that must
+  // never be saved. This must run after that check, or a PNG would lose its preview identity.
   if !binary && is_binary_content(&source.bytes) {
     return Err("binary_content".into());
   }
@@ -1929,10 +1942,11 @@ mod tests {
     assert_eq!(shared.len(), 1, "someone else can still claim it");
   }
 
-  /// Pictures are read for their metadata only. SVG counts as text on purpose: it is edited
-  /// as source, and it is the one image the editor can legitimately show both ways.
+  /// Pictures and PDFs are read for their metadata only: the previews and the reader draw them,
+  /// and neither has a buffer to save. SVG counts as text on purpose: it is edited as source,
+  /// and it is the one image the editor can legitimately show both ways.
   #[test]
-  fn only_raster_images_are_treated_as_binary() {
+  fn pictures_and_pdfs_are_treated_as_binary() {
     for name in [
       r"C:\pics\no-extension",
       r"C:\pics\a.svg",
@@ -1948,8 +1962,10 @@ mod tests {
       r"C:\pics\a.webp",
       r"C:\pics\a.PNG",
       r"C:\pics\a.gif",
+      r"C:\docs\a.pdf",
+      r"C:\docs\a.PDF",
     ] {
-      assert!(is_binary_ext(name), "{name} should be treated as a picture");
+      assert!(is_binary_ext(name), "{name} should be opened for its metadata only");
     }
   }
 

@@ -454,3 +454,11 @@ export function isHtml(path: string): boolean {
 export function isPreviewableImage(path: string): boolean {
   return isBitmapImage(path) || isSvg(path);
 }
+
+/**
+ * A PDF. Not text, and not a picture either: the reader draws it from its own bytes, so the
+ * text reader's refusal says nothing about whether the file can be shown.
+ */
+export function isPdf(path: string): boolean {
+  return extOf(path) === "pdf";
+}
