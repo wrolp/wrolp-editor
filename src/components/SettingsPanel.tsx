@@ -595,6 +595,12 @@ export default function SettingsPanel({
                 onChange={(v) => onSaveSettings({ minimap: v })}
               />
               <SettingCheck
+                label={t("settings.showStatusBar")}
+                checked={settings.showStatusBar}
+                onChange={(v) => onSaveSettings({ showStatusBar: v })}
+              />
+              <p className="muted">{t("settings.showStatusBarDesc")}</p>
+              <SettingCheck
                 label={t("settings.restoreSession")}
                 checked={settings.restoreSession}
                 onChange={(v) => onSaveSettings({ restoreSession: v })}

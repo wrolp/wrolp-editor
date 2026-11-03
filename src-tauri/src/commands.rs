@@ -145,6 +145,10 @@ pub struct Settings {
   pub font_size: f64,
   pub minimap: bool,
   pub sidebar_visible: bool,
+  /// Show the status bar along the bottom edge. On by default, because the bar is where the
+  /// cursor, selection counts, size, encoding and line ending are read. Turning it off gives
+  /// the file the whole height, and the choice is remembered like any other layout switch.
+  pub show_status_bar: bool,
   pub sidebar_view: String,
   pub sidebar_width: f64,
   /// Text size in the sidebar's list content: the file tree, the recent files and the folder
@@ -310,6 +314,7 @@ impl Default for Settings {
       font_size: 14.0,
       minimap: true,
       sidebar_visible: true,
+      show_status_bar: true,
       sidebar_view: "explorer".into(),
       sidebar_width: 240.0,
       sidebar_font: 12.0,
@@ -437,6 +442,7 @@ impl Settings {
       },
       minimap: self.minimap,
       sidebar_visible: self.sidebar_visible,
+      show_status_bar: self.show_status_bar,
       sidebar_view: if self.sidebar_view.is_empty() {
         "explorer".into()
       } else {
@@ -2027,6 +2033,7 @@ mod tests {
   fn first_run_defaults_keep_sidebar_and_minimap_on() {
     let s = Settings::default();
     assert!(s.sidebar_visible);
+    assert!(s.show_status_bar);
     assert!(s.minimap);
     assert_eq!(s.sidebar_view, "explorer");
     assert_eq!(s.font_size, 14.0);
@@ -2565,6 +2572,8 @@ mod tests {
       serde_json::from_str("{\"fontSize\":16.0,\"minimap\":false,\"language\":\"zh\"}")
         .expect("parse partial settings");
     assert!(s.restore_session);
+    // A file written before the status bar could be hidden keeps it on screen.
+    assert!(s.show_status_bar);
     assert!(!s.minimap);
     assert_eq!(s.font_size, 16.0);
     assert_eq!(s.language, "zh");

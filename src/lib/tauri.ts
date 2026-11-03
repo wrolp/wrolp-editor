@@ -113,6 +113,8 @@ export interface Settings {
   fontSize: number;
   minimap: boolean;
   sidebarVisible: boolean;
+  /** Show the status bar along the bottom of the window. */
+  showStatusBar: boolean;
   sidebarView: string;
   sidebarWidth: number;
   /** Sidebar text size in CSS pixels, 11 to 20. 12 is the size the file tree was pinned at. */

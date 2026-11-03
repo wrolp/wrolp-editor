@@ -182,6 +182,9 @@ const DEFAULT_SETTINGS: Settings = {
   fontSize: 14,
   minimap: true,
   sidebarVisible: true,
+  // The bar is where the cursor, selection counts and the file's encoding are read, so a fresh
+  // install shows it; it costs one row of height and can be turned off once it is in the way.
+  showStatusBar: true,
   sidebarView: "explorer",
   sidebarWidth: 240,
   // 12 px is what the file tree was pinned at before this was a setting, so the sidebar looks the
@@ -2922,29 +2925,31 @@ const defaultModeFor = useCallback(
         </div>
       </div>
 
-      <StatusBar
-        tab={tabs.activeTab}
-        line={cursor.line}
-        column={cursor.column}
-        stats={stats}
-        eol={shownEol}
-        diff={diffStats}
-        git={
-          statusBarHead
-            ? {
-                repo: statusBarRepo,
-                branch:
-                  statusBarHead.branch ??
-                  statusBarHead.short ??
-                  t("git.unborn"),
-                ahead: statusBarHead.ahead,
-                behind: statusBarHead.behind,
-                changed: statusBarChanged,
-              }
-            : null
-        }
-        onGitClick={() => changeView("git")}
-      />
+      {settings.showStatusBar && (
+        <StatusBar
+          tab={tabs.activeTab}
+          line={cursor.line}
+          column={cursor.column}
+          stats={stats}
+          eol={shownEol}
+          diff={diffStats}
+          git={
+            statusBarHead
+              ? {
+                  repo: statusBarRepo,
+                  branch:
+                    statusBarHead.branch ??
+                    statusBarHead.short ??
+                    t("git.unborn"),
+                  ahead: statusBarHead.ahead,
+                  behind: statusBarHead.behind,
+                  changed: statusBarChanged,
+                }
+              : null
+          }
+          onGitClick={() => changeView("git")}
+        />
+      )}
 
       {tabMenu && menuTabPath && (
         <div
