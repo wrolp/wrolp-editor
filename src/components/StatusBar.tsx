@@ -1,5 +1,5 @@
 import { t } from "../lib/i18n";
-import { isBitmapImage } from "../lib/path";
+import { isBitmapImage, isPdf } from "../lib/path";
 import { IconBranch, IconLock } from "./icons";
 import { isFileTab, type DiffStats, type EditStats, type Tab } from "../lib/types";
 
@@ -64,7 +64,9 @@ export default function StatusBar({
   // A picture is not text: its "character count" is the byte decoder's opinion, and the
   // caret belongs to an editor that is not on screen. Only the size on disk is real.
   const picture = !!tab && !tab.isSettings && isBitmapImage(tab.path);
-  const counters = file && !picture;
+  // A PDF is read rather than edited, so the same three readouts are invented numbers here too.
+  const reader = !!tab && !tab.isSettings && isPdf(tab.path);
+  const counters = file && !picture && !reader;
   return (
     <div className="statusbar">
       <span className="sb-path">
@@ -153,7 +155,9 @@ export default function StatusBar({
       {/* Only the ending itself, in the three letters every editor uses; a tab that is not a
           text file has none to show. */}
       {eol && <span className="sb-eol">{eol}</span>}
-      <span className="sb-lang">{counters ? tab.language : ""}</span>
+      {/* A PDF's type is the format's own letters: `tab.language` is the editor's language, and
+          for an extension it cannot parse that says plaintext rather than what is on screen. */}
+      <span className="sb-lang">{reader ? "PDF" : counters ? tab.language : ""}</span>
     </div>
   );
 }
