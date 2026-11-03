@@ -643,6 +643,18 @@ export interface GroupStore {
   items: Group[];
 }
 
+/**
+ * Where the reader last left a PDF: the page it was on, and how far down that page as a
+ * fraction. A fraction rather than pixels because the page is drawn at whatever size the pane
+ * and the zoom allow, so a scroll offset measured in one window lands elsewhere in another.
+ */
+export interface PdfPosition {
+  /** 1-based, the way the reader counts pages. */
+  page: number;
+  /** 0 for the top of the page, 1 for its bottom. */
+  ratio: number;
+}
+
 /** Where the window was left, in physical pixels. `maximized` is the state to enter with. */
 export interface WindowState {
   x: number;
@@ -1104,6 +1116,10 @@ export const api = {
   gitForgetHost: (host: string) => invoke<void>("git_forget_host", { host }),
   getGroups: () => invoke<GroupStore>("get_groups"),
   saveGroups: (store: GroupStore) => invoke<GroupStore>("save_groups", { store }),
+  /** Where this PDF was last left; null when it has never been read on this machine. */
+  getPdfPosition: (path: string) => invoke<PdfPosition | null>("get_pdf_position", { path }),
+  savePdfPosition: (path: string, page: number, ratio: number) =>
+    invoke<void>("save_pdf_position", { path, page, ratio }),
   transferTabs: (store: GroupStore, transfer: TabTransfer) =>
     invoke<GroupStore>("transfer_tabs", { store, transfer }),
   getWindowState: () => invoke<WindowState | null>("get_window_state"),

@@ -25,10 +25,11 @@ const FILE_SUFFIX: &str = ".json";
 /// Drafts and the version store are deliberately absent: they are user data rather than
 /// configuration, and copying them would let a snapshot grow to the size of the work it was
 /// meant to protect. The order is also the restore order, which means settings land first.
-const STATE_FILES: [&str; 5] = [
+const STATE_FILES: [&str; 6] = [
   "settings.json",
   "groups.json",
   "file-settings.json",
+  "pdf-positions.json",
   "history.json",
   "folder-history.json",
 ];

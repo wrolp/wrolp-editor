@@ -483,6 +483,53 @@ function PdfPage({
   );
 }
 
+/** Where the reader left the document: the page under the top edge, and how far down that page. */
+interface ReadingPosition {
+  page: number;
+  ratio: number;
+}
+
+/** How long the saved page is waited for before the document is simply left at the top. */
+const RESUME_ATTEMPTS = 60;
+const RESUME_RETRY_MS = 50;
+/** How long a landing is watched for a page frame that corrects itself, and how often. */
+const RESUME_WATCH_MS = 1500;
+const RESUME_WATCH_STEP_MS = 250;
+/** A document being scrolled writes its place at most this often, and once this long after it stops. */
+const SAVE_MIN_MS = 2000;
+const SAVE_SETTLE_MS = 700;
+/** Coarse enough that two reads of one place match, fine enough to land within a pixel of it. */
+const RATIO_PRECISION = 1000;
+
+/** How far one page sits below the top of the scroll content, whatever the positioning ancestors do. */
+function contentTop(host: HTMLElement, el: HTMLElement): number {
+  return el.getBoundingClientRect().top - host.getBoundingClientRect().top + host.scrollTop;
+}
+
+/**
+ * The place the pane is showing, as a page and a fraction of it.
+ *
+ * The fraction is measured within the page rather than across the document because a document's
+ * pages differ in height, and because a page is the unit the reader thinks in: a window resize or
+ * a zoom change moves the pixels, but leaves "halfway down page twelve" where it was.
+ */
+function positionOf(host: HTMLElement): ReadingPosition {
+  const scrollTop = host.scrollTop;
+  let page = 1;
+  let ratio = 0;
+  for (const el of Array.from(host.querySelectorAll<HTMLElement>(".pdf-page"))) {
+    const top = contentTop(host, el);
+    // The pages are in document order, so the first one that starts below the top edge ends the walk.
+    if (top > scrollTop + 1) break;
+    page = Number(el.dataset.page) || page;
+    ratio =
+      el.offsetHeight > 0
+        ? Math.round(((scrollTop - top) / el.offsetHeight) * RATIO_PRECISION) / RATIO_PRECISION
+        : 0;
+  }
+  return { page, ratio: Math.min(1, Math.max(0, ratio)) };
+}
+
 /**
  * A PDF document, read rather than edited.
  *
@@ -519,6 +566,19 @@ export default function PdfViewer({ path, paper, onSavePaper, outlineSide }: Pro
   const [atEnd, setAtEnd] = useState(false);
   /** The first page whose render failed, shown instead of letting the pane sit blank. */
   const [pageError, setPageError] = useState<string | null>(null);
+  /** The reader is on their own place: either landed on the stored one, or there is none to reach. */
+  const resumed = useRef(false);
+  /** Set once the landing has been asked for, so a resize cannot drag the reader back to it. */
+  const resumeTried = useRef(false);
+  /** The retry waiting for the stored page's frame to have a height to place. */
+  const resumeTimer = useRef<number | null>(null);
+  /** The place last written: a document nobody moved has no reason to rewrite its own entry. */
+  const lastWrite = useRef<ReadingPosition | null>(null);
+  /** Where the pane stood at the most recent scroll, kept for the write that closes the tab. */
+  const currentPlace = useRef<ReadingPosition | null>(null);
+  const lastSavedAt = useRef(0);
+  /** The write waiting for the reader to stop moving the page. */
+  const saveTimer = useRef<number | null>(null);
 
   /** What the pane is showing, whether the reader pinned it or the pane chose it. */
   const shownZoom = zoom ?? fitPercent;
@@ -595,6 +655,137 @@ export default function PdfViewer({ path, paper, onSavePaper, outlineSide }: Pro
       void task?.destroy();
     };
   }, [path]);
+
+  /**
+   * Land on the page the reader left this document on.
+   *
+   * Frames are sized from the first page's measurement, which is asynchronous; until it lands the
+   * stored page has no height to place. The retry waits for that single measurement, and a page
+   * that never arrives leaves the document at the top rather than holding the reader hostage to
+   * a scroll that cannot be made.
+   *
+   * `resumeTried` is why a window resize does not send the reader back: the pane's width is what
+   * fitting measures against, so a resize during the wait would otherwise re-run this and re-land.
+   */
+  useEffect(() => {
+    if (!doc || pageCount === 0 || resumeTried.current) return;
+    resumeTried.current = true;
+    let live = true;
+    const land = (position: ReadingPosition, attempt: number) => {
+      if (!live) return;
+      const host = hostRef.current;
+      const el = host?.querySelector<HTMLElement>(
+        `[data-page="${Math.min(position.page, pageCount)}"]`
+      );
+      if (!host || !el || el.offsetHeight <= 0) {
+        if (attempt < RESUME_ATTEMPTS) {
+          resumeTimer.current = window.setTimeout(
+            () => land(position, attempt + 1),
+            RESUME_RETRY_MS
+          );
+        } else {
+          resumed.current = true;
+        }
+        return;
+      }
+      const aim = () => Math.round(contentTop(host, el) + position.ratio * el.offsetHeight);
+      lastWrite.current = position;
+      resumed.current = true;
+      host.scrollTop = aim();
+      // A frame's height is measured against the pane's width, and a pane that has just been
+      // mounted does not always hold the width it ends up with, so the frames can correct
+      // themselves a moment after the landing aimed at them. Watching puts the reader back on the
+      // page they left — and stops the instant their own hand moves the page.
+      let last = host.scrollTop;
+      const deadline = Date.now() + RESUME_WATCH_MS;
+      const watch = () => {
+        resumeTimer.current = null;
+        if (!live || host.scrollTop !== last) return;
+        const target = aim();
+        if (target !== last) {
+          host.scrollTop = target;
+          last = host.scrollTop;
+        }
+        if (Date.now() < deadline) {
+          resumeTimer.current = window.setTimeout(watch, RESUME_WATCH_STEP_MS);
+        }
+      };
+      resumeTimer.current = window.setTimeout(watch, RESUME_WATCH_STEP_MS);
+    };
+    void api
+      .getPdfPosition(path)
+      .then((stored) => {
+        if (!live) return;
+        if (stored) land({ page: stored.page, ratio: stored.ratio }, 0);
+        // Nothing stored is not a failure to restore: the document is one the reader has not
+        // reached before, and the top is where a first read begins.
+        else resumed.current = true;
+      })
+      .catch(() => {
+        if (live) resumed.current = true;
+      });
+    return () => {
+      live = false;
+      if (resumeTimer.current !== null) {
+        window.clearTimeout(resumeTimer.current);
+        resumeTimer.current = null;
+      }
+    };
+  }, [doc, pageCount, path]);
+
+  /** Write where the pane stood at the moment this was last called. */
+  const writePosition = useCallback((position: ReadingPosition) => {
+    const previous = lastWrite.current;
+    if (previous && previous.page === position.page && previous.ratio === position.ratio) return;
+    lastWrite.current = position;
+    lastSavedAt.current = Date.now();
+    void api.savePdfPosition(path, position.page, position.ratio).catch(() => undefined);
+  }, [path]);
+
+  /**
+   * Follow the reader's place as they move.
+   *
+   * The automatic scroll moves the pane every frame, so a write per frame would be a rewrite of
+   * the store sixty times a second: one per `SAVE_MIN_MS` while the page is running, and one more
+   * after it stops, which is also the one that catches a reader who stops and closes the tab.
+   */
+  const rememberPosition = useCallback(() => {
+    const host = hostRef.current;
+    if (!host || !resumed.current) {
+      // Moved before the document landed on its stored page — a slip of the wheel while the pages
+      // are still being measured, not a place worth writing. The store keeps what the reader did
+      // leave, and the landing is about to put them back on it.
+      return;
+    }
+    const position = positionOf(host);
+    currentPlace.current = position;
+    if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
+    saveTimer.current = null;
+    if (Date.now() - lastSavedAt.current >= SAVE_MIN_MS) {
+      writePosition(position);
+      return;
+    }
+    saveTimer.current = window.setTimeout(() => {
+      saveTimer.current = null;
+      writePosition(position);
+    }, SAVE_SETTLE_MS);
+  }, [writePosition]);
+
+  // The place before the pane goes away is the one that counts: switching tabs remounts the reader,
+  // and a quit can land between the last scroll and the timer that would have written it. The
+  // position is the one read at the last scroll rather than measured now, because by this point
+  // the pane it was read from is already off the page.
+  useEffect(
+    () => () => {
+      if (saveTimer.current !== null) {
+        window.clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+      const place = currentPlace.current;
+      if (place) writePosition(place);
+    },
+    [writePosition]
+  );
 
   // The outline is read once per document: a document without one answers null, which is not a
   // failure but the reason the tab never appears.
@@ -893,6 +1084,7 @@ export default function PdfViewer({ path, paper, onSavePaper, outlineSide }: Pro
       <div
         className="pdf-scroll"
         ref={hostRef}
+        onScroll={rememberPosition}
         onWheel={pauseForHand}
         // A single click only clears the tools; the automatic scroll keeps going. Stopping is a
         // deliberate double click, so a reader who taps the page to read does not lose their place.

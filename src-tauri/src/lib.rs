@@ -10,6 +10,7 @@ mod gallery;
 mod git;
 mod group;
 mod name_order;
+mod pdf_position;
 mod rename;
 mod unlock;
 mod versioning;
@@ -109,6 +110,8 @@ pub fn run() {
       commands::get_groups,
       commands::save_groups,
       commands::transfer_tabs,
+      pdf_position::get_pdf_position,
+      pdf_position::save_pdf_position,
       commands::get_window_state,
       commands::save_window_state,
       commands::plan_window_placement,
