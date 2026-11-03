@@ -330,16 +330,19 @@ function holesMask(rects: { x: number; y: number; w: number; h: number }[]): str
 /**
  * One page, drawn into a canvas.
  *
- * Pages are drawn lazily: the observer marks a page visible once it is near the viewport, and
- * the canvas only then asks the document for its content. `rendered` keeps a page drawn after
- * it leaves the viewport again — redrawing on every scroll back would make long documents
- * flicker for no gain.
+ * Pages are drawn and measured lazily: the observer marks a page visible once it is near the
+ * viewport, and only then does the canvas ask the document for its content and its exact
+ * height. A frame whose page has not had its turn is sized from `estimate` instead, so the
+ * list keeps its shape without parsing pages nobody is looking at. `drawn` keeps a page drawn
+ * after it leaves the viewport again — redrawing on every scroll back would make long
+ * documents flicker for no gain.
  */
 function PdfPage({
   doc,
   index,
   zoom,
   width,
+  estimate,
   night,
   onError,
 }: {
@@ -347,6 +350,8 @@ function PdfPage({
   index: number;
   zoom: number | null;
   width: number;
+  /** The height to hold until this page has been measured, from the first page's shape. */
+  estimate: number;
   /** Inverted page; the pictures on it are measured so they can be left alone. */
   night: boolean;
   onError: (message: string) => void;
@@ -355,13 +360,18 @@ function PdfPage({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [visible, setVisible] = useState(index < 2);
   const [height, setHeight] = useState(0);
+  /** The frame's height: the page's own once known, the shared estimate until then. */
+  const frameHeight = height > 0 ? height : estimate;
   /** Whether the canvas holds this page, as opposed to a frame waiting for it. */
   const [drawn, setDrawn] = useState(false);
   /** The pictures on this page, as a mask for the inversion layer; empty until measured. */
   const [holes, setHoles] = useState("");
 
   useEffect(() => {
-    if (visible) return;
+    // The estimate has to be in place before anything is observed: until the first page is
+    // measured every frame is zero-height and stacked at the top edge, so the observer would
+    // call the whole document visible at once and draw every page on open.
+    if (visible || estimate <= 0) return;
     const node = wrapRef.current;
     if (!node) return;
     const observer = new IntersectionObserver(
@@ -376,7 +386,7 @@ function PdfPage({
     );
     observer.observe(node);
     return () => observer.disconnect();
-  }, [visible]);
+  }, [visible, estimate]);
 
   useEffect(() => {
     if (!visible || width <= 0) return;
@@ -423,12 +433,13 @@ function PdfPage({
     };
   }, [doc, index, zoom, width, visible]);
 
-  // A page that has not been drawn yet still holds its place: the list's scrollbar, and a jump
-  // from a bookmark, both need the frame to be where the page will be rather than stacked at
-  // zero height. The number is the one the render will land on, so the frame does not resize
-  // when the page arrives.
+  // A page that has not been drawn yet still holds its place, and once it is near the viewport
+  // its exact height replaces the shared estimate: the list's scrollbar, and a jump from a
+  // bookmark, both need the frame to be where the page will be. Pages far from the viewport
+  // are left to the estimate — asking the document for every page up front is what made a long
+  // file wait before the first one could be read.
   useEffect(() => {
-    if (drawn || width <= 0) return;
+    if (drawn || !visible || width <= 0) return;
     let live = true;
     void doc
       .getPage(index + 1)
@@ -439,13 +450,20 @@ function PdfPage({
         setHeight(Math.floor(base.height * unit));
       })
       .catch(() => {
-        // A page that cannot be measured keeps its zero frame; it reports the reason when it
+        // A page that cannot be measured keeps the estimate; it reports the reason when it
         // draws.
       });
     return () => {
       live = false;
     };
-  }, [doc, index, zoom, width, drawn]);
+  }, [doc, index, zoom, width, drawn, visible]);
+
+  // A measurement belongs to the size it was taken at. Zooming or resizing the pane throws the
+  // old numbers away so a frame that is not near enough to be measured again falls back to the
+  // estimate instead of keeping a height from the previous size.
+  useEffect(() => {
+    setHeight(0);
+  }, [zoom, width]);
 
   // Night cuts the pictures out of the inversion layer so a photograph on the page stays the
   // photograph it was. Measured only while the mode is on and the page is near the viewport:
@@ -472,7 +490,7 @@ function PdfPage({
       ref={wrapRef}
       style={
         {
-          ...(height > 0 ? { height } : {}),
+          ...(frameHeight > 0 ? { height: frameHeight } : {}),
           ...(holes ? { "--pdf-holes": holes } : {}),
         } as CSSProperties
       }
@@ -531,11 +549,48 @@ function positionOf(host: HTMLElement): ReadingPosition {
 }
 
 /**
+ * The bytes pdf.js asks for, read from the file on disk.
+ *
+ * Handing the reader the whole document as one buffer made opening a scanned book wait for
+ * every megabyte before the first page could be drawn. A page needs its cross-reference table
+ * and its own objects, and pdf.js already knows how to ask for exactly those ranges; answering
+ * them is the difference between "the document" and "the first page of it".
+ */
+class FileRangeTransport extends pdfjs.PDFDataRangeTransport {
+  /** Set by `abort`, which pdf.js calls when the document is closed. */
+  private closed = false;
+
+  constructor(
+    private readonly path: string,
+    length: number,
+    /** A range that could not be read: there is no way to reject one through this API. */
+    private readonly onFailure: (message: string) => void
+  ) {
+    super(length, null);
+  }
+
+  requestDataRange(begin: number, end: number) {
+    void api
+      .readFileRange(this.path, begin, end)
+      .then((buffer) => {
+        if (!this.closed) this.onDataRange(begin, new Uint8Array(buffer));
+      })
+      .catch((e) => {
+        if (!this.closed) this.onFailure(e instanceof Error ? e.message : String(e));
+      });
+  }
+
+  abort() {
+    this.closed = true;
+  }
+}
+
+/**
  * A PDF document, read rather than edited.
  *
- * The file is loaded through the asset protocol, the same route the image preview takes: the
- * bytes stay in the webview's cache instead of being copied through JSON, and a large document
- * costs no extra memory on the way in.
+ * The file is read a range at a time, in the order pdf.js asks for it: the cross-reference
+ * table, the page about to be drawn, and the objects on it. A large document therefore costs
+ * what its first page needs rather than every byte it holds.
  *
  * The automatic scroll is the reason this exists as its own view: a document read aloud, or a
  * sheet of music, has to move at a pace the reader sets, and a browser's built-in viewer has no
@@ -550,6 +605,12 @@ export default function PdfViewer({ path, paper, onSavePaper, outlineSide }: Pro
   const [zoom, setZoom] = useState<number | null>(null);
   /** What fitting comes to for the first page, so the size box shows a number rather than a 0. */
   const [fitPercent, setFitPercent] = useState(0);
+  /**
+   * The first page's size at 100%, which every page that has not been measured is sized from.
+   * Measuring all of them up front is what makes a long document wait, and most documents have
+   * one page shape, so this is the estimate a frame holds until its own turn comes.
+   */
+  const [pageBox, setPageBox] = useState<{ width: number; height: number } | null>(null);
   /** The text in the size box while it is being typed; committed on Enter or on leaving it. */
   const [zoomDraft, setZoomDraft] = useState("");
   const [width, setWidth] = useState(0);
@@ -636,12 +697,29 @@ export default function PdfViewer({ path, paper, onSavePaper, outlineSide }: Pro
     setZoom(null);
     void (async () => {
       try {
-        // Bytes come through the IPC binary channel rather than the asset protocol: pdf.js
+        // The transport needs the document's length before pdf.js can ask for its first
+        // range, and a file that is gone has no range to answer.
+        const stat = await api.statFile(path);
+        // The tab may have closed while the stat was in flight; a task started now would have
+        // nobody to destroy it.
+        if (!live) return;
+        if (!stat) throw new Error("file_access:missing");
+        // Ranges come through the IPC binary channel rather than the asset protocol: pdf.js
         // fetches with `Range` and CORS, and the asset handler answers neither the way a
         // document served over http would — the images get away with `<img>`, which is
         // exempt from both.
-        const bytes = new Uint8Array(await api.readFileBytes(path));
-        task = pdfjs.getDocument({ data: bytes });
+        const range = new FileRangeTransport(path, stat.bytes, (message) => {
+          if (live) setPageError((current) => current ?? message);
+        });
+        task = pdfjs.getDocument({
+          range,
+          // Only the ranges a page needs: with auto-fetch on, pdf.js walks the rest of the
+          // document in the background after the first chunk, which is the read this avoids.
+          disableAutoFetch: true,
+          // The bytes are answers to range requests rather than a stream, so the reader must
+          // not sit waiting for a stream that has no end to reach.
+          disableStream: true,
+        });
         const loaded = await task.promise;
         if (!live) return;
         setDoc(loaded);
@@ -859,13 +937,17 @@ export default function PdfViewer({ path, paper, onSavePaper, outlineSide }: Pro
   useEffect(() => {
     if (!doc || width <= 0) {
       setFitPercent(0);
+      setPageBox(null);
       return;
     }
     let live = true;
     void doc
       .getPage(1)
       .then((page) => {
-        if (live) setFitPercent(Math.round((width / page.getViewport({ scale: 1 }).width) * 100));
+        if (!live) return;
+        const base = page.getViewport({ scale: 1 });
+        setPageBox({ width: base.width, height: base.height });
+        setFitPercent(Math.round((width / base.width) * 100));
       })
       .catch(() => {
         // An unmeasurable first page leaves the box as it is; that page reports the reason
@@ -943,6 +1025,13 @@ export default function PdfViewer({ path, paper, onSavePaper, outlineSide }: Pro
   // Night inverts the page rather than tinting it, and the inversion is a stylesheet layer with
   // the pictures cut out of it, so the sheet colour becomes the stylesheet's business alone.
   const night = paper === NIGHT_PAPER;
+
+  // A frame whose page has not been measured yet is sized from the first page: the list still
+  // needs a height for its scrollbar and its jumps, and measuring every page up front is the
+  // read this change removes.
+  const estimate = pageBox
+    ? Math.floor(pageBox.height * (zoom === null ? width / pageBox.width : zoom / 100))
+    : 0;
 
   return (
     <div
@@ -1104,6 +1193,7 @@ export default function PdfViewer({ path, paper, onSavePaper, outlineSide }: Pro
                 index={index}
                 zoom={zoom}
                 width={width}
+                estimate={estimate}
                 night={night}
                 onError={(message) => setPageError((current) => current ?? message)}
               />

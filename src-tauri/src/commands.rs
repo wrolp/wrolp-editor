@@ -8,7 +8,7 @@ use crate::unlock::UnlockStore;
 use crate::window::{MonitorRect, Placement, WindowState};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io::Read;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
@@ -824,15 +824,37 @@ fn open_container(
   }
 }
 
-/// A file's raw bytes, for a viewer that decodes content itself — the PDF reader. Answered as
-/// an IPC binary response rather than JSON: a ten-megabyte document is then ten megabytes on
-/// the wire instead of forty, and the webview receives an `ArrayBuffer` it can hand straight
-/// to pdf.js. Going through the asset protocol instead would need CORS for a `fetch`, which
-/// the images never trip because `<img>` is exempt from it.
-#[tauri::command]
-pub fn read_file_bytes(path: String) -> Result<tauri::ipc::Response, String> {
-  let bytes = std::fs::read(&path).map_err(|e| format!("fs_read:{e}"))?;
-  Ok(tauri::ipc::Response::new(bytes))
+/// One byte range of a file, for a viewer that decodes content itself — the PDF reader.
+///
+/// pdf.js asks for the cross-reference table and the objects of the page it is about to draw,
+/// not for the whole document. Answering those ranges is what lets a scanned book open at the
+/// speed of its first page instead of copying every megabyte through IPC first.
+///
+/// Answered as an IPC binary response rather than JSON: the bytes are then the same size on the
+/// wire as on disk, and the webview receives an `ArrayBuffer` it can hand straight to pdf.js.
+/// Going through the asset protocol instead would need CORS for a `fetch`, which the images
+/// never trip because `<img>` is exempt from it.
+///
+/// Async, because a range on a slow disk is still a wait and the main thread is busy drawing
+/// the page that is already on screen.
+#[tauri::command(async)]
+pub fn read_file_range(path: String, begin: u64, end: u64) -> Result<tauri::ipc::Response, String> {
+  read_range(&path, begin, end).map(tauri::ipc::Response::new)
+}
+
+/// The read itself, clamped to the file's own end so a size that went stale between the stat
+/// and the read cannot turn into a panic.
+fn read_range(path: &str, begin: u64, end: u64) -> Result<Vec<u8>, String> {
+  let mut file = std::fs::File::open(path).map_err(|e| format!("fs_read:{e}"))?;
+  let len = file.metadata().map_err(|e| format!("fs_read:{e}"))?.len();
+  let begin = begin.min(len);
+  let end = end.min(len).max(begin);
+  if begin > 0 {
+    file.seek(SeekFrom::Start(begin)).map_err(|e| format!("fs_read:{e}"))?;
+  }
+  let mut bytes = vec![0u8; (end - begin) as usize];
+  file.read_exact(&mut bytes).map_err(|e| format!("fs_read:{e}"))?;
+  Ok(bytes)
 }
 
 #[tauri::command]
@@ -2017,6 +2039,31 @@ mod tests {
         .starts_with("file_access:"),
       "a path that does not exist is a file_access error"
     );
+  }
+
+  /// A range is read exactly as asked, and one that runs past the end is cut there rather than
+  /// failing: the frontend learns the length from a stat, and a file that shrank in between
+  /// must still answer the ranges that remain.
+  #[test]
+  fn file_ranges_are_clamped_to_the_file() {
+    let dir = std::env::temp_dir().join(format!("wrolp-range-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let file = dir.join("a.pdf");
+    std::fs::write(&file, b"0123456789").expect("write");
+    let path = file.to_string_lossy().into_owned();
+
+    assert_eq!(read_range(&path, 2, 5).unwrap(), b"234");
+    assert_eq!(read_range(&path, 6, 100).unwrap(), b"6789");
+    assert!(read_range(&path, 20, 30).unwrap().is_empty());
+    assert!(read_range(&path, 8, 3).unwrap().is_empty());
+    assert!(
+      read_range(&dir.join("missing.pdf").to_string_lossy(), 0, 4)
+        .unwrap_err()
+        .starts_with("fs_read:"),
+      "a file that is gone is reported, not read as empty"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
   }
 
   #[test]

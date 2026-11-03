@@ -1020,8 +1020,12 @@ export const api = {
   gitDeleteBranch: (root: string, name: string, force = false) =>
     invoke<void>("git_delete_branch", { root, name, force }),
   gitRemotes: (root: string) => invoke<GitRemote[]>("git_remotes", { root }),
-  /** A file's raw bytes, for a viewer that decodes content itself (the PDF reader). */
-  readFileBytes: (path: string) => invoke<ArrayBuffer>("read_file_bytes", { path }),
+  /**
+   * One byte range of a file, for a viewer that decodes content itself (the PDF reader).
+   * `end` is exclusive; a range running past the file is cut at its end.
+   */
+  readFileRange: (path: string, begin: number, end: number) =>
+    invoke<ArrayBuffer>("read_file_range", { path, begin, end }),
   /** Add a remote, or move an existing one to a new URL; returns the updated list. */
   gitRemoteSave: (root: string, name: string, url: string) =>
     invoke<GitRemote[]>("git_remote_save", { root, name, url }),
