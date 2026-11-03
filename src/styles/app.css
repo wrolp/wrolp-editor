@@ -4990,6 +4990,33 @@ button.pdf-outline-twist:hover {
 .statusbar .sb-diff .del {
   color: var(--del);
 }
+/* A PDF's place is a number, so the bar both reports it and takes one. The box is the reader's
+   own kind of box, sized for the bar's height rather than the tool row's. */
+.statusbar .sb-pdf {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+}
+.statusbar .sb-pdf-input {
+  width: 44px;
+  height: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11px;
+  text-align: right;
+}
+.statusbar .sb-pdf-input:hover {
+  border-color: var(--border-strong);
+}
+.statusbar .sb-pdf-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
 
 /* ---------- Modal ---------- */
 /* No dim behind a dialog. The panel is an opaque surface of its own with a shadow around it,

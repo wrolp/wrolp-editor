@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { t } from "../lib/i18n";
 import { isBitmapImage, isPdf } from "../lib/path";
 import { IconBranch, IconLock } from "./icons";
@@ -29,6 +30,10 @@ interface Props {
   git: GitSummary | null;
   /** Opens the Source Control view when the git summary is clicked. */
   onGitClick?: () => void;
+  /** Where the PDF reader stands; null when the file on screen is not a PDF. */
+  pdf: { page: number; total: number } | null;
+  /** Take the PDF reader to a page the user typed. */
+  onPdfGo?: (page: number) => void;
 }
 
 /**
@@ -47,6 +52,68 @@ function formatBytes(bytes: number): string {
   return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
 }
 
+/**
+ * The page the reader is on, and the way to another one.
+ *
+ * A reader's place is a number they think in, so the bar both says it and takes one: the same
+ * box reports where the document is and jumps when a page is typed into it. Committed on Enter
+ * or on leaving the box, like the reader's own size box, so a half-typed number is not a jump.
+ */
+function PdfPageControl({
+  page,
+  total,
+  onGo,
+}: {
+  page: number;
+  total: number;
+  onGo: (page: number) => void;
+}) {
+  const [draft, setDraft] = useState(String(page));
+  /** While the box has focus the reader is typing, and a scroll must not overwrite that. */
+  const typing = useRef(false);
+  useEffect(() => {
+    if (!typing.current) setDraft(String(page));
+  }, [page]);
+
+  const commit = () => {
+    const parsed = Number.parseInt(draft.trim(), 10);
+    if (Number.isNaN(parsed)) {
+      setDraft(String(page));
+      return;
+    }
+    // The reader's own range: a zero or a page past the end lands on the nearest page there is.
+    const next = Math.min(total, Math.max(1, parsed));
+    setDraft(String(next));
+    if (next !== page) onGo(next);
+  };
+
+  return (
+    <span className="sb-pdf">
+      <span>{t("status.pdfPage")}</span>
+      <input
+        className="sb-pdf-input"
+        type="text"
+        inputMode="numeric"
+        value={draft}
+        title={t("status.pdfGoto")}
+        aria-label={t("status.pdfPage")}
+        onChange={(event) => setDraft(event.target.value)}
+        onFocus={() => {
+          typing.current = true;
+        }}
+        onBlur={() => {
+          typing.current = false;
+          commit();
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") event.currentTarget.blur();
+        }}
+      />
+      <span>/ {total}</span>
+    </span>
+  );
+}
+
 export default function StatusBar({
   tab,
   line,
@@ -56,6 +123,8 @@ export default function StatusBar({
   diff,
   git,
   onGitClick,
+  pdf,
+  onPdfGo,
 }: Props) {
   // A comparison tab shows two files, so the file counters (selection, size, dirty) and
   // the single caret readout do not apply to it; it gets the diff totals instead.
@@ -149,9 +218,19 @@ export default function StatusBar({
           )}
         </span>
       )}
-      <span className="sb-cursor">
-        {counters ? t("status.cursor", { line, column }) : ""}
-      </span>
+      {/* A PDF has no caret to report, so the page box takes the cursor's place rather than
+          sitting beside an empty slot. */}
+      {pdf ? (
+        <PdfPageControl
+          page={pdf.page}
+          total={pdf.total}
+          onGo={(page) => onPdfGo?.(page)}
+        />
+      ) : (
+        <span className="sb-cursor">
+          {counters ? t("status.cursor", { line, column }) : ""}
+        </span>
+      )}
       {/* Only the ending itself, in the three letters every editor uses; a tab that is not a
           text file has none to show. */}
       {eol && <span className="sb-eol">{eol}</span>}

@@ -118,6 +118,8 @@ const EN: Table = {
   "status.selection": "Selected {n}",
   "status.selectionLines": "Selected {n} · {lines} lines",
   "status.totalChars": "{n} chars",
+  "status.pdfPage": "Page",
+  "status.pdfGoto": "Type a page and press Enter",
 
   "menu.saved": "Saved {name}",
   "menu.reloaded": "Reloaded {name}",
@@ -1434,6 +1436,8 @@ const ZH: Table = {
   "status.selection": "已选 {n} 个字符",
   "status.selectionLines": "已选 {n} 个字符 · 跨 {lines} 行",
   "status.totalChars": "共 {n} 个字符",
+  "status.pdfPage": "页码",
+  "status.pdfGoto": "输入页码后按回车",
 
   "menu.saved": "已保存 {name}",
   "menu.reloaded": "已重新加载 {name}",

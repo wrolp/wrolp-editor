@@ -26,6 +26,7 @@ import FileSettingsDialog from "./components/FileSettingsDialog";
 import Sidebar, { type EntryKind } from "./components/Sidebar";
 import SidebarResizer from "./components/SidebarResizer";
 import StatusBar from "./components/StatusBar";
+import type { PdfViewerHandle } from "./components/PdfViewer";
 import TitleBar, { type PreviewMode } from "./components/TitleBar";
 import Toast from "./components/Toast";
 import GroupChip from "./components/GroupChip";
@@ -459,6 +460,17 @@ export default function App() {
   const [menuTarget, setMenuTarget] = useState<MenuTarget | null>(null);
   /** Added/removed lines of the comparison on screen; null for every other tab. */
   const [diffStats, setDiffStats] = useState<DiffStats | null>(null);
+  /**
+   * Where the PDF reader on screen stands, reported by the reader itself. Keyed by path so a
+   * number left over from the last document cannot be shown against the next one.
+   */
+  const [pdfPlace, setPdfPlace] = useState<{
+    path: string;
+    page: number;
+    total: number;
+  } | null>(null);
+  /** The reader's handle, so the status bar's page box can take it somewhere. */
+  const pdfRef = useRef<PdfViewerHandle | null>(null);
   const [menuBusy, setMenuBusy] = useState(false);
   const [fileSettingsPath, setFileSettingsPath] = useState<string | null>(null);
   const [tabMenu, setTabMenu] = useState<{
@@ -2448,6 +2460,25 @@ const defaultModeFor = useCallback(
    */
   const isPdf = !!tabs.fileTab && /\.pdf$/i.test(tabs.fileTab.path);
   const showUnopenable = !!tabs.fileTab?.unopenable && !isPdf;
+  /** The PDF on screen, when there is one; the status bar's page box belongs to it alone. */
+  const pdfPath = isPdf ? tabs.fileTab?.path ?? null : null;
+  const onPdfPage = useCallback(
+    (page: number, total: number) => {
+      if (!pdfPath) return;
+      // A page that has not moved is not a new fact, and returning the same object keeps a
+      // scroll within one page from re-rendering the whole window.
+      setPdfPlace((previous) =>
+        previous &&
+        previous.path === pdfPath &&
+        previous.page === page &&
+        previous.total === total
+          ? previous
+          : { path: pdfPath, page, total }
+      );
+    },
+    [pdfPath]
+  );
+  const onPdfGo = useCallback((page: number) => pdfRef.current?.goToPage(page), []);
   /**
    * A picture that is being shown as text, and the editor is not what should be on screen.
    * Reachable by switching the layout — which used to be a silent no-op from the user's
@@ -2770,10 +2801,12 @@ const defaultModeFor = useCallback(
               <Suspense fallback={<div className="pdf-loading">{t("app.loading")}</div>}>
                 <PdfViewer
                   key={tabs.fileTab.path}
+                  ref={pdfRef}
                   path={tabs.fileTab.path}
                   paper={settings.pdfPaper}
                   onSavePaper={(value) => void saveSettings({ pdfPaper: value })}
                   outlineSide={settings.pdfOutlineSide === "left" ? "left" : "right"}
+                  onPageChange={onPdfPage}
                 />
               </Suspense>
             </PaneErrorBoundary>
@@ -2948,6 +2981,12 @@ const defaultModeFor = useCallback(
               : null
           }
           onGitClick={() => changeView("git")}
+          pdf={
+            pdfPath && pdfPlace?.path === pdfPath
+              ? { page: pdfPlace.page, total: pdfPlace.total }
+              : null
+          }
+          onPdfGo={onPdfGo}
         />
       )}
 

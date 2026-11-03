@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type CSSProperties,
+  type Ref,
+} from "react";
 // The legacy build, not the default one: pdf.js now calls `Map.prototype.getOrInsertComputed`,
 // which the webview on an older Windows may not have. The legacy build carries that polyfill
 // for both the API and the worker, and costs only a few dozen kilobytes over the default build.
@@ -25,6 +33,15 @@ interface Props {
   onSavePaper: (value: string) => void;
   /** Which edge the bookmark column takes when it is open. */
   outlineSide: "left" | "right";
+  /** Where the reader stands, so the status bar can show it and seek with the same number. */
+  onPageChange?: (page: number, total: number) => void;
+  /** The status bar's page box finds its way back here through this handle. */
+  ref?: Ref<PdfViewerHandle>;
+}
+
+/** What the status bar can ask of the reader: go to a page it was given. */
+export interface PdfViewerHandle {
+  goToPage: (page: number) => void;
 }
 
 /** Zoom levels the buttons walk, as a percentage of the page's own size. `null` means "fit". */
@@ -596,7 +613,14 @@ class FileRangeTransport extends pdfjs.PDFDataRangeTransport {
  * sheet of music, has to move at a pace the reader sets, and a browser's built-in viewer has no
  * way to do that.
  */
-export default function PdfViewer({ path, paper, onSavePaper, outlineSide }: Props) {
+export default function PdfViewer({
+  path,
+  paper,
+  onSavePaper,
+  outlineSide,
+  onPageChange,
+  ref,
+}: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [doc, setDoc] = useState<pdfjs.PDFDocumentProxy | null>(null);
   const [pageCount, setPageCount] = useState(0);
@@ -643,6 +667,27 @@ export default function PdfViewer({ path, paper, onSavePaper, outlineSide }: Pro
 
   /** What the pane is showing, whether the reader pinned it or the pane chose it. */
   const shownZoom = zoom ?? fitPercent;
+
+  /** The page under the top edge, reported to the status bar. */
+  const [currentPage, setCurrentPage] = useState(1);
+  /** The last page reported, so a scroll within one page does not re-render the status bar. */
+  const pageNow = useRef(1);
+
+  const showPage = useCallback((page: number) => {
+    if (page === pageNow.current) return;
+    pageNow.current = page;
+    setCurrentPage(page);
+  }, []);
+
+  /**
+   * Tell the status bar where the reader stands.
+   *
+   * The bar is outside this pane, so the number has to be sent up; it is sent only when it
+   * changes, because a scroll moves the pane many times within one page.
+   */
+  useEffect(() => {
+    if (pageCount > 0) onPageChange?.(currentPage, pageCount);
+  }, [currentPage, pageCount, onPageChange]);
 
   const stepBy = (direction: 1 | -1) => {
     // Stepping from "fit" starts where the pane already is, so a small first nudge from a
@@ -695,6 +740,9 @@ export default function PdfViewer({ path, paper, onSavePaper, outlineSide }: Pro
     setPageError(null);
     setAtEnd(false);
     setZoom(null);
+    // A new document starts at its first page; the stored place is applied when it lands.
+    setCurrentPage(1);
+    pageNow.current = 1;
     void (async () => {
       try {
         // The transport needs the document's length before pdf.js can ask for its first
@@ -770,6 +818,9 @@ export default function PdfViewer({ path, paper, onSavePaper, outlineSide }: Pro
       lastWrite.current = position;
       resumed.current = true;
       host.scrollTop = aim();
+      // The landing is the reader's place too, and on a document reopened mid-way it is the
+      // first number the status bar should show.
+      showPage(Math.min(position.page, pageCount));
       // A frame's height is measured against the pane's width, and a pane that has just been
       // mounted does not always hold the width it ends up with, so the frames can correct
       // themselves a moment after the landing aimed at them. Watching puts the reader back on the
@@ -809,7 +860,7 @@ export default function PdfViewer({ path, paper, onSavePaper, outlineSide }: Pro
         resumeTimer.current = null;
       }
     };
-  }, [doc, pageCount, path]);
+  }, [doc, pageCount, path, showPage]);
 
   /** Write where the pane stood at the moment this was last called. */
   const writePosition = useCallback((position: ReadingPosition) => {
@@ -837,6 +888,7 @@ export default function PdfViewer({ path, paper, onSavePaper, outlineSide }: Pro
     }
     const position = positionOf(host);
     currentPlace.current = position;
+    showPage(position.page);
     if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
     saveTimer.current = null;
     if (Date.now() - lastSavedAt.current >= SAVE_MIN_MS) {
@@ -847,7 +899,7 @@ export default function PdfViewer({ path, paper, onSavePaper, outlineSide }: Pro
       saveTimer.current = null;
       writePosition(position);
     }, SAVE_SETTLE_MS);
-  }, [writePosition]);
+  }, [writePosition, showPage]);
 
   // The place before the pane goes away is the one that counts: switching tabs remounts the reader,
   // and a quit can land between the last scroll and the timer that would have written it. The
@@ -918,6 +970,30 @@ export default function PdfViewer({ path, paper, onSavePaper, outlineSide }: Pro
     },
     [doc]
   );
+
+  /**
+   * Take the pane to a page the status bar names.
+   *
+   * The pages are frames with heights of their own, so the jump is a scroll to the frame rather
+   * than a second render; the number is held inside the document, so a typed page past the end
+   * lands on the last one instead of nowhere.
+   */
+  const goToPage = useCallback(
+    (page: number) => {
+      const host = hostRef.current;
+      if (!host || pageCount === 0) return;
+      const target = Math.min(pageCount, Math.max(1, Math.round(page)));
+      host
+        .querySelector<HTMLElement>(`[data-page="${target}"]`)
+        ?.scrollIntoView({ block: "start" });
+      // The bar's number follows the page the jump aimed at rather than waiting for the scroll
+      // event to report it.
+      showPage(target);
+    },
+    [pageCount, showPage]
+  );
+
+  useImperativeHandle(ref, () => ({ goToPage }), [goToPage]);
 
   /** Puts one branch of the outline away, or brings it back, without touching its siblings. */
   const toggleFold = useCallback((key: string) => {
