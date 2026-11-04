@@ -4670,8 +4670,15 @@ button.pdf-outline-twist:hover {
   font-weight: 600;
   color: var(--text-strong);
 }
-.git-settings .setting-group + .setting-group {
+/* Stacked cards: every page that splits its settings by area — General, Git — needs the same
+   gap between them, so the rule belongs to the category rather than to one of the pages. */
+.settings-cat .setting-group + .setting-group {
   margin-top: 12px;
+}
+/* A heading at the top of a card is the card's title, so it must not carry the paragraph gap
+   the description paragraphs after it use. */
+.settings-cat .setting-group > h3:first-child {
+  margin-top: 0;
 }
 .git-setting-actions {
   display: flex;

@@ -531,7 +531,11 @@ export default function SettingsPanel({
         {category === "general" && (
           <div className="settings-cat">
             <h2>{t("settings.generalHeading")}</h2>
+            {/* One card per area of the app rather than one long list: the items below read as
+                unrelated switches only while they share a box. The headings are the ones the
+                Git page uses, so the two pages are read the same way. */}
             <div className="setting-group">
+              <h3>{t("settings.groupInterface")}</h3>
               <SettingField label={t("settings.language")}>
                 <select
                   className="select"
@@ -559,6 +563,21 @@ export default function SettingsPanel({
                   ))}
                 </select>
               </SettingField>
+              <SettingCheck
+                label={t("settings.compactMode")}
+                checked={settings.compactMode}
+                onChange={(v) => onSaveSettings({ compactMode: v })}
+              />
+              <p className="muted">{t("settings.compactModeDesc")}</p>
+              <SettingCheck
+                label={t("settings.showStatusBar")}
+                checked={settings.showStatusBar}
+                onChange={(v) => onSaveSettings({ showStatusBar: v })}
+              />
+              <p className="muted">{t("settings.showStatusBarDesc")}</p>
+            </div>
+            <div className="setting-group">
+              <h3>{t("settings.groupText")}</h3>
               <SettingField label={t("settings.fontSize")}>
                 <input
                   type="number"
@@ -589,17 +608,9 @@ export default function SettingsPanel({
                 />
               </SettingField>
               <p className="muted">{t("settings.sidebarFontDesc")}</p>
-              <SettingCheck
-                label={t("settings.minimap")}
-                checked={settings.minimap}
-                onChange={(v) => onSaveSettings({ minimap: v })}
-              />
-              <SettingCheck
-                label={t("settings.showStatusBar")}
-                checked={settings.showStatusBar}
-                onChange={(v) => onSaveSettings({ showStatusBar: v })}
-              />
-              <p className="muted">{t("settings.showStatusBarDesc")}</p>
+            </div>
+            <div className="setting-group">
+              <h3>{t("settings.groupSession")}</h3>
               <SettingCheck
                 label={t("settings.restoreSession")}
                 checked={settings.restoreSession}
@@ -626,6 +637,9 @@ export default function SettingsPanel({
                 </select>
               </SettingField>
               <p className="muted">{t("settings.draftRestoreDesc")}</p>
+            </div>
+            <div className="setting-group">
+              <h3>{t("settings.groupExplorer")}</h3>
               <SettingCheck
                 label={t("settings.expandFolders")}
                 checked={settings.expandFolders}
@@ -645,12 +659,14 @@ export default function SettingsPanel({
                 />
               </SettingField>
               <p className="muted">{t("settings.expandFoldersDesc")}</p>
+            </div>
+            <div className="setting-group">
+              <h3>{t("settings.groupEditor")}</h3>
               <SettingCheck
-                label={t("settings.compactMode")}
-                checked={settings.compactMode}
-                onChange={(v) => onSaveSettings({ compactMode: v })}
+                label={t("settings.minimap")}
+                checked={settings.minimap}
+                onChange={(v) => onSaveSettings({ minimap: v })}
               />
-              <p className="muted">{t("settings.compactModeDesc")}</p>
               <SettingField label={t("settings.renderWhitespace")}>
                 <select
                   className="select"
@@ -664,6 +680,113 @@ export default function SettingsPanel({
                   ))}
                 </select>
               </SettingField>
+              <SettingCheck
+                label={t("settings.wordWrap")}
+                checked={settings.wordWrap}
+                onChange={(v) => onSaveSettings({ wordWrap: v })}
+              />
+              <SettingCheck
+                label={t("settings.stickyScroll")}
+                checked={settings.stickyScroll}
+                onChange={(v) => onSaveSettings({ stickyScroll: v })}
+              />
+              <p className="muted">{t("settings.stickyScrollDesc")}</p>
+              <SettingField label={t("settings.tabSize")}>
+                <input
+                  type="number"
+                  min={1}
+                  max={8}
+                  value={settings.tabSize}
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    if (!Number.isNaN(n) && n >= 1) onSaveSettings({ tabSize: n });
+                  }}
+                />
+              </SettingField>
+              <SettingCheck
+                label={t("settings.insertSpaces")}
+                checked={settings.insertSpaces}
+                onChange={(v) => onSaveSettings({ insertSpaces: v })}
+              />
+              <SettingCheck
+                label={t("settings.detectIndentation")}
+                checked={settings.detectIndentation}
+                onChange={(v) => onSaveSettings({ detectIndentation: v })}
+              />
+              <p className="muted">{t("settings.detectIndentationDesc")}</p>
+              <SettingCheck
+                label={t("settings.scrollBeyondLastLine")}
+                checked={settings.scrollBeyondLastLine}
+                onChange={(v) => onSaveSettings({ scrollBeyondLastLine: v })}
+              />
+              <p className="muted">{t("settings.scrollBeyondLastLineDesc")}</p>
+            </div>
+            <div className="setting-group">
+              <h3>{t("settings.groupFiles")}</h3>
+              <SettingField label={t("settings.encoding")}>
+                <select
+                  className="select"
+                  value={settings.encoding}
+                  onChange={(e) => onSaveSettings({ encoding: e.target.value })}
+                >
+                  {ENCODINGS.map((enc) => (
+                    <option key={enc} value={enc}>
+                      {t(`settings.enc.${enc}`)}
+                    </option>
+                  ))}
+                </select>
+              </SettingField>
+              <p className="muted">{t("settings.encodingDesc")}</p>
+              <SettingField label={t("settings.lineEnding")}>
+                <select
+                  className="select"
+                  value={settings.lineEnding}
+                  onChange={(e) => onSaveSettings({ lineEnding: e.target.value })}
+                >
+                  {LINE_ENDINGS.map((option) => (
+                    <option key={option} value={option}>
+                      {t(`settings.lineEnding.${option}`)}
+                    </option>
+                  ))}
+                </select>
+              </SettingField>
+              <p className="muted">{t("settings.lineEndingDesc")}</p>
+              <SettingCheck
+                label={t("settings.trimTrailing")}
+                checked={settings.trimTrailingWhitespace}
+                onChange={(v) => onSaveSettings({ trimTrailingWhitespace: v })}
+              />
+              <p className="muted">{t("settings.trimTrailingDesc")}</p>
+              <SettingCheck
+                label={t("settings.finalNewline")}
+                checked={settings.insertFinalNewline}
+                onChange={(v) => onSaveSettings({ insertFinalNewline: v })}
+              />
+              <p className="muted">{t("settings.finalNewlineDesc")}</p>
+              <SettingCheck
+                label={t("settings.autoSave")}
+                checked={settings.autoSave}
+                onChange={(v) => onSaveSettings({ autoSave: v })}
+              />
+              <SettingField label={t("settings.autoSaveInterval")}>
+                <input
+                  type="number"
+                  min={1}
+                  max={3600}
+                  step={1}
+                  disabled={!settings.autoSave}
+                  value={settings.autoSaveInterval}
+                  onChange={(e) => {
+                    const sec = Math.trunc(Number(e.target.value));
+                    if (Number.isNaN(sec) || sec < 1) return;
+                    onSaveSettings({ autoSaveInterval: Math.min(sec, 3600) });
+                  }}
+                />
+              </SettingField>
+              <p className="muted">{t("settings.autoSaveDesc")}</p>
+            </div>
+            <div className="setting-group">
+              <h3>{t("settings.groupPreview")}</h3>
               <SettingField label={t("settings.previewLayout")}>
                 <select
                   className="select"
@@ -751,109 +874,8 @@ export default function SettingsPanel({
                 />
               </SettingField>
               <p className="muted">{t("settings.imageBackdropDesc")}</p>
-              <SettingCheck
-                label={t("settings.wordWrap")}
-                checked={settings.wordWrap}
-                onChange={(v) => onSaveSettings({ wordWrap: v })}
-              />
-              <SettingCheck
-                label={t("settings.stickyScroll")}
-                checked={settings.stickyScroll}
-                onChange={(v) => onSaveSettings({ stickyScroll: v })}
-              />
-              <p className="muted">{t("settings.stickyScrollDesc")}</p>
-              <SettingField label={t("settings.tabSize")}>
-                <input
-                  type="number"
-                  min={1}
-                  max={8}
-                  value={settings.tabSize}
-                  onChange={(e) => {
-                    const n = Number(e.target.value);
-                    if (!Number.isNaN(n) && n >= 1) onSaveSettings({ tabSize: n });
-                  }}
-                />
-              </SettingField>
-              <SettingCheck
-                label={t("settings.insertSpaces")}
-                checked={settings.insertSpaces}
-                onChange={(v) => onSaveSettings({ insertSpaces: v })}
-              />
-              <SettingCheck
-                label={t("settings.detectIndentation")}
-                checked={settings.detectIndentation}
-                onChange={(v) => onSaveSettings({ detectIndentation: v })}
-              />
-              <p className="muted">{t("settings.detectIndentationDesc")}</p>
-              <SettingCheck
-                label={t("settings.scrollBeyondLastLine")}
-                checked={settings.scrollBeyondLastLine}
-                onChange={(v) => onSaveSettings({ scrollBeyondLastLine: v })}
-              />
-              <p className="muted">{t("settings.scrollBeyondLastLineDesc")}</p>
-              <SettingField label={t("settings.encoding")}>
-                <select
-                  className="select"
-                  value={settings.encoding}
-                  onChange={(e) => onSaveSettings({ encoding: e.target.value })}
-                >
-                  {ENCODINGS.map((enc) => (
-                    <option key={enc} value={enc}>
-                      {t(`settings.enc.${enc}`)}
-                    </option>
-                  ))}
-                </select>
-              </SettingField>
-              <p className="muted">{t("settings.encodingDesc")}</p>
-              <SettingField label={t("settings.lineEnding")}>
-                <select
-                  className="select"
-                  value={settings.lineEnding}
-                  onChange={(e) => onSaveSettings({ lineEnding: e.target.value })}
-                >
-                  {LINE_ENDINGS.map((option) => (
-                    <option key={option} value={option}>
-                      {t(`settings.lineEnding.${option}`)}
-                    </option>
-                  ))}
-                </select>
-              </SettingField>
-              <p className="muted">{t("settings.lineEndingDesc")}</p>
-              <SettingCheck
-                label={t("settings.trimTrailing")}
-                checked={settings.trimTrailingWhitespace}
-                onChange={(v) => onSaveSettings({ trimTrailingWhitespace: v })}
-              />
-              <p className="muted">{t("settings.trimTrailingDesc")}</p>
-              <SettingCheck
-                label={t("settings.finalNewline")}
-                checked={settings.insertFinalNewline}
-                onChange={(v) => onSaveSettings({ insertFinalNewline: v })}
-              />
-              <p className="muted">{t("settings.finalNewlineDesc")}</p>
-              <SettingCheck
-                label={t("settings.autoSave")}
-                checked={settings.autoSave}
-                onChange={(v) => onSaveSettings({ autoSave: v })}
-              />
-              <SettingField label={t("settings.autoSaveInterval")}>
-                <input
-                  type="number"
-                  min={1}
-                  max={3600}
-                  step={1}
-                  disabled={!settings.autoSave}
-                  value={settings.autoSaveInterval}
-                  onChange={(e) => {
-                    const sec = Math.trunc(Number(e.target.value));
-                    if (Number.isNaN(sec) || sec < 1) return;
-                    onSaveSettings({ autoSaveInterval: Math.min(sec, 3600) });
-                  }}
-                />
-              </SettingField>
-              <p className="muted">{t("settings.autoSaveDesc")}</p>
-              <p className="muted">{t("settings.persisted")}</p>
             </div>
+            <p className="muted">{t("settings.persisted")}</p>
           </div>
         )}
 
