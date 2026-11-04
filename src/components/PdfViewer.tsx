@@ -33,6 +33,11 @@ interface Props {
   onSavePaper: (value: string) => void;
   /** Which edge the bookmark column takes when it is open. */
   outlineSide: "left" | "right";
+  /**
+   * Whether the bookmark column starts open, from `settings.pdfOutlineOpen`. Only the initial
+   * state: a column the reader put away stays put for as long as this document is on screen.
+   */
+  outlineOpenByDefault: boolean;
   /** Where the reader stands, so the status bar can show it and seek with the same number. */
   onPageChange?: (page: number, total: number) => void;
   /** The status bar's page box finds its way back here through this handle. */
@@ -618,6 +623,7 @@ export default function PdfViewer({
   paper,
   onSavePaper,
   outlineSide,
+  outlineOpenByDefault,
   onPageChange,
   ref,
 }: Props) {
@@ -644,8 +650,8 @@ export default function PdfViewer({
   const [toolsOpen, setToolsOpen] = useState(false);
   /** The document's outline, empty when it has none — the tab then has nothing to offer. */
   const [outline, setOutline] = useState<Bookmark[]>([]);
-  /** The bookmark column takes no width until the tab asks for it. */
-  const [outlineOpen, setOutlineOpen] = useState(false);
+  /** The bookmark column takes no width until the tab asks for it, unless the setting says so. */
+  const [outlineOpen, setOutlineOpen] = useState(outlineOpenByDefault);
   /** The branches put away by the reader, by path; empty means the whole tree is open. */
   const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set());
   const [atEnd, setAtEnd] = useState(false);

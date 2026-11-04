@@ -47,6 +47,11 @@ interface Props {
   showToc: boolean;
   /** Which edge the outline column takes: `left` | `right`. */
   tocSide: "left" | "right";
+  /**
+   * Whether the outline starts unfolded, from `settings.tocOpen`. Only the initial state: a
+   * column the reader put away stays put for as long as this preview lives.
+   */
+  tocOpenByDefault: boolean;
   /** Opens a file the document links to, beside itself. */
   onOpenPath: (path: string) => void;
   /** Reports a link that was followed but could not be opened. */
@@ -73,6 +78,7 @@ export default function MarkdownPreview({
   theme,
   showToc,
   tocSide,
+  tocOpenByDefault,
   onOpenPath,
   onError,
 }: Props) {
@@ -292,11 +298,13 @@ export default function MarkdownPreview({
   );
 
   /**
-   * Hidden until asked for, like the row of controls above every other pane: the outline is a
-   * reading aid, and a document read on a narrow pane needs the width more than it needs the
-   * list. The tab in the corner is what asks for it, and what puts it away again.
+   * Hidden unless `settings.tocOpen` says otherwise, like the row of controls above every other
+   * pane: the outline is a reading aid, and a document read on a narrow pane needs the width
+   * more than it needs the list. The tab in the corner is what asks for it, and what puts it
+   * away again. Read as the initial state only, so a reader who folds the column does not have
+   * it reopened underneath them.
    */
-  const [tocOpen, setTocOpen] = useState(false);
+  const [tocOpen, setTocOpen] = useState(tocOpenByDefault);
   /** Raw heading index of the section at the top of the pane. */
   const [activeIndex, setActiveIndex] = useState(0);
   const tocRef = useRef<HTMLElement>(null);

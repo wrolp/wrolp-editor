@@ -251,9 +251,13 @@ const DEFAULT_SETTINGS: Settings = {
   // Right by default: the Explorer is on the left, and a contents column beside it would read
   // as a second sidebar.
   tocSide: "right",
+  // Folded to its tab until asked for: the column takes width from the page, and a document
+  // opened to be read should not lose that width before the list is wanted.
+  tocOpen: false,
   // The same reasoning for a PDF's bookmarks, on a setting of its own: the reader opens one
   // document at a time, and the column should be somewhere it has been put on purpose.
   pdfOutlineSide: "right",
+  pdfOutlineOpen: false,
   // A slideshow's pace and whether it starts over: five seconds is long enough to look and
   // short enough to feel like a show, and looping is what a slideshow is expected to do.
   galleryInterval: 5,
@@ -2859,6 +2863,7 @@ const defaultModeFor = useCallback(
                   paper={settings.pdfPaper}
                   onSavePaper={(value) => void saveSettings({ pdfPaper: value })}
                   outlineSide={settings.pdfOutlineSide === "left" ? "left" : "right"}
+                  outlineOpenByDefault={settings.pdfOutlineOpen}
                   onPageChange={onPdfPage}
                 />
               </Suspense>
@@ -2965,6 +2970,7 @@ const defaultModeFor = useCallback(
               theme={theme}
               showToc={previewMode === "preview"}
               tocSide={settings.tocSide === "left" ? "left" : "right"}
+              tocOpenByDefault={settings.tocOpen}
               onOpenPath={(path) => void tabs.openPath(path)}
               onError={(message) => toast(message)}
             />

@@ -286,9 +286,15 @@ const EN: Table = {
   "settings.tocSide": "Markdown contents side",
   "settings.tocSideDesc":
     "Where the outline column sits when a Markdown file is in preview-only mode. Right keeps it away from the Explorer.",
+  "settings.tocOpen": "Open Markdown contents by default",
+  "settings.tocOpenDesc":
+    "Show the outline column as soon as a Markdown file opens in preview-only mode, instead of folding it into the tab in the corner. Applies to previews opened after the change; the tab still folds it away.",
   "settings.pdfOutlineSide": "PDF bookmarks side",
   "settings.pdfOutlineSideDesc":
-    "Where a PDF's bookmark column opens. The column itself is folded into a tab in the corner of the page, and only appears when that tab is clicked.",
+    "Where a PDF's bookmark column opens. The column can open with the document, or stay folded into a tab in the corner of the page until that tab is clicked.",
+  "settings.pdfOutlineOpen": "Open PDF bookmarks by default",
+  "settings.pdfOutlineOpenDesc":
+    "Show the bookmark column as soon as a PDF with bookmarks is opened, instead of leaving it behind the tab. Applies to documents opened after the change; the tab still folds it away.",
   "settings.galleryInterval": "Slideshow pace",
   "settings.galleryIntervalDesc":
     "Seconds each picture stays on screen. A change takes effect on the next picture.",
@@ -1615,9 +1621,15 @@ const ZH: Table = {
   "settings.tocSide": "Markdown 目录位置",
   "settings.tocSideDesc":
     "Markdown 以「只显示预览」打开时，目录列显示在哪一侧。默认靠右，不与左侧边栏并排。",
+  "settings.tocOpen": "默认展开 Markdown 目录",
+  "settings.tocOpenDesc":
+    "Markdown 以「只显示预览」打开时就把目录列展开，而不是先收在角落的按钮里。对改动之后打开的预览生效；角落的按钮仍然可以把它收起来。",
   "settings.pdfOutlineSide": "PDF 书签位置",
   "settings.pdfOutlineSideDesc":
-    "PDF 的书签列从哪一侧展开。书签列平时收在页面角落的一枚浮动按钮里，点了才出来。",
+    "PDF 的书签列从哪一侧展开。书签列可以随文档打开时自动展开，也可以平时收在页面角落的按钮里，点了才出来。",
+  "settings.pdfOutlineOpen": "默认展开 PDF 书签",
+  "settings.pdfOutlineOpenDesc":
+    "打开带书签的 PDF 时就把书签列展开，而不是先收在角落里。对改动之后打开的文档生效；角落的按钮仍然可以把它收起来。",
   "settings.galleryInterval": "轮播间隔",
   "settings.galleryIntervalDesc": "每张图片停留的秒数，切换后从下一张开始生效。",
   "settings.gallerySeconds": "{n} 秒",

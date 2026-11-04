@@ -252,6 +252,11 @@ pub struct Settings {
   /// Which side the markdown outline takes in preview-only mode: left | right. Right by
   /// default, so the column does not sit against the Explorer.
   pub toc_side: String,
+  /// Open the markdown outline as soon as a document has headings under it, instead of
+  /// leaving it folded into the tab in the corner. Off by default: the column takes width
+  /// from the page, and a document opened to be read should not lose that width until the
+  /// reader asks for the list. Applies when a preview mounts, not to one already on screen.
+  pub toc_open: bool,
   /// Seconds each picture stays on screen in the gallery slideshow. A short list of choices in
   /// the frontend, clamped here so a hand-edited file cannot make the timer absurd.
   pub gallery_interval: u32,
@@ -270,6 +275,11 @@ pub struct Settings {
   /// outline's side because the two are read in different panes — a reader may want the one
   /// against the Explorer and the other away from it.
   pub pdf_outline_side: String,
+  /// Open a PDF's bookmark column as soon as the document has an outline to show, instead of
+  /// leaving it behind the tab in the corner. Off by default, for the same reason as the
+  /// markdown outline: the column takes width, and the tab is always there to ask with. Only
+  /// ever read when a document is opened, so switching it does not move the column on screen.
+  pub pdf_outline_open: bool,
   /// Colour scheme: system | dark | light. `system` follows the OS preference at runtime,
   /// so a machine that switches at dusk does not need the app restarted.
   pub theme: String,
@@ -352,11 +362,13 @@ impl Default for Settings {
       preview_width: "narrow".into(),
       preview_modes: HashMap::new(),
       toc_side: "right".into(),
+      toc_open: false,
       gallery_interval: GALLERY_INTERVAL_DEFAULT_SECONDS,
       gallery_loop: true,
       image_backdrop: IMAGE_BACKDROP_CHECKER.into(),
       pdf_paper: PDF_PAPER_WHITE.into(),
       pdf_outline_side: "right".into(),
+      pdf_outline_open: false,
       theme: "system".into(),
       encrypt_idle_minutes: ENCRYPT_IDLE_DEFAULT_MINUTES,
       versioning_enabled: false,
@@ -590,11 +602,13 @@ impl Settings {
       } else {
         "right".into()
       },
+      toc_open: self.toc_open,
       pdf_outline_side: if SIDES.contains(&self.pdf_outline_side.as_str()) {
         self.pdf_outline_side.clone()
       } else {
         "right".into()
       },
+      pdf_outline_open: self.pdf_outline_open,
       // Same reasoning as the layout above: an unknown theme would leave the frontend with
       // no palette to apply, and an app with no palette is worse than one that ignores it.
       theme: if THEMES.contains(&self.theme.as_str()) {
@@ -2449,6 +2463,28 @@ mod tests {
         "right"
       );
     }
+  }
+
+  /// Both columns stay folded until they are asked for: a settings file that never mentioned
+  /// them must not start opening a column the reader is used to seeing closed, and an explicit
+  /// choice has to survive the trip back from the file.
+  #[test]
+  fn outline_open_flags_start_closed_and_keep_their_choice() {
+    assert!(!Settings::default().toc_open);
+    assert!(!Settings::default().pdf_outline_open);
+    let partial: Settings =
+      serde_json::from_str("{\"fontSize\":16.0}").expect("parse partial settings");
+    let filled = partial.filled();
+    assert!(!filled.toc_open);
+    assert!(!filled.pdf_outline_open);
+    let opened = Settings {
+      toc_open: true,
+      pdf_outline_open: true,
+      ..Default::default()
+    }
+    .filled();
+    assert!(opened.toc_open);
+    assert!(opened.pdf_outline_open);
   }
 
   #[test]

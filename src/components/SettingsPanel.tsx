@@ -845,6 +845,12 @@ export default function SettingsPanel({
                 </select>
               </SettingField>
               <p className="muted">{t("settings.tocSideDesc")}</p>
+              <SettingCheck
+                label={t("settings.tocOpen")}
+                checked={settings.tocOpen}
+                onChange={(v) => onSaveSettings({ tocOpen: v })}
+                description={t("settings.tocOpenDesc")}
+              />
               <SettingField label={t("settings.pdfOutlineSide")}>
                 <select
                   className="select"
@@ -859,6 +865,12 @@ export default function SettingsPanel({
                 </select>
               </SettingField>
               <p className="muted">{t("settings.pdfOutlineSideDesc")}</p>
+              <SettingCheck
+                label={t("settings.pdfOutlineOpen")}
+                checked={settings.pdfOutlineOpen}
+                onChange={(v) => onSaveSettings({ pdfOutlineOpen: v })}
+                description={t("settings.pdfOutlineOpenDesc")}
+              />
               <SettingField label={t("settings.galleryInterval")}>
                 <select
                   className="select"

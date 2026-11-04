@@ -212,10 +212,20 @@ export interface Settings {
    */
   tocSide: string;
   /**
+   * Open the markdown outline as soon as a document has headings under it, rather than leaving
+   * it folded into the tab in the corner. Off by default: the column takes width from the page.
+   */
+  tocOpen: boolean;
+  /**
    * Which side a PDF's bookmark column takes: `left` | `right`. Apart from `tocSide` because the
    * two are read in different panes — a document and a drawing may want opposite edges.
    */
   pdfOutlineSide: string;
+  /**
+   * Open a PDF's bookmark column as soon as the document has an outline, rather than leaving it
+   * behind the tab. Off by default, for the same reason as `tocOpen`.
+   */
+  pdfOutlineOpen: boolean;
   /** Seconds a gallery slideshow keeps one picture on screen, 1 to 60. */
   galleryInterval: number;
   /** After the last picture, the slideshow starts over instead of stopping. */
