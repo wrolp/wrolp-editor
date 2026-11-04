@@ -38,7 +38,7 @@ pub struct DiffText {
 /// `scope` is `workdir` (index → working tree), `index` (HEAD → index) or `commit` (first parent
 /// → that commit, with `rev` naming the commit). `old_path` is the repository path a rename came
 /// from, used only for the left-hand lookup; it is never written to.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_diff(
   app: AppHandle,
   root: String,

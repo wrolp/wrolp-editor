@@ -162,12 +162,15 @@ function gatheredGitFiles(
   // A parent repository can report files that belong to a nested repository as untracked.
   // Those files are the nested repository's business: keep only what the nearest listed
   // repository reports, so a clean nested repository does not colour its files in the Explorer.
+  // Longest first, so the first root that contains a path is the nearest one: with dozens of
+  // repositories and thousands of changed paths, scanning every root per path is what makes the
+  // Explorer draw slowly.
+  const roots = [...repoRoots].sort((a, b) => b.length - a.length);
   const nearestRoot = (path: string): string => {
-    let best = "";
-    for (const root of repoRoots) {
-      if (isUnder(path, root) && root.length > best.length) best = root;
+    for (const root of roots) {
+      if (isUnder(path, root)) return root;
     }
-    return best;
+    return "";
   };
   for (const { root, status } of repos) {
     for (const file of status.files) {

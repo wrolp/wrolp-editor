@@ -1486,6 +1486,12 @@ body.resizing .editor-host {
   cursor: pointer;
   white-space: nowrap;
   color: var(--text);
+  /* Rows far outside the viewport keep their size but skip layout, paint and hit-testing.
+     A folder of ten thousand names still has ten thousand rows; this is what keeps scrolling
+     and hover from paying for all of them. `auto` remembers the height a row actually had,
+     and the fallback is only the first estimate before it has ever been on screen. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 22px;
 }
 /* Hover has to be seen with the pointer on it, not measured afterwards: the background step
    alone was 5 levels of grey (1.07:1 against the sidebar), which reads as nothing at all. The
@@ -5707,6 +5713,8 @@ button.pdf-outline-twist:hover {
 }
 .app[data-density="compact"] .tree-row {
   padding: 2px 12px;
+  /* The compact row is shorter, so the skipped-row estimate has to match it. */
+  contain-intrinsic-size: auto 18px;
 }
 .app[data-density="compact"] .hist-item {
   padding: 5px 14px;

@@ -16,6 +16,25 @@ const SUMMARY_POLL_MS = 5000;
 const SCAN_TTL_MS = 30000;
 /** How many repositories get per-repository status reads for Explorer decorations. */
 const DECORATE_LIMIT = 12;
+/**
+ * How many repository summaries are read at the same time. Each one walks a whole work tree, so a
+ * workspace of dozens of repositories must not launch them all on one tick: the IPC queue would
+ * grow faster than it drains and the window would spend every second inside a status walk.
+ */
+const SUMMARY_CONCURRENCY = 3;
+/**
+ * How many repositories without a reading are picked up per tick, on top of the rows in view.
+ * The list fills in over a few ticks rather than starting every walk at once.
+ */
+const SUMMARY_UNREAD_PER_TICK = 6;
+
+/**
+ * What one summary pass reads: every row, or only the rows worth re-reading every five seconds
+ * (the selected repository and the folder's own / parent one). A long list is read in full once
+ * when it appears and refreshed row by row only where the user is looking; the rest keep the
+ * counts from that first pass until the next scan or refresh button.
+ */
+type SummaryScope = "all" | "live";
 
 interface Options {
   /** The group's folder: what the scan starts from. */
@@ -64,7 +83,8 @@ export interface GitReposController {
   statusByRepo: Map<string, GitStatusView>;
   select(root: string): void;
   rescan(): Promise<void>;
-  refreshSummaries(): Promise<void>;
+  /** `all` re-reads every row; `live` only the rows the five-second poll refreshes. */
+  refreshSummaries(scope?: SummaryScope): Promise<void>;
 }
 
 export function useGitRepos({
@@ -95,6 +115,14 @@ export function useGitRepos({
   const scanningRef = useRef(false);
   const lastScanRef = useRef(0);
   const summaryGen = useRef(0);
+  /** A summary pass is running: the next tick is dropped rather than queued behind it. */
+  const summariesInFlight = useRef(false);
+  /**
+   * Repositories a summary has already been asked for. A failure counts as asked too: a folder
+   * that is gone would otherwise be retried on every tick and never let the list move on. The
+   * explicit rescan and refresh paths read everything again.
+   */
+  const summaryTried = useRef<Set<string>>(new Set());
   /** A manual repository selected before its group write landed in this render. */
   const pendingSelectRef = useRef<string | null>(null);
   const onErrorRef = useRef(onError);
@@ -153,24 +181,77 @@ export function useGitRepos({
     return scanNow();
   }, [scanNow]);
 
-  const refreshSummaries = useCallback(async () => {
+  const refreshSummaries = useCallback(async (scope: SummaryScope = "all") => {
+    // One pass at a time. Reading a work tree can take longer than the poll interval, and a
+    // second pass queued behind it would make the backlog grow for as long as the view is open.
+    if (summariesInFlight.current) return;
     const list = entriesRef.current;
     if (!list.length) return;
+    const full = scope === "all" || list.length <= DECORATE_LIMIT;
+    const selectedKey = selectedRef.current ? pathKey(selectedRef.current) : "";
+    // The rows the user is looking at, plus whichever repositories have no reading yet. Taking a
+    // few of those per tick instead of all of them is what keeps a fifty-repository workspace
+    // from starting fifty work-tree walks the moment the list appears.
+    const inView = (entry: GitRepoEntry) =>
+      entry.source === "root" ||
+      entry.source === "parent" ||
+      pathKey(entry.root) === selectedKey;
+    const targets = full
+      ? list
+      : [
+          ...list.filter(inView),
+          ...list
+            .filter((entry) => !inView(entry) && !summaryTried.current.has(pathKey(entry.root)))
+            .slice(0, SUMMARY_UNREAD_PER_TICK),
+        ];
+    if (!targets.length) return;
+
     const generation = ++summaryGen.current;
-    const results = await Promise.allSettled(
-      list.map((entry) => api.gitRepoSummary(entry.root))
-    );
-    if (generation !== summaryGen.current) return;
+    summariesInFlight.current = true;
     const next = new Map<string, GitRepoSummary>();
     const errors = new Map<string, string>();
-    results.forEach((result, index) => {
-      const entry = list[index];
-      const key = pathKey(entry.root);
-      if (result.status === "fulfilled") next.set(key, result.value);
-      else errors.set(key, typeof result.reason === "string" ? result.reason : errorMessage(result.reason));
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < targets.length) {
+        const entry = targets[cursor];
+        cursor += 1;
+        const key = pathKey(entry.root);
+        try {
+          next.set(key, await api.gitRepoSummary(entry.root));
+        } catch (e) {
+          errors.set(key, typeof e === "string" ? e : errorMessage(e));
+        }
+        // Another folder took over while this pass was reading; the answer would be the old one.
+        if (generation !== summaryGen.current) return;
+      }
+    };
+    try {
+      await Promise.all(
+        Array.from({ length: Math.min(SUMMARY_CONCURRENCY, targets.length) }, worker)
+      );
+    } finally {
+      summariesInFlight.current = false;
+    }
+    if (generation !== summaryGen.current) return;
+    for (const entry of targets) summaryTried.current.add(pathKey(entry.root));
+
+    if (full) {
+      setSummaries(next);
+      setSummaryErrors(errors);
+      return;
+    }
+    // A partial pass only speaks for the rows it read; every other reading stands.
+    setSummaries((previous) => {
+      const merged = new Map(previous);
+      for (const [key, value] of next) merged.set(key, value);
+      return merged;
     });
-    setSummaries(next);
-    setSummaryErrors(errors);
+    setSummaryErrors((previous) => {
+      const merged = new Map(previous);
+      for (const key of next.keys()) merged.delete(key);
+      for (const [key, message] of errors) merged.set(key, message);
+      return merged;
+    });
   }, []);
 
   // A different folder is a different list. Keep the group's manual entries, but drop every
@@ -184,6 +265,9 @@ export function useGitRepos({
     setSummaryErrors(new Map());
     setStatusByRepo(new Map());
     lastScanRef.current = 0;
+    // A pass still reading the old folder must not land on the new one.
+    summaryGen.current += 1;
+    summaryTried.current = new Set();
   }, [rootDir]);
 
   // Scanning reads the disk; do it when a view that shows the list is opened, when the depth
@@ -227,9 +311,11 @@ export function useGitRepos({
   useEffect(() => {
     if (!active || !entries.length) return;
     let alive = true;
+    // Every tick refreshes the rows in view and picks up a few repositories that have no reading
+    // yet, so a long list fills in over several ticks instead of all at once.
     const tick = () => {
       if (!alive) return;
-      void refreshSummaries();
+      void refreshSummaries("live");
     };
     tick();
     const timer = window.setInterval(tick, SUMMARY_POLL_MS);
@@ -248,7 +334,10 @@ export function useGitRepos({
     let timer: number | undefined;
     const onChange = () => {
       window.clearTimeout(timer);
-      timer = window.setTimeout(() => void refreshSummaries(), 300);
+      // The folder the user just touched is under the selected repository or the folder's own
+      // one; re-reading every repository on each create/rename would be the same freeze the
+      // poll is careful about.
+      timer = window.setTimeout(() => void refreshSummaries("live"), 300);
     };
     window.addEventListener("wrolp:folder-changed", onChange);
     return () => {
@@ -263,7 +352,19 @@ export function useGitRepos({
     if (!decorating || !entries.length) return;
     let alive = true;
     let index = 0;
+    // A status read can outlast the interval. Without this the same slow repository would be
+    // asked again every five seconds while the first answer is still on its way.
+    let busy = false;
     const tick = async () => {
+      if (busy) return;
+      busy = true;
+      try {
+        await readOne();
+      } finally {
+        busy = false;
+      }
+    };
+    const readOne = async () => {
       const all = entriesRef.current;
       // A workspace with dozens of repositories should not launch a status read for every one;
       // beyond the limit the Explorer keeps the selected repository (live, from the panel
@@ -299,6 +400,11 @@ export function useGitRepos({
   // Drop readings for repositories that are no longer listed.
   useEffect(() => {
     const keys = new Set(entries.map((entry) => pathKey(entry.root)));
+    // Forget the ones that left as well, so a repository removed and added again is read again
+    // instead of being treated as already answered.
+    for (const key of summaryTried.current) {
+      if (!keys.has(key)) summaryTried.current.delete(key);
+    }
     setStatusByRepo((previous) => {
       if (!previous.size) return previous;
       const next = new Map<string, GitStatusView>();

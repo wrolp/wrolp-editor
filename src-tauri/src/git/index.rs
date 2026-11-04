@@ -17,7 +17,7 @@ use tauri::{AppHandle, State};
 use super::auth::{AuthStore, Identity};
 use super::{conflict_paths, discover, fail, git_path, rel_of, short_oid, signature, GitLocks};
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_stage(
   root: String,
   paths: Vec<String>,
@@ -45,7 +45,7 @@ pub(crate) fn stage(root: &str, paths: &[String], locks: &GitLocks) -> Result<()
   Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_unstage(
   root: String,
   paths: Vec<String>,
@@ -136,7 +136,7 @@ fn staged_renames(repo: &Repository) -> HashMap<String, String> {
 /// Throw away the working-tree side of a change. The staged side is left alone: the panel only
 /// offers this on the unstaged list, and keeping it to one meaning means a user who wanted both
 /// can discard twice with the unstage in between and see what happened.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_discard(
   root: String,
   paths: Vec<String>,
@@ -193,7 +193,7 @@ pub struct CommitResult {
 /// Commit what is staged. Nothing is added on the way: a file the user did not stage stays out,
 /// which is the whole reason the panel has two lists. `amend` replaces the commit at HEAD instead
 /// of adding one on top of it.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_commit(
   app: AppHandle,
   root: String,

@@ -144,7 +144,7 @@ fn remote_name_ok(name: &str) -> bool {
 
 /// Add a remote, or point an existing one at a new URL. Returns the whole list so the panel can
 /// show the result without a second read.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_remote_save(
   root: String,
   name: String,
@@ -189,7 +189,7 @@ pub(crate) fn save_remote(
   list_remotes(repo)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_remote_remove(
   root: String,
   name: String,
@@ -1146,7 +1146,7 @@ fn display_url(url: &str) -> String {
     .unwrap_or_else(|| url.to_string())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_conflict_sides(
   app: AppHandle,
   root: String,
@@ -1335,7 +1335,7 @@ fn conflict_entry(index: &git2::Index, rel: &str) -> Result<bool, String> {
 }
 
 /// Write the merge result over the working copy and mark the path resolved.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_write_resolution(
   app: AppHandle,
   root: String,
@@ -1424,7 +1424,7 @@ pub(crate) fn write_resolution(
 }
 
 /// Remove a file as the resolution (the chosen side does not exist) and mark it resolved.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_delete_resolution(
   root: String,
   path: String,
@@ -1463,7 +1463,7 @@ pub(crate) fn delete_resolution(
 /// Write one side over the working copy and mark the path resolved in the index. `markers`
 /// leaves both texts between conflict markers for hand editing; `ours`/`theirs` take that side
 /// whole. A delete/delete conflict removes the file.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_resolve_conflict(
   root: String,
   path: String,
@@ -1583,7 +1583,7 @@ fn markers(ours: Option<&[u8]>, theirs: Option<&[u8]>) -> Vec<u8> {
   }
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_merge_abort(root: String, locks: State<'_, GitLocks>) -> Result<(), String> {
   merge_abort(&root, &locks)
 }

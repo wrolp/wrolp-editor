@@ -1,4 +1,5 @@
 import {
+  memo,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -135,6 +136,16 @@ const FOLDER_MENU_CARET = 6;
  * across the tree passes a hundred names and means none of them in particular.
  */
 const TIP_DELAY_MS = 500;
+
+/**
+ * How many rows one folder may draw in a single commit.
+ *
+ * A listing of a few thousand names otherwise turns into a few thousand rows in one go: the
+ * commit and layout of that block the window for seconds, which is what reading it as "the
+ * app froze" was. One screenful appears immediately and the rest follows a chunk per frame,
+ * so the rows above stay clickable while the folder fills in.
+ */
+const LEVEL_CHUNK = 200;
 
 /**
  * Two-line tooltip for the file tree: name on top, full path underneath.
@@ -685,13 +696,55 @@ function FolderNode({
 
 function TreeLevel({ entries, depth, ...handlers }: LevelProps) {
   // The rows of this one folder, in the order they are drawn: what a Shift+click selects
-  // between. Built once per listing rather than per row, and passed down explicitly because
-  // it is about this level, not something the handlers above it know.
-  const siblings: NodeTarget[] = entries.map((entry) => ({
-    path: entry.path,
-    name: entry.name,
-    isDir: entry.isDir,
-  }));
+  // between. Built once per listing rather than per row, and passed to every chunk because
+  // a selection spans the rows of the folder, not just the chunk the click landed in.
+  const siblings = useMemo<NodeTarget[]>(
+    () => entries.map((entry) => ({ path: entry.path, name: entry.name, isDir: entry.isDir })),
+    [entries]
+  );
+  // A folder can hold thousands of names. Making a row for every one of them in a single
+  // commit blocks the paint for seconds, so the listing is cut into fixed chunks and each
+  // frame draws one more. Cutting it once is what lets `TreeChunk`'s memo leave the chunks
+  // already on screen alone when another one arrives.
+  const chunks = useMemo(() => {
+    const out: FsEntry[][] = [];
+    for (let start = 0; start < entries.length; start += LEVEL_CHUNK) {
+      out.push(entries.slice(start, start + LEVEL_CHUNK));
+    }
+    return out;
+  }, [entries]);
+  const [drawn, setDrawn] = useState(1);
+  // A re-read can return fewer entries than the one already drawn (a deletion). The counter
+  // has to come back down with it, or the next read would start by drawing everything.
+  useEffect(() => {
+    if (drawn > chunks.length) setDrawn(chunks.length);
+  }, [drawn, chunks.length]);
+  useEffect(() => {
+    if (drawn >= chunks.length) return;
+    const frame = window.requestAnimationFrame(() => setDrawn((n) => n + 1));
+    return () => window.cancelAnimationFrame(frame);
+  }, [drawn, chunks.length]);
+  return (
+    <>
+      {chunks.slice(0, drawn).map((chunk, index) => (
+        <TreeChunk key={index} {...handlers} entries={chunk} depth={depth} siblings={siblings} />
+      ))}
+    </>
+  );
+}
+
+/**
+ * One frame's worth of a listing.
+ *
+ * It is a component of its own so that appending the next chunk does not reconcile the rows
+ * already drawn: their props are the same arrays and callbacks, so `memo` stops right there.
+ */
+const TreeChunk = memo(function TreeChunk({
+  entries,
+  depth,
+  siblings,
+  ...handlers
+}: NodeProps & { entries: FsEntry[]; siblings: NodeTarget[] }) {
   return (
     <>
       {entries.map((entry) =>
@@ -715,7 +768,7 @@ function TreeLevel({ entries, depth, ...handlers }: LevelProps) {
       )}
     </>
   );
-}
+});
 
 interface Props extends Omit<
   TreeHandlers,
@@ -1526,6 +1579,10 @@ export default function Sidebar(props: Props) {
           ) : (
             <>
               <TreeLevel
+                // A different folder is a different listing: remounting resets how much of
+                // it has been drawn, while a refresh of the same folder keeps the rows the
+                // user already had on screen.
+                key={rootDir}
                 entries={entries}
                 depth={0}
                 activePath={activePath}

@@ -134,6 +134,14 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
 
   const rootRef = useRef(rootDir);
   rootRef.current = rootDir;
+  /**
+   * The operation in flight, readable from the poll callback without re-arming the timer. A
+   * status read during a checkout or a commit would ask libgit2 about a work tree being rewritten
+   * under it; when every command ran on the main thread that could not happen, and now that they
+   * run on the runtime the poll has to hold back instead.
+   */
+  const busyRef = useRef<string | null>(null);
+  busyRef.current = busy;
   const statusRef = useRef<GitStatusView | null>(null);
   const logRef = useRef<GitLogEntry[]>([]);
   logRef.current = log;
@@ -145,6 +153,13 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
   remotesRef.current = remotes;
   /** Answers from an older root or an older refresh must not overwrite a newer one. */
   const seq = useRef(0);
+  /**
+   * How many status reads are running. A walk over a large work tree can take longer than the
+   * poll interval; without this the timer would queue another one behind it every five seconds
+   * and the repository would never catch up. A count rather than a flag, because an operation's
+   * own refresh may overlap the poll that was already in flight.
+   */
+  const statusBusy = useRef(0);
   /** The same for the log: a page asked for before a commit must not land after its reload. */
   const logSeq = useRef(0);
   /**
@@ -168,6 +183,7 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
       return;
     }
     setLoading(statusRef.current === null);
+    statusBusy.current += 1;
     try {
       const next = await api.gitStatus(root);
       if (mine !== seq.current) return;
@@ -178,6 +194,7 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
       applyStatus(null);
       setError(typeof e === "string" ? e : errorMessage(e));
     } finally {
+      statusBusy.current -= 1;
       if (mine === seq.current) setLoading(false);
     }
   }, [applyStatus]);
@@ -356,9 +373,11 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
     void loadRemotes();
     void loadAuth();
     const timer = window.setInterval(() => {
-      if (!document.hidden) void refresh();
+      if (!document.hidden && statusBusy.current === 0 && busyRef.current === null) void refresh();
     }, POLL_MS);
-    const onFocus = () => void refresh();
+    const onFocus = () => {
+      if (statusBusy.current === 0 && busyRef.current === null) void refresh();
+    };
     window.addEventListener("focus", onFocus);
     return () => {
       window.clearInterval(timer);

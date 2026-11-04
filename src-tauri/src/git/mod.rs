@@ -8,6 +8,11 @@
 //! One repository per panel: [`discover`] walks up from the group's folder like `git` itself
 //! does. Nested repositories and submodules are not aggregated; a nested repository is shown the
 //! way git shows it, as one changed path.
+//!
+//! Commands that touch the disk are declared `#[tauri::command(async)]`. A blocking command runs
+//! on the main thread, so a single `statuses()` walk over a large work tree freezes the window for
+//! as long as it takes — and a folder holding dozens of repositories is exactly where that walk is
+//! slowest. Network commands are `async fn` around `spawn_blocking` for the same reason.
 
 pub mod auth;
 pub mod branch;
@@ -378,7 +383,7 @@ pub(crate) fn state_name(repo: &Repository) -> String {
   .to_string()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_repo_info(root: String) -> Result<RepoInfo, String> {
   let opened = discover(&root)?;
   Ok(repo_info(&opened, &root))
@@ -386,7 +391,7 @@ pub fn git_repo_info(root: String) -> Result<RepoInfo, String> {
 
 /// Create a repository in the folder the panel is pointed at. The default branch name comes from
 /// git's own `init.defaultBranch`, exactly as `git init` in a terminal would choose it.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_init(root: String) -> Result<(), String> {
   let dir = crate::draft::normalize_path(&root);
   if dir.is_empty() || !Path::new(&dir).is_dir() {

@@ -46,7 +46,7 @@ pub struct CommitFile {
   pub abs: String,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_log(
   root: String,
   limit: Option<u32>,
@@ -204,7 +204,7 @@ fn rank(kind: &str) -> u8 {
 
 /// The paths a commit changed against its first parent. A root commit has no parent to be
 /// compared with, so every path it holds is shown as added.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_commit_files(root: String, rev: String) -> Result<Vec<CommitFile>, String> {
   commit_files(&root, &rev)
 }

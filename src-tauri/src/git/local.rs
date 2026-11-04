@@ -61,19 +61,19 @@ pub struct LocalPathState {
   pub exclude_path: String,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_local_ignore(path: String, locks: State<'_, GitLocks>) -> Result<(), String> {
   local_ignore(&path, &locks)
 }
 
 /// Add a path to the repository's own `.gitignore` — the tracked file, shared with every clone.
 /// `git_local_ignore` is the other half: same pattern, written to `.git/info/exclude` instead.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_repo_ignore(path: String, locks: State<'_, GitLocks>) -> Result<(), String> {
   repo_ignore(&path, &locks)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_local_unignore(
   root: String,
   pattern: String,
@@ -82,7 +82,7 @@ pub fn git_local_unignore(
   local_unignore(&root, &pattern, &locks)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_assume_unchanged(
   root: String,
   paths: Vec<String>,

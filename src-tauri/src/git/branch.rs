@@ -24,7 +24,7 @@ pub struct BranchInfo {
   pub upstream: Option<String>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_branches(root: String) -> Result<Vec<BranchInfo>, String> {
   branches_of(&root)
 }
@@ -70,7 +70,7 @@ pub(crate) fn branches_of(root: &str) -> Result<Vec<BranchInfo>, String> {
   Ok(out)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_create_branch(
   root: String,
   name: String,
@@ -121,7 +121,7 @@ pub(crate) fn create_branch(
   Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_switch_branch(
   root: String,
   name: String,
@@ -192,7 +192,7 @@ fn checkout_remote(repo: &Repository, name: &str) -> Result<(), String> {
   Ok(())
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_delete_branch(
   root: String,
   name: String,

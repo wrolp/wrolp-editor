@@ -1414,7 +1414,10 @@ pub fn clear_draft(app: AppHandle, path: String) -> Result<bool, String> {
 }
 
 /// Directory listing: directories first, then case-insensitive by name.
-#[tauri::command]
+///
+/// Async because a listing is disk work: reading a folder of a few thousand entries used to
+/// run on the main thread, which stalled every other command while the window waited.
+#[tauri::command(async)]
 pub fn list_dir(path: String) -> Result<Vec<FsEntry>, String> {
   const IGNORED: [&str; 4] = ["node_modules", "target", "dist", ".git"];
   let normalized = draft::normalize_path(&path);
@@ -1429,9 +1432,19 @@ pub fn list_dir(path: String) -> Result<Vec<FsEntry>, String> {
     if IGNORED.iter().any(|i| name.eq_ignore_ascii_case(i)) {
       continue;
     }
-    let is_dir = item.path().is_dir();
+    // `file_type` reads the type the directory scan already returned; `path().is_dir()`
+    // asks the disk again, once per entry, and on Windows that was measured at seconds for
+    // a folder of a few thousand files. A symlink is the one case that still needs its
+    // target: `file_type` describes the link itself, while the tree shows a link to a
+    // folder as a folder.
+    let is_dir = match item.file_type() {
+      Ok(t) if t.is_symlink() => item.metadata().map(|m| m.is_dir()).unwrap_or(false),
+      Ok(t) => t.is_dir(),
+      Err(_) => false,
+    };
+    let entry_path = dir.join(&name);
     entries.push(FsEntry {
-      path: item.path().to_string_lossy().to_string(),
+      path: entry_path.to_string_lossy().to_string(),
       name: if is_dir { format!("{name}/") } else { name },
       is_dir,
     });

@@ -981,14 +981,29 @@ fn the_summary_counts_the_same_changes_as_status() {
 ")], &locks()).unwrap();
   write(&fixture, "new.txt", "new
 ");
+  // An ignored path is not a change. The panel carries it so the Explorer can grey it out; the
+  // summary neither reports it nor asks libgit2 to resolve the ignore rules for it.
+  write(&fixture, ".gitignore", "*.log\n");
+  write(&fixture, "debug.log", "noise\n");
 
   let status = status_of(&root(&fixture)).unwrap();
   let summary = summary_of(&root(&fixture)).unwrap();
+  assert!(
+    status.files.iter().any(|file| file.kind == "ignored"),
+    "the panel is the one that reports ignored paths"
+  );
   assert_eq!(summary.staged, status.staged);
   assert_eq!(summary.changed, status.changed);
   assert_eq!(summary.untracked, status.untracked);
   assert_eq!(summary.conflicted, status.conflicted);
-  assert_eq!(summary.files, status.files.len());
+  // Counted against the panel's list minus its ignored entries, which is the lineup the two
+  // numbers have always shared.
+  let changed_paths = status
+    .files
+    .iter()
+    .filter(|file| file.kind != "ignored")
+    .count();
+  assert_eq!(summary.files, changed_paths);
 }
 
 fn merge_branch(repo: &Repository, name: &str) {

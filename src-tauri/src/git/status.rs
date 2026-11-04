@@ -61,7 +61,7 @@ pub struct SummaryView {
   pub files: usize,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_repo_summary(root: String) -> Result<SummaryView, String> {
   summary_of(&root)
 }
@@ -69,7 +69,7 @@ pub fn git_repo_summary(root: String) -> Result<SummaryView, String> {
 pub(crate) fn summary_of(root: &str) -> Result<SummaryView, String> {
   let opened = discover(root)?;
   let info = repo_info(&opened, root);
-  let mut opts = status_options();
+  let mut opts = summary_options();
   let statuses = opened
     .repo
     .statuses(Some(&mut opts))
@@ -117,13 +117,13 @@ pub(crate) fn summary_of(root: &str) -> Result<SummaryView, String> {
   })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn git_status(root: String) -> Result<StatusView, String> {
   status_of(&root)
 }
 
-/// The status options both the panel and the multi-repository summary use. Kept in one place so
-/// the two cannot disagree about what counts as a change.
+/// The status options the panel uses. The summary has its own, below, because it does not need
+/// the ignored paths and that difference is worth money on a large work tree.
 fn status_options() -> StatusOptions {
   let mut opts = StatusOptions::new();
   opts.include_untracked(true)
@@ -136,6 +136,23 @@ fn status_options() -> StatusOptions {
     // A staged rename is cheap to detect and makes the staged list read like `git status`.
     // Working-tree renames are not asked for: they cost a full content comparison on every
     // refresh, and a delete plus an add is an honest answer for a change not staged yet.
+    .renames_head_to_index(true)
+    .renames_index_to_workdir(false);
+  opts
+}
+
+/// The status options a one-line summary uses.
+///
+/// Everything that decides a count is the same as [`status_options`], so the numbers agree. What
+/// is dropped is the ignore handling: a summary counts only changes, it never reports an ignored
+/// path, and asking libgit2 to resolve the ignore rules of every directory costs a walk of the
+/// whole work tree for an answer that is thrown away. A workspace with dozens of repositories
+/// asks for one summary per repository, so this is the option list that matters most.
+fn summary_options() -> StatusOptions {
+  let mut opts = StatusOptions::new();
+  opts.include_untracked(true)
+    .recurse_untracked_dirs(true)
+    .include_ignored(false)
     .renames_head_to_index(true)
     .renames_index_to_workdir(false);
   opts
