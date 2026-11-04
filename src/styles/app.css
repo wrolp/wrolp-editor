@@ -1112,8 +1112,19 @@ body.resizing .editor-host {
   flex: 0 0 auto;
 }
 .side-tab {
-  flex: 1;
-  padding: 6px 4px;
+  /* Sized by its label rather than by an equal share of the strip. A quarter of a 240px sidebar
+     is narrower than 资源管理器, and CJK text breaks between any two characters — an equal
+     share therefore wrapped that label onto two lines instead of the tabs giving it the room.
+     `flex-basis: auto` lets the longest label ask for what it needs; the rest of the strip is
+     shared out evenly. Only a column dragged narrower than its four labels together ellipsizes
+     one, which is the one case where nothing better is on offer. */
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  /* Three rather than four so the four labels still fit at the sidebar's minimum width. */
+  padding: 6px 3px;
   font-size: 11px;
   color: var(--muted);
   background: transparent;
@@ -5672,7 +5683,7 @@ button.pdf-outline-twist:hover {
   padding: 4px 8px;
 }
 .app[data-density="compact"] .side-tab {
-  padding: 4px 4px;
+  padding: 4px 3px;
 }
 .app[data-density="compact"] .side-view {
   padding: 4px 0;
