@@ -1898,6 +1898,50 @@ export default function App() {
   );
 
   /**
+   * The two ends of the strip, as menu entries. Dragging a tab across a long strip is a
+   * gesture that gets harder the more tabs there are, so the ends are also reachable in one
+   * click. Each row is offered only when the tab is not already there: a row that would do
+   * nothing reads as broken.
+   *
+   * Both are shared by the file menu and the one a comparison or the Settings tab opens —
+   * where a tab sits is not a fact about its path.
+   */
+  const moveMenuItems = (tabId: number) => {
+    const index = tabs.tabs.findIndex((tab) => tab.id === tabId);
+    if (index < 0) return null;
+    return (
+      <>
+        {index > 0 && (
+          <div
+            className="ctx-item"
+            onClick={() => {
+              setTabMenu(null);
+              tabs.moveTab(tabId, 0);
+            }}
+          >
+            <span className="ctx-icon">⇤</span>
+            {t("tab.moveFirst")}
+          </div>
+        )}
+        {index < tabs.tabs.length - 1 && (
+          <div
+            className="ctx-item"
+            onClick={() => {
+              setTabMenu(null);
+              // The gap after the last tab, counted with this one still in place — the same
+              // index a drop at the far right of the strip would report.
+              tabs.moveTab(tabId, tabs.tabs.length);
+            }}
+          >
+            <span className="ctx-icon">⇥</span>
+            {t("tab.moveLast")}
+          </div>
+        )}
+      </>
+    );
+  };
+
+  /**
    * The close entries both tab menus share. "Left" and "right" are only offered when something
    * actually sits on that side, so the menu never shows an action that would do nothing.
    */
@@ -3021,6 +3065,7 @@ const defaultModeFor = useCallback(
                   {t("cmp.swap")}
                 </div>
               )}
+              {menuTab && moveMenuItems(menuTab.id)}
               {menuTab && closeMenuItems(menuTab.id)}
             </>
           ) : tabMenu.panel === "root" ? (
@@ -3339,6 +3384,7 @@ const defaultModeFor = useCallback(
                   )}
                 </div>
               ))}
+              {moveMenuItems(tabMenu.tabId)}
               {closeMenuItems(tabMenu.tabId)}
             </>
           ) : (
