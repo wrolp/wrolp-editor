@@ -70,6 +70,8 @@ function sizeLabel(bytes: number): string {
 const IDLE_MINUTES = [5, 10, 30, 60, 240, 0];
 
 const WHITESPACE_MODES = ["none", "boundary", "selection", "all", "trailing"] as const;
+/** Where an Explorer name wider than its column loses characters. Middle first: it is the default. */
+const NAME_ELLIPSIS = ["middle", "end"] as const;
 /** `auto` last: it is the fallback that decides by file type, not a layout of its own. */
 const PREVIEW_LAYOUTS = ["text", "split", "preview", "auto"] as const;
 const PREVIEW_WIDTHS = ["narrow", "wide", "full"] as const;
@@ -659,6 +661,20 @@ export default function SettingsPanel({
                 />
               </SettingField>
               <p className="muted">{t("settings.expandFoldersDesc")}</p>
+              <SettingField label={t("settings.explorerEllipsis")}>
+                <select
+                  className="select"
+                  value={settings.explorerNameEllipsis}
+                  onChange={(e) => onSaveSettings({ explorerNameEllipsis: e.target.value })}
+                >
+                  {NAME_ELLIPSIS.map((option) => (
+                    <option key={option} value={option}>
+                      {t(`settings.explorerEllipsis.${option}`)}
+                    </option>
+                  ))}
+                </select>
+              </SettingField>
+              <p className="muted">{t("settings.explorerEllipsisDesc")}</p>
             </div>
             <div className="setting-group">
               <h3>{t("settings.groupEditor")}</h3>

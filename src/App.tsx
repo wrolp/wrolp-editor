@@ -191,6 +191,9 @@ const DEFAULT_SETTINGS: Settings = {
   // 12 px is what the file tree was pinned at before this was a setting, so the sidebar looks the
   // same on the first run of a new build and only changes when somebody asks for a different size.
   sidebarFont: 12,
+  // A long name keeps both ends by default: the end of a file name is where the extension is,
+  // and the old end-only cut put the extension off screen first.
+  explorerNameEllipsis: "middle",
   // Follow the OS on a fresh install, so a Chinese Windows opens in Chinese without a visit to
   // Settings; the stored value stays "system" rather than the language it resolved to.
   language: "system",
@@ -2614,6 +2617,9 @@ const defaultModeFor = useCallback(
           visible={sidebarShown}
           width={sidebarWidth}
           fontSize={settings.sidebarFont}
+          // The stored value is normalized by the backend; anything else falls back to the
+          // default here rather than reaching the tree as a third, unhandled mode.
+          nameEllipsis={settings.explorerNameEllipsis === "end" ? "end" : "middle"}
           view={sidebarView}
           rootDir={rootDir}
           expandFolders={settings.expandFolders}

@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -48,6 +49,7 @@ import {
   type VersionSummary,
 } from "../lib/tauri";
 import { basename, isUnder, isUntitled } from "../lib/path";
+import { cutMiddle, type NameEllipsis } from "../lib/nameEllipsis";
 import { pathKey, type GitMark, type SidebarView } from "../lib/types";
 import { useMenuPlacement } from "../hooks/useMenuPlacement";
 
@@ -190,6 +192,47 @@ function TreeTooltip({ children, name, detail }: TipProps) {
 }
 
 /**
+ * The name of a row, shortened where it is wider than the row.
+ *
+ * `end` is plain CSS: the name is handed over whole and `text-overflow` draws the ellipsis at
+ * the right edge. `middle` cannot be done in CSS — it needs the row's measured width and the
+ * measured width of the text — so it is computed here, and again whenever either changes:
+ * the sidebar is resized, the text size is changed, or another row takes width away.
+ */
+function NameText({ name, mode }: { name: string; mode: NameEllipsis }) {
+  const ref = useRef<HTMLSpanElement>(null);
+
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const fit = () => {
+      // `end`, and any row whose width is not known yet, is the stylesheet's own
+      // `text-overflow`: the name is written out whole and the browser draws the ellipsis.
+      // A width of 0 means the row is outside the viewport and skipped (`content-visibility`),
+      // and cutting every one of those down to the ellipsis would be worse than the full name.
+      const width = mode === "middle" ? el.getBoundingClientRect().width : 0;
+      const next = width > 1 ? cutMiddle(el, name, width - 1) : name;
+      // Written straight to the node rather than through state: a row is not a view that
+      // needs re-rendering, and an observer callback that sets state repaints the whole row
+      // a frame later — for a name that was already on screen.
+      if (el.textContent !== next) el.textContent = next;
+    };
+    fit();
+    if (mode !== "middle") return;
+    const observer = new ResizeObserver(fit);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [name, mode]);
+
+  // The whole name is what React owns; the cut text is written over it by the effect above.
+  return (
+    <span ref={ref} className="tn">
+      {name}
+    </span>
+  );
+}
+
+/**
  * The name of a tree row, or the input that stands in for it while that row is renamed.
  *
  * The text being typed lives here rather than in the sidebar: one row edits at a time, and
@@ -200,12 +243,15 @@ function TreeTooltip({ children, name, detail }: TipProps) {
 function RowName({
   editing,
   name,
+  mode = "middle",
   placeholder,
   onCommit,
   onCancel,
 }: {
   editing: boolean;
   name: string;
+  /** How a name wider than the row is shortened. Unused while it is being edited. */
+  mode?: NameEllipsis;
   /** Shown in place of the name while an empty input waits to be filled in. */
   placeholder?: string;
   onCommit: (name: string) => Promise<boolean>;
@@ -222,7 +268,7 @@ function RowName({
     if (editing) setValue(current);
   }, [editing, current]);
 
-  if (!editing) return <span className="tn">{current}</span>;
+  if (!editing) return <NameText name={current} mode={mode} />;
 
   const submit = () => {
     if (busy.current) return;
@@ -267,6 +313,8 @@ function RowName({
 
 interface TreeHandlers {
   activePath: string | null;
+  /** Where a name too wide for its row is cut: both ends (`middle`) or the end (`end`). */
+  nameEllipsis: NameEllipsis;
   onOpenPath: (path: string) => void;
   /** Opens a side-by-side comparison between this file and another one. */
   onCompare: (path: string) => void;
@@ -373,6 +421,7 @@ function FileRow({
   entry,
   depth,
   activePath,
+  nameEllipsis,
   onOpenPath,
   renaming,
   onRename,
@@ -432,6 +481,7 @@ function FileRow({
         <RowName
           editing={editing}
           name={entry.name}
+          mode={nameEllipsis}
           onCommit={(name) =>
             onRename({ path: entry.path, name: entry.name, isDir: false }, name)
           }
@@ -574,6 +624,7 @@ function FolderNode({
           <RowName
             editing={editing}
             name={entry.name}
+            mode={handlers.nameEllipsis}
             onCommit={(name) =>
               onRename({ path: entry.path, name: entry.name, isDir: true }, name)
             }
@@ -690,6 +741,8 @@ interface Props extends Omit<
    * The panel's chrome — tabs, buttons, tooltips — keeps its own sizes.
    */
   fontSize: number;
+  /** Where a tree row's name is cut when the column cannot hold it: both ends, or the end. */
+  nameEllipsis: NameEllipsis;
   view: SidebarView;
   rootDir: string | null;
   history: HistoryEntry[];
@@ -775,6 +828,7 @@ export default function Sidebar(props: Props) {
     visible,
     width,
     fontSize,
+    nameEllipsis,
     view,
     rootDir,
     history,
@@ -1475,6 +1529,7 @@ export default function Sidebar(props: Props) {
                 entries={entries}
                 depth={0}
                 activePath={activePath}
+                nameEllipsis={nameEllipsis}
                 onOpenPath={onOpenPath}
                 onCompare={onCompare}
                 expandLimit={expandLimit}

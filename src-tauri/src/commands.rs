@@ -157,6 +157,11 @@ pub struct Settings {
   /// Defaults to the 12 px the tree was pinned at before this existed, so installing the build
   /// changes nothing until somebody moves the number.
   pub sidebar_font: f64,
+  /// How a name too wide for the Explorer's column is cut: `middle` keeps both ends and puts the
+  /// ellipsis between them, `end` keeps the head and lets the name run out at the right edge.
+  /// Middle by default, because the end of a file name is where the extension sits and, for a
+  /// long name, usually the half that tells two files apart.
+  pub explorer_name_ellipsis: String,
   /// UI language code: "en", "zh" or "system" (follow the OS). Anything else is stored as "en",
   /// so a hand-edited or removed language never leaves the interface without a table.
   pub language: String,
@@ -318,6 +323,7 @@ impl Default for Settings {
       sidebar_view: "explorer".into(),
       sidebar_width: 240.0,
       sidebar_font: 12.0,
+      explorer_name_ellipsis: "middle".into(),
       language: "system".into(),
       restore_session: true,
       compare_reuse_tab: true,
@@ -374,6 +380,8 @@ const SIDEBAR_MAX_WIDTH: f64 = 640.0;
 /// rather than recognised by shape; the high end is where the tree stops fitting its own column.
 const SIDEBAR_FONT_MIN: f64 = 11.0;
 const SIDEBAR_FONT_MAX: f64 = 20.0;
+/// Where a name too wide for the Explorer's column loses its characters: the middle, or the end.
+const NAME_ELLIPSIS: [&str; 2] = ["middle", "end"];
 /// The automatic save is off by default, so this is only the pause a fresh install starts with once
 /// somebody turns it on: long enough that typing is not interrupted by a write every other second,
 /// short enough that leaving the window for a coffee saves the file anyway.
@@ -459,6 +467,13 @@ impl Settings {
         self.sidebar_font.clamp(SIDEBAR_FONT_MIN, SIDEBAR_FONT_MAX)
       } else {
         12.0
+      },
+      // A hand-edited value that names neither end reads as the default rather than as the end:
+      // this is the one the setting ships with, so it is the one a stale string should mean.
+      explorer_name_ellipsis: if NAME_ELLIPSIS.contains(&self.explorer_name_ellipsis.as_str()) {
+        self.explorer_name_ellipsis.clone()
+      } else {
+        "middle".into()
       },
       // A fresh install follows the OS; a value this build does not know — hand-edited, or a
       // language that was removed — reads as English rather than leaving the UI to guess.
@@ -2611,6 +2626,30 @@ mod tests {
     );
   }
 
+  #[test]
+  fn explorer_name_ellipsis_is_one_of_the_two_modes() {
+    assert_eq!(Settings::default().explorer_name_ellipsis, "middle");
+    assert_eq!(
+      Settings {
+        explorer_name_ellipsis: "end".into(),
+        ..Default::default()
+      }
+      .filled()
+      .explorer_name_ellipsis,
+      "end"
+    );
+    // A hand-edited value is not a third mode: it falls back to the one the setting ships with.
+    assert_eq!(
+      Settings {
+        explorer_name_ellipsis: "clip".into(),
+        ..Default::default()
+      }
+      .filled()
+      .explorer_name_ellipsis,
+      "middle"
+    );
+  }
+
   /// An older settings.json has no restoreSession key at all; that must not read as
   /// "the user turned session restore off".
   #[test]
@@ -2632,6 +2671,9 @@ mod tests {
     assert_eq!(s.line_ending, "lf");
     // The sidebar text of an existing install keeps the 12 px the tree was pinned at.
     assert_eq!(s.sidebar_font, 12.0);
+    // A name too long for the column was cut at the end before this was a choice; the new
+    // default keeps both ends, and nobody who never opens the setting gets the old behaviour.
+    assert_eq!(s.explorer_name_ellipsis, "middle");
     // And a file it saves keeps the whitespace it was written with until somebody asks otherwise.
     assert!(!s.trim_trailing_whitespace);
     assert!(!s.insert_final_newline);
