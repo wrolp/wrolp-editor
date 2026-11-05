@@ -141,7 +141,7 @@ export default function TabBar({
 }: Props) {
   const barRef = useRef<HTMLDivElement>(null);
   /** One bubble for the whole strip: a tab passes its id when the pointer rests on it. */
-  const { tip, show: showTip, hide: hideTip } = useHoverTip<number>();
+  const { tip, show: showTip, hide: hideTip } = useHoverTip<number>("below");
   /**
    * Drag state for reordering. The strip is not rearranged while the pointer moves: doing
    * that changes which tab sits under the cursor mid-gesture, so the strip keeps swapping

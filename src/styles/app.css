@@ -1253,7 +1253,8 @@ body.resizing .editor-host {
 .tree-tip {
   position: fixed;
   z-index: 120;
-  /* Below the row: a tooltip above the pointer covers the item being pointed at. */
+  /* The anchor decides where the bubble hangs; this is only the breath between the two.
+     A bubble flush with its anchor reads as part of it instead of as a note about it. */
   transform: translateY(3px);
   max-width: 420px;
   padding: 6px 9px;
@@ -1267,7 +1268,7 @@ body.resizing .editor-host {
   gap: 2px;
 }
 /* Near the right edge there is no room to the right, so the bubble hangs off the
-   cursor's right side instead of being clipped by the window. */
+   cursor's other side instead of being clipped by the window. */
 .tree-tip.align-end {
   transform: translateY(3px) translateX(-100%);
 }

@@ -148,8 +148,8 @@ const LEVEL_CHUNK = 200;
  *
  * A native `title` attribute cannot do this — it renders one unstyled string in an
  * OS-drawn bubble, so the path would end up on the same line and could not be dimmed.
- * Hence the overlay. It sits below the row unconditionally: a tooltip above the cursor
- * covers the very thing being pointed at, and the tree reserves room at the bottom.
+ * Hence the overlay. It hangs beside the cursor, clear of the pointer: a bubble placed at
+ * the pointer's own position leaves the arrow sitting on the first characters of the name.
  */
 function TreeTooltip({ children, name, detail }: TipProps) {
   const { tip, show, hide } = useHoverTip();
