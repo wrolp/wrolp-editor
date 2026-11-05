@@ -1174,6 +1174,29 @@ body.resizing .editor-host {
 .side-view.active {
   display: block;
 }
+/* The Explorer's header — the folder it is showing, the picker and the refresh — stays where
+   it is while the rows scroll under it. Scrolling it away takes the column's way back to the
+   folder bar with it, and the rows are the part with somewhere to go. A column, so the tree is
+   the only thing that shrinks; `overflow: hidden` here, because the view itself no longer
+   scrolls — its scrollbar is the tree's now. */
+.side-view.explorer.active {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.side-view.explorer .side-root,
+.side-view.explorer .side-actions {
+  flex: 0 0 auto;
+}
+.side-view.explorer .tree {
+  flex: 1 1 auto;
+  /* A flex item's automatic minimum is its content, which would grow the column instead of
+     scrolling it. Both axes are named for the same reason `.side-view` names one: a scroll
+     container cannot keep the other axis `visible`. */
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
 .side-view .empty {
   color: var(--muted);
   font-size: 12px;
@@ -5584,6 +5607,7 @@ button.pdf-outline-twist:hover {
    a `*` reset. */
 .sidebar,
 .side-view,
+.side-view .tree,
 .settings-content,
 .settings-side,
 .tab-dropdown,
@@ -5598,6 +5622,7 @@ button.pdf-outline-twist:hover {
 }
 .sidebar::-webkit-scrollbar,
 .side-view::-webkit-scrollbar,
+.side-view .tree::-webkit-scrollbar,
 .settings-content::-webkit-scrollbar,
 .settings-side::-webkit-scrollbar,
 .tab-dropdown::-webkit-scrollbar,
@@ -5612,6 +5637,7 @@ button.pdf-outline-twist:hover {
 }
 .sidebar::-webkit-scrollbar-track,
 .side-view::-webkit-scrollbar-track,
+.side-view .tree::-webkit-scrollbar-track,
 .settings-content::-webkit-scrollbar-track,
 .settings-side::-webkit-scrollbar-track,
 .tab-dropdown::-webkit-scrollbar-track,
@@ -5626,6 +5652,7 @@ button.pdf-outline-twist:hover {
 }
 .sidebar::-webkit-scrollbar-thumb,
 .side-view::-webkit-scrollbar-thumb,
+.side-view .tree::-webkit-scrollbar-thumb,
 .settings-content::-webkit-scrollbar-thumb,
 .settings-side::-webkit-scrollbar-thumb,
 .tab-dropdown::-webkit-scrollbar-thumb,
@@ -5644,6 +5671,7 @@ button.pdf-outline-twist:hover {
 /* Only the hovered panel brightens, so a screenful of panels stays quiet. */
 .sidebar:hover::-webkit-scrollbar-thumb,
 .side-view:hover::-webkit-scrollbar-thumb,
+.side-view:hover .tree::-webkit-scrollbar-thumb,
 .settings-content:hover::-webkit-scrollbar-thumb,
 .settings-side:hover::-webkit-scrollbar-thumb,
 .tab-dropdown:hover::-webkit-scrollbar-thumb,

@@ -67,6 +67,7 @@ pub fn run() {
       commands::save_draft,
       commands::clear_draft,
       commands::list_dir,
+      commands::dir_stamps,
       gallery::list_images,
       commands::allow_asset_dir,
       commands::render_diagram,

@@ -130,6 +130,19 @@ interface TipProps {
 /** `.folder-menu`'s CSS width. The panel is placed by hand, so the number is needed twice. */
 const FOLDER_MENU_WIDTH = 260;
 
+/**
+ * How often the folders on screen are asked for their stamp. A stamp is one metadata call per
+ * open folder — far cheaper than re-reading a listing — and 1.2 s is short enough that a file
+ * created by another program is already in the tree by the time the user looks back at it.
+ */
+const DIR_POLL_MS = 1200;
+
+/**
+ * Tells the panel that a folder is open on screen, so a change another program makes inside it
+ * can be noticed and only that folder read again. Returns the call that stops watching.
+ */
+type WatchDir = (path: string) => () => void;
+
 /** How tall `.folder-menu`'s caret is, and so how far below the arrow the panel starts. */
 const FOLDER_MENU_CARET = 6;
 
@@ -288,6 +301,11 @@ interface TreeHandlers {
    * sends another one back to the disk.
    */
   refresh: RefreshRequest | null;
+  /**
+   * An open folder tells the panel it is on screen, so a change made inside it by another
+   * program can be noticed and only that folder read again. Returns the call that stops.
+   */
+  watchDir: WatchDir;
   /** Changed paths by `pathKey`, drawn as a one-letter badge on the row. */
   gitMarks: ReadonlyMap<string, GitMark>;
   /** How many changed paths sit under each folder, by `pathKey`. */
@@ -502,6 +520,14 @@ function FolderNode({
     handlers.onFold(key, false);
   }, [naming, collapsed, key, handlers.onFold]);
 
+  // An open folder is the only kind a change outside the app can make wrong: it has rows on
+  // screen, and those rows are a reading of the disk that may no longer hold. Closing it
+  // unregisters — the rows go with it, and opening it again reads the disk afresh.
+  useEffect(() => {
+    if (collapsed) return;
+    return handlers.watchDir(entry.path);
+  }, [collapsed, entry.path, handlers.watchDir]);
+
   useEffect(() => {
     // `>=` and not `===`: a listing read for a later counter than this folder has been asked
     // for is still current, and re-reading it would be work for no newer answer.
@@ -714,6 +740,7 @@ interface Props extends Omit<
   | "onRenameEnd"
   | "refreshed"
   | "refresh"
+  | "watchDir"
   | "creating"
   | "onCreate"
   | "onCreateEnd"
@@ -914,6 +941,20 @@ export default function Sidebar(props: Props) {
   const [refresh, setRefresh] = useState<RefreshRequest | null>(null);
   /** Only ever counts up: a folder compares tokens with `>=`, which is what needs that. */
   const refreshSeq = useRef(0);
+  /**
+   * The folders on screen, by path, with the stamp last read for each.
+   *
+   * `null` means "no reading yet": the folder has just been opened, or the app itself has just
+   * re-read it. The next stamp becomes the baseline instead of counting as a change — otherwise
+   * every listing the app writes would be followed by a second read of its own making.
+   */
+  const watchedDirs = useRef(new Map<string, number | null>());
+  const watchDir = useCallback<WatchDir>((path) => {
+    watchedDirs.current.set(path, null);
+    return () => {
+      watchedDirs.current.delete(path);
+    };
+  }, []);
   // 0 means "collapse everything", which is what having the setting off has to mean: a
   // negative or missing depth would otherwise expand the top level by accident.
   const expandLimit = props.expandFolders ? Math.max(1, Math.floor(props.expandDepth)) : 0;
@@ -1070,6 +1111,9 @@ export default function Sidebar(props: Props) {
     const token = ++refreshSeq.current;
     setRefreshed((prev) => ({ ...prev, [pathKey(dir)]: token }));
     setRefresh({ path: dir, token });
+    // What is about to be read becomes the folder's new baseline, so the poll does not report
+    // this read's own change back as if another program had made it.
+    if (watchedDirs.current.has(dir)) watchedDirs.current.set(dir, null);
     // A gallery tab is not part of the tree, so it cannot be bumped directly. The folder name
     // is enough for it to decide whether the change was inside what it is showing.
     window.dispatchEvent(
@@ -1304,6 +1348,77 @@ export default function Sidebar(props: Props) {
     // ever counts up, so these do not re-run for a refresh aimed somewhere else in the tree.
   }, [rootDir, onError, view, rootToken]);
 
+  /**
+   * `bumpFolder` through a ref: the poll below must not restart every time the tree re-renders,
+   * and the function it calls is rebuilt on each of those.
+   */
+  const bumpRef = useRef(bumpFolder);
+  bumpRef.current = bumpFolder;
+
+  // The tree of another folder is another set of open folders: the ones registered against the
+  // old root went with it.
+  useEffect(() => {
+    watchedDirs.current.clear();
+  }, [rootDir]);
+
+  /**
+   * Keep the open folders honest about the disk.
+   *
+   * A directory's own stamp moves when an entry inside it is created, removed or renamed, so
+   * one metadata call per open folder is enough to notice a file that appeared or went behind
+   * the app's back — a `git checkout`, another program's save, a terminal `rm`. Only the
+   * folders on screen are asked about: a folded folder has no rows to correct, and re-reading
+   * the whole tree on a timer is how a sidebar becomes a source of disk load.
+   *
+   * The rows that changed are re-read through the same path the refresh button uses, so the
+   * expansion and the folders below stay exactly as the user left them.
+   */
+  useEffect(() => {
+    if (!visible || view !== "explorer" || !rootDir) return;
+    // The root is a listing like any other but has no folder row of its own, so nothing else
+    // registers it.
+    if (!watchedDirs.current.has(rootDir)) watchedDirs.current.set(rootDir, null);
+    let alive = true;
+    let reported = false;
+    const tick = async () => {
+      const paths = [...watchedDirs.current.keys()];
+      if (paths.length === 0) return;
+      // A folder that cannot be read answers 0, which is a change like any other: the re-read
+      // is what makes a row disappear once its folder is gone.
+      const stamps = await api.dirStamps(paths).catch((e: unknown) => {
+        // Worth saying once: without this the feature simply does nothing, and a silent
+        // no-op is the hardest kind of bug to report. The usual cause is a build whose
+        // backend predates the command.
+        if (!reported) {
+          reported = true;
+          console.warn("explorer: folder stamps unavailable", e);
+        }
+        return null;
+      });
+      if (!alive || !stamps) return;
+      for (const stamp of stamps) {
+        const seen = watchedDirs.current.get(stamp.path);
+        // Closed while the answer was on its way: nothing on screen to correct.
+        if (seen === undefined) continue;
+        watchedDirs.current.set(stamp.path, stamp.mtime);
+        if (seen !== null && seen !== stamp.mtime) bumpRef.current(stamp.path);
+      }
+    };
+    const timer = window.setInterval(() => {
+      // A window nobody is looking at has no rows to correct.
+      if (!document.hidden) void tick();
+    }, DIR_POLL_MS);
+    // Coming back to the window is the moment a stale tree is most likely to be looked at, so
+    // the next reading is taken right away rather than up to a poll later.
+    const onFocus = () => void tick();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [visible, view, rootDir]);
+
   // Rows of another folder are not rows of this one, so a selection does not outlive a change
   // of what the tree is showing. The history's own selection dies on the same boundary: a
   // bulk remove aimed at the list must not stay armed once the list is off screen.
@@ -1421,7 +1536,9 @@ export default function Sidebar(props: Props) {
 
       {view === "explorer" && (
       <div
-        className={`side-view${view === "explorer" ? " active" : ""}`}
+        // `explorer` rather than only `active`: this is the one view with a header of its own
+        // above the rows, and the stylesheet pins that header and scrolls the tree instead.
+        className={`side-view explorer${view === "explorer" ? " active" : ""}`}
         ref={viewHost}
         // Every part of the Explorer answers a right-click with the tree's own menu: the
         // path bar, the buttons and the blank space below the rows alike. The browser's menu
@@ -1605,6 +1722,7 @@ export default function Sidebar(props: Props) {
                 onCreateEnd={() => setCreating(null)}
                 refreshed={refreshed}
                 refresh={refresh}
+                watchDir={watchDir}
                 folded={folded.current}
                 onFold={rememberFold}
                 gitMarks={props.gitMarks}

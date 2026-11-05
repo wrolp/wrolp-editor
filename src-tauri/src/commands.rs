@@ -1553,6 +1553,44 @@ pub fn list_dir(path: String) -> Result<Vec<FsEntry>, String> {
   Ok(entries)
 }
 
+/// When each folder last changed, as the filesystem reports it.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DirStamp {
+  pub path: String,
+  /// Milliseconds since the Unix epoch, or 0 when the folder cannot be read.
+  pub mtime: u64,
+}
+
+/// Modification stamps for a set of folders, in the order they were asked for.
+///
+/// A directory's own stamp moves when an entry inside it is created, removed or renamed, and
+/// does not move when a file's contents change — which is exactly the question the Explorer
+/// asks: are the names on screen still the names on disk? Reading a folder does not touch its
+/// stamp, so asking on a timer cannot make the answer chase itself.
+///
+/// A folder that cannot be read answers 0: deleted, renamed away, or on a drive that was
+/// unplugged. The tree reads that like any other change and re-reads the folder, which is how
+/// a row for something that is gone disappears.
+///
+/// Async for the same reason `list_dir` is: this is disk work, and a folder on a disconnected
+/// network share can take seconds to fail.
+#[tauri::command(async)]
+pub fn dir_stamps(paths: Vec<String>) -> Vec<DirStamp> {
+  paths
+    .into_iter()
+    .map(|path| {
+      let mtime = std::fs::metadata(draft::normalize_path(&path))
+        .and_then(|meta| meta.modified())
+        .ok()
+        .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|since| since.as_millis() as u64)
+        .unwrap_or(0);
+      DirStamp { path, mtime }
+    })
+    .collect()
+}
+
 #[tauri::command]
 pub fn get_history(app: AppHandle) -> Result<Vec<HistoryEntry>, String> {
   Ok(read_json::<Vec<HistoryEntry>>(&app, "history.json")?.unwrap_or_default())
@@ -2819,6 +2857,39 @@ mod tests {
     let dir = std::env::temp_dir().join(format!("wrolp-{}-{}", name, std::process::id()));
     std::fs::create_dir_all(&dir).expect("temp dir");
     dir
+  }
+
+  /// The Explorer's poll asks one question per open folder: has anything in here changed?
+  /// A folder's own stamp has to move for an entry appearing or going, and stay put when the
+  /// folder is only being read — otherwise the tree would refresh forever.
+  #[test]
+  fn dir_stamps_move_for_element_changes_only() {
+    let dir = scratch_dir("dir-stamps");
+    let path = dir.to_string_lossy().to_string();
+    std::fs::write(dir.join("seed.txt"), b"seed").expect("seed");
+    let first = dir_stamps(vec![path.clone()]);
+    assert_eq!(first.len(), 1);
+    assert!(first[0].mtime > 0);
+
+    // Reading the listing is not a change to it.
+    list_dir(path.clone()).expect("list");
+    assert_eq!(dir_stamps(vec![path.clone()])[0].mtime, first[0].mtime);
+
+    // A new entry is, and so is a removed one. The sleep is only there so a filesystem with a
+    // coarse clock cannot answer the same number twice by accident.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    std::fs::write(dir.join("added.txt"), b"x").expect("add");
+    let added = dir_stamps(vec![path.clone()])[0].mtime;
+    assert_ne!(added, first[0].mtime);
+
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    std::fs::remove_file(dir.join("added.txt")).expect("remove");
+    assert_ne!(dir_stamps(vec![path.clone()])[0].mtime, added);
+
+    // A folder that is not there answers 0 rather than failing the whole call.
+    let gone = dir.join("gone");
+    assert_eq!(dir_stamps(vec![gone.to_string_lossy().to_string()])[0].mtime, 0);
+    std::fs::remove_dir_all(&dir).ok();
   }
 
   #[test]

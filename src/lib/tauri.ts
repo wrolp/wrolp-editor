@@ -63,6 +63,12 @@ export interface FsEntry {
   isDir: boolean;
 }
 
+/** A folder's own modification time, epoch milliseconds; 0 when it cannot be read. */
+export interface DirStamp {
+  path: string;
+  mtime: number;
+}
+
 /** One picture in a gallery listing. Metadata only; the image itself is read by the webview. */
 export interface ImageEntry {
   name: string;
@@ -912,6 +918,12 @@ export const api = {
   removeEncryption: (path: string, password: string) =>
     invoke<SavedFile>("remove_encryption", { path, password }),
   listDir: (path: string) => invoke<FsEntry[]>("list_dir", { path }),
+  /**
+   * One modification stamp per folder, in the order asked for. The Explorer holds a folder's
+   * stamp between polls: a different number means an entry inside it was created, removed or
+   * renamed, and the listing on screen is worth reading again. 0 means the folder is gone.
+   */
+  dirStamps: (paths: string[]) => invoke<DirStamp[]>("dir_stamps", { paths }),
   /**
    * Pictures in a folder, files only and in natural order (`IMG_2` before `IMG_10`).
    * A recursive listing walks up to four levels and skips `node_modules`/`target`/`dist`/`.git`.
