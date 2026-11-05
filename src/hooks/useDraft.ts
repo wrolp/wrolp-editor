@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { api, errorMessage } from "../lib/tauri";
 import { isUntitled } from "../lib/path";
 
@@ -23,7 +23,13 @@ export interface DraftWriter {
 export function useDraft(onError: (message: string) => void): DraftWriter {
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const pending = useRef(new Map<string, PendingEntry>());
+  /**
+   * The write in flight for each path, and the generation of the write that last queued it.
+   * Writes for one path are chained rather than run side by side: two overlapping save_draft
+   * calls could land in either order, and the older text would be the one kept on disk.
+   */
   const writing = useRef(new Map<string, Promise<void>>());
+  const writeGen = useRef(new Map<string, number>());
 
   const write = useCallback(
     (path: string): Promise<void> => {
@@ -33,24 +39,36 @@ export function useDraft(onError: (message: string) => void): DraftWriter {
         timers.current.delete(path);
       }
       const entry = pending.current.get(path);
+      // Nothing new to write: still wait for the write already on its way, so a caller that
+      // flushes before reading the file sees the result of both.
       if (!entry) return writing.current.get(path) ?? Promise.resolve();
       pending.current.delete(path);
 
-      const inFlight = (async () => {
-        try {
-          if (isUntitled(path) || entry.content === entry.original) {
-            await api.clearDraft(path);
-          } else {
-            await api.saveDraft(path, entry.content, entry.cursor);
+      const generation = (writeGen.current.get(path) ?? 0) + 1;
+      writeGen.current.set(path, generation);
+      const previous = writing.current.get(path) ?? Promise.resolve();
+      const next = previous
+        .catch(() => undefined)
+        .then(async () => {
+          try {
+            if (isUntitled(path) || entry.content === entry.original) {
+              await api.clearDraft(path);
+            } else {
+              await api.saveDraft(path, entry.content, entry.cursor);
+            }
+          } catch (e) {
+            onError(errorMessage(e));
+          } finally {
+            // Only the last write queued for this path may clear the entry: a newer one has
+            // already replaced it, and dropping that promise would let a flush miss it.
+            if (writeGen.current.get(path) === generation) {
+              writeGen.current.delete(path);
+              writing.current.delete(path);
+            }
           }
-        } catch (e) {
-          onError(errorMessage(e));
-        } finally {
-          writing.current.delete(path);
-        }
-      })();
-      writing.current.set(path, inFlight);
-      return inFlight;
+        });
+      writing.current.set(path, next);
+      return next;
     },
     [onError]
   );
@@ -68,7 +86,11 @@ export function useDraft(onError: (message: string) => void): DraftWriter {
   const flush = useCallback((path: string) => write(path), [write]);
 
   const flushAll = useCallback(async () => {
-    await Promise.all([...pending.current.keys()].map((path) => write(path)));
+    // Pending and in-flight both have to be waited for: a path whose debounce already fired
+    // has no pending entry left, but its write is exactly the one a quit or a switch must not
+    // cut through.
+    const paths = new Set<string>([...pending.current.keys(), ...writing.current.keys()]);
+    await Promise.all([...paths].map((path) => write(path)));
   }, [write]);
 
   const forget = useCallback((path: string) => {
@@ -87,5 +109,8 @@ export function useDraft(onError: (message: string) => void): DraftWriter {
     []
   );
 
-  return { schedule, flush, flushAll, forget };
+  return useMemo(
+    () => ({ schedule, flush, flushAll, forget }),
+    [schedule, flush, flushAll, forget]
+  );
 }

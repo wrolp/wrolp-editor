@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { api, errorMessage, type Group, type GroupStore } from "../lib/tauri";
 import { rekeyPath } from "../lib/path";
 import { applySnapshot, newGroupId, sameName, type LiveSnapshot } from "../lib/group";
@@ -54,20 +54,32 @@ export function useGroups({ onError }: Options): GroupStoreCommitter {
   const timer = useRef<number | undefined>(undefined);
   // Serialize writes: two overlapping save_groups calls would race on one file.
   const writing = useRef<Promise<void>>(Promise.resolve());
+  /**
+   * Bumped on every local change of the store. A write that comes back while this has moved
+   * describes an older state than the one on screen, so its answer must not be adopted.
+   */
+  const rev = useRef(0);
+  /** Which read is the latest one, so an older `getGroups` cannot land on a newer call. */
+  const loadGen = useRef(0);
 
   const write = useCallback(
     (next: GroupStore) => {
       storeRef.current = next;
       setStore(next);
+      const at = ++rev.current;
       writing.current = writing.current
         .catch(() => undefined)
         .then(() =>
           api
             .saveGroups(next)
-            // The backend cleans and re-times the store, so its answer is the new truth.
+            // The backend cleans and re-times the store, so its answer is the new truth — but
+            // only while no edit landed in between. Adopting it otherwise would replace the
+            // newer snapshot with this older one.
             .then((saved) => {
+              if (rev.current !== at) return;
               storeRef.current = saved;
               setStore(saved);
+              rev.current += 1;
             })
             .catch((e) => onError(errorMessage(e)))
         );
@@ -84,6 +96,9 @@ export function useGroups({ onError }: Options): GroupStoreCommitter {
       }
       storeRef.current = next;
       setStore(next);
+      // A debounced edit is still a local change: a write already in flight must not adopt its
+      // older answer over this one when it returns.
+      rev.current += 1;
       window.clearTimeout(timer.current);
       timer.current = window.setTimeout(() => write(storeRef.current), DEBOUNCE_MS);
     },
@@ -91,9 +106,16 @@ export function useGroups({ onError }: Options): GroupStoreCommitter {
   );
 
   const load = useCallback(async () => {
+    const gen = (loadGen.current += 1);
+    const at = rev.current;
     const s = await api.getGroups();
+    // Two ways the answer can be stale: a newer load was asked for after this one, or the
+    // store changed locally while the read was in flight. Either way what came back describes
+    // an older moment and adopting it would undo newer state.
+    if (gen !== loadGen.current || rev.current !== at) return storeRef.current;
     storeRef.current = s;
     setStore(s);
+    rev.current += 1;
     return s;
   }, []);
 
@@ -303,27 +325,50 @@ export function useGroups({ onError }: Options): GroupStoreCommitter {
     [schedule]
   );
 
-  return {
-    store,
-    load,
-    commit,
-    flush,
-    active,
-    snapshotStore,
-    replace,
-    create,
-    select,
-    setRoot,
-    setGitRoots,
-    setGitSelected,
-    adoptRoot,
-    rename,
-    isNameTaken,
-    rekeyPaths,
-    rekeyPathsMany,
-    clearContents,
-    remove,
-  };
+  return useMemo(
+    () => ({
+      store,
+      load,
+      commit,
+      flush,
+      active,
+      snapshotStore,
+      replace,
+      create,
+      select,
+      setRoot,
+      setGitRoots,
+      setGitSelected,
+      adoptRoot,
+      rename,
+      isNameTaken,
+      rekeyPaths,
+      rekeyPathsMany,
+      clearContents,
+      remove,
+    }),
+    [
+      store,
+      load,
+      commit,
+      flush,
+      active,
+      snapshotStore,
+      replace,
+      create,
+      select,
+      setRoot,
+      setGitRoots,
+      setGitSelected,
+      adoptRoot,
+      rename,
+      isNameTaken,
+      rekeyPaths,
+      rekeyPathsMany,
+      clearContents,
+      remove,
+    ]
+  );
 }
 
 export type { LiveSnapshot };

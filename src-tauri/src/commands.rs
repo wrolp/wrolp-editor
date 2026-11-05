@@ -8,7 +8,7 @@ use crate::unlock::UnlockStore;
 use crate::window::{MonitorRect, Placement, WindowState};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{AppHandle, Manager, State};
@@ -58,16 +58,16 @@ pub(crate) fn is_binary_content(bytes: &[u8]) -> bool {
 /// Whether a path can be handed to the OS's default app. Split out of the command so the
 /// checks (but not the actual launch) are unit-testable.
 fn check_openable(raw: &str) -> Result<PathBuf, String> {
-  let path = draft::normalize_path(raw);
-  if path.is_empty() {
+  if draft::normalize_path(raw).is_empty() {
     return Err("path_empty".into());
   }
-  let file = Path::new(&path);
-  let meta = std::fs::metadata(file).map_err(|e| format!("file_access:{e}"))?;
+  // The OS opens the path as it is spelled on disk, not its lowercased identity.
+  let path = PathBuf::from(draft::io_path(raw));
+  let meta = std::fs::metadata(&path).map_err(|e| format!("file_access:{e}"))?;
   if !meta.is_file() {
     return Err("file_not_file".into());
   }
-  Ok(PathBuf::from(path))
+  Ok(path)
 }
 /// Name used before a group was understood as a named set of tabs rather than a folder.
 const LEGACY_GROUPS_FILE: &str = "workspaces.json";
@@ -668,10 +668,15 @@ pub(crate) fn read_json<T: for<'de> Deserialize<'de>>(
 /// Replace `path` with `bytes` without ever leaving a half-written file behind:
 /// the whole payload goes to a sibling temp file first, then gets renamed over the target.
 ///
+/// The temp file is flushed to the disk before the rename. Without that, the rename can be
+/// durable while the bytes it points at are not, which is the one way this strategy still
+/// loses a file after a power cut — and for an encrypted container that is a lost document,
+/// not a damaged one. Whatever goes wrong, the temp file is removed instead of being left
+/// beside the target for the next attempt to trip over.
+///
 /// Nothing is deleted on the way. `rename` replaces an existing file on Windows (std passes
 /// `MOVEFILE_REPLACE_EXISTING`), so removing the target first would only open a window in
-/// which the file does not exist at all — and for an encrypted document a crash inside that
-/// window is not a damaged file to be repaired by hand, it is a lost one.
+/// which the file does not exist at all.
 pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
   // `.tmp` is appended rather than swapped in for the extension: `with_extension` would turn
   // `notes.md` and `notes.txt` into the same temp file in the same directory.
@@ -682,8 +687,26 @@ pub(crate) fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
       .map(|n| n.to_string_lossy())
       .unwrap_or_default()
   ));
-  std::fs::write(&tmp, bytes).map_err(|e| format!("tmp_write:{e}"))?;
-  std::fs::rename(&tmp, path).map_err(|e| format!("tmp_replace:{e}"))
+  {
+    // The same `tmp_write` prefix a failed write uses: the caller only needs "the temp file
+    // could not be produced", and the historical error code stays recognizable.
+    let mut file = std::fs::File::create(&tmp).map_err(|e| format!("tmp_write:{e}"))?;
+    if let Err(e) = file.write_all(bytes) {
+      drop(file);
+      let _ = std::fs::remove_file(&tmp);
+      return Err(format!("tmp_write:{e}"));
+    }
+    if let Err(e) = file.sync_all() {
+      drop(file);
+      let _ = std::fs::remove_file(&tmp);
+      return Err(format!("tmp_sync:{e}"));
+    }
+  }
+  if let Err(e) = std::fs::rename(&tmp, path) {
+    let _ = std::fs::remove_file(&tmp);
+    return Err(format!("tmp_replace:{e}"));
+  }
+  Ok(())
 }
 
 pub(crate) fn write_json<T: Serialize>(
@@ -724,19 +747,22 @@ pub(crate) struct SourceFile {
 }
 
 pub(crate) fn read_source(raw: &str) -> Result<SourceFile, String> {
+  // Two spellings, two jobs: `path` is the identity every store and comparison uses, `file`
+  // is what the filesystem is actually asked to open. Lowercasing the latter would miss a
+  // real file in a case-sensitive directory.
   let path = draft::normalize_path(raw);
   if path.is_empty() {
     return Err("path_empty".into());
   }
-  let file = Path::new(&path);
-  let meta = std::fs::metadata(file).map_err(|e| format!("file_access:{e}"))?;
+  let file = PathBuf::from(draft::io_path(raw));
+  let meta = std::fs::metadata(&file).map_err(|e| format!("file_access:{e}"))?;
   if !meta.is_file() {
     return Err("file_not_file".into());
   }
   if meta.len() > MAX_FILE_BYTES {
     return Err(format!("file_too_large:{}", meta.len() / (1024 * 1024)));
   }
-  let bytes = std::fs::read(file).map_err(|e| format!("file_read:{e}"))?;
+  let bytes = std::fs::read(&file).map_err(|e| format!("file_read:{e}"))?;
   Ok(SourceFile { path, meta, bytes })
 }
 
@@ -746,11 +772,10 @@ pub(crate) fn read_source(raw: &str) -> Result<SourceFile, String> {
 /// answer has to be cheap because drafting happens while the user types. `None` when there
 /// is no file at that path, which for a save is a first write rather than an error.
 fn read_head(raw: &str) -> Result<Option<Vec<u8>>, String> {
-  let normalized = draft::normalize_path(raw);
-  if normalized.is_empty() {
+  if draft::normalize_path(raw).is_empty() {
     return Err("path_empty".into());
   }
-  let mut file = match std::fs::File::open(Path::new(&normalized)) {
+  let mut file = match std::fs::File::open(Path::new(&draft::io_path(raw))) {
     Ok(f) => f,
     Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
     Err(e) => return Err(format!("file_read:{e}")),
@@ -886,7 +911,7 @@ fn read_range(path: &str, begin: u64, end: u64) -> Result<Vec<u8>, String> {
   Ok(bytes)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_file(
   app: AppHandle,
   state: State<'_, UnlockStore>,
@@ -954,7 +979,7 @@ pub fn open_file(
 /// editor cannot read (too large, undecodable, a foreign container) and for any file the user
 /// would rather hand to something else. The path is validated here; the webview's `open-path`
 /// capability stays scoped to the three config folders, so this is the only way out.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_in_system(path: String) -> Result<(), String> {
   let file = check_openable(&path)?;
   tauri_plugin_opener::open_path(&file, None::<&str>).map_err(|e| format!("open_system:{e}"))
@@ -968,14 +993,15 @@ pub fn open_in_system(path: String) -> Result<(), String> {
 /// "there is no file there" is an answer the caller can act on, while a failure to *look* —
 /// a share that is not answering, a permission that is not granted — is not, and is still an
 /// error so the caller keeps what it already has rather than inventing a change.
-#[tauri::command]
-pub fn stat_file(path: String) -> Result<Option<FileStat>, String> {
-  let normalized = draft::normalize_path(&path);
+pub(crate) fn file_stat(raw: &str) -> Result<Option<FileStat>, String> {
+  let normalized = draft::normalize_path(raw);
   if normalized.is_empty() {
     return Err("path_empty".into());
   }
-  let file = Path::new(&normalized);
-  let meta = match std::fs::metadata(file) {
+  // Stat the spelling on disk, report the identity: the caller compares identities, and a
+  // case-sensitive directory would not find the lowercased one.
+  let file = PathBuf::from(draft::io_path(raw));
+  let meta = match std::fs::metadata(&file) {
     Ok(m) => m,
     // Deleted, moved, or never written: what the tab was built on is gone.
     Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
@@ -992,6 +1018,45 @@ pub fn stat_file(path: String) -> Result<Option<FileStat>, String> {
   }))
 }
 
+#[tauri::command(async)]
+pub fn stat_file(path: String) -> Result<Option<FileStat>, String> {
+  file_stat(&path)
+}
+
+/// One answer per requested path, so a path that could not be looked at is kept apart from a
+/// path that is genuinely gone. The batch exists because a sweep of every open tab used to
+/// mean one IPC round-trip per file; a single failure no longer has to swallow the others.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StatResult {
+  pub path: String,
+  pub stat: Option<FileStat>,
+  /// The reason this one path could not be looked at, if any.
+  pub error: Option<String>,
+}
+
+#[tauri::command(async)]
+pub fn stat_files(paths: Vec<String>) -> Vec<StatResult> {
+  paths
+    .into_iter()
+    .map(|path| {
+      let normalized = draft::normalize_path(&path);
+      match file_stat(&path) {
+        Ok(stat) => StatResult {
+          path: normalized,
+          stat,
+          error: None,
+        },
+        Err(error) => StatResult {
+          path: normalized,
+          stat: None,
+          error: Some(error),
+        },
+      }
+    })
+    .collect()
+}
+
 /// The stored settings, cleaned. Missing file is a clean first run, not an error.
 pub(crate) fn settings_of(app: &AppHandle) -> Settings {
   read_json::<Settings>(app, "settings.json")
@@ -1001,12 +1066,25 @@ pub(crate) fn settings_of(app: &AppHandle) -> Settings {
     .unwrap_or_default()
 }
 
-/// The configured encoding, for callers that were not handed one.
+/// The encoding a save must name explicitly.
+///
+/// `auto` answers "what is this file", not "what should it be written as". Taking it as UTF-8
+/// on the write side is exactly how a GB18030 or BOM file gets silently converted by a save
+/// that was meant to write it back unchanged. A caller that cannot name the encoding has a
+/// bug, and an error is better than a conversion nobody asked for.
+pub(crate) fn write_encoding(raw: Option<String>) -> Result<String, String> {
+  match raw.map(|choice| choice.trim().to_string()) {
+    Some(choice) if !choice.is_empty() && !choice.eq_ignore_ascii_case("auto") => Ok(choice),
+    _ => Err("encoding_required".into()),
+  }
+}
+
+/// The configured encoding, for callers that read rather than write.
 pub(crate) fn stored_encoding(app: &AppHandle) -> String {
   settings_of(app).encoding
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_file(
   app: AppHandle,
   state: State<'_, UnlockStore>,
@@ -1019,7 +1097,9 @@ pub fn save_file(
   if normalized.is_empty() {
     return Err("path_empty".into());
   }
-  let file = Path::new(&normalized);
+  // Write where the file really lives, not at its lowercased identity. On a case-sensitive
+  // directory those are two different files, and the identity one would be a new one.
+  let file = PathBuf::from(draft::io_path(&path));
   if let Some(parent) = file.parent() {
     std::fs::create_dir_all(parent).map_err(|e| format!("dir_create:{e}"))?;
   }
@@ -1030,17 +1110,17 @@ pub fn save_file(
   if read_head(&normalized)?.is_some_and(|head| crypto::is_container(&head)) {
     return save_container(&app, &state, &normalized, &content);
   }
-  // Write back in the encoding the file was read in, so a legacy file stays legacy.
-  let target = match encoding.filter(|e| !e.trim().is_empty()) {
-    Some(choice) => choice,
-    None => stored_encoding(&app),
-  };
+  // Write back in the encoding the file was read in, so a legacy file stays legacy. The
+  // choice has to be named: "auto" describes how to read a file, not how to write one.
+  let target = write_encoding(encoding)?;
   let written = crate::encoding::encode(&content, &target, bom.unwrap_or(false))?;
   if written.len() as u64 > MAX_FILE_BYTES {
     return Err(format!("file_too_large:{}", written.len() / (1024 * 1024)));
   }
-  std::fs::write(file, &written).map_err(|e| format!("file_write:{e}"))?;
-  let mtime = std::fs::metadata(file).map(|m| mtime_ms(&m)).unwrap_or(0);
+  // Same strategy as a container: a cut-short plain file is recoverable, but there is no
+  // reason to expose the window at all when an atomic replace costs only a temp file.
+  write_atomic(&file, &written)?;
+  let mtime = std::fs::metadata(&file).map(|m| mtime_ms(&m)).unwrap_or(0);
   push_history_entry(&app, &normalized)?;
   Ok(SavedFile {
     path: normalized,
@@ -1076,10 +1156,11 @@ fn save_container(
     state.remove(normalized);
   }
   let written = written?;
-  write_atomic(Path::new(normalized), &written)?;
-  let mtime = std::fs::metadata(normalized)
-    .map(|m| mtime_ms(&m))
-    .unwrap_or(0);
+  // `normalized` is the key the cached key is filed under; the file itself is opened and
+  // replaced at the spelling the filesystem reported.
+  let file = PathBuf::from(draft::io_path(normalized));
+  write_atomic(&file, &written)?;
+  let mtime = std::fs::metadata(&file).map(|m| mtime_ms(&m)).unwrap_or(0);
   push_history_entry(app, normalized)?;
   Ok(SavedFile {
     path: normalized.to_string(),
@@ -1172,7 +1253,7 @@ fn fold_case(path: &Path) -> PathBuf {
 /// Called with the folder of each image a document references, so the grant covers the
 /// picture and its siblings rather than a fixed subtree. Every folder that is refused
 /// here stays unreachable no matter how many `..` segments a document uses.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn allow_asset_dir(app: AppHandle, dir: String) -> Result<(), String> {
   let normalized = draft::normalize_path(&dir);
   let path = Path::new(&normalized);
@@ -1196,7 +1277,7 @@ pub(crate) const EXPORT_MAX_BYTES: u64 = 64 * 1024 * 1024;
 /// image's directory to the asset protocol for the preview, so the same scope is the lock
 /// here — an export cannot turn into a "read any file" back door, and it reads nothing the
 /// preview could not have shown anyway.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn read_export_asset(app: AppHandle, path: String) -> Result<String, String> {
   let normalized = draft::normalize_path(&path);
   let file = Path::new(&normalized);
@@ -1215,7 +1296,7 @@ pub fn read_export_asset(app: AppHandle, path: String) -> Result<String, String>
 /// Write an exported document (.docx, .pdf) to disk. Base64 rather than a byte array because
 /// the invoke payload is JSON and a number array for a few megabytes is both slow and bloated.
 /// The file is written atomically so a failed export never leaves a half-written document.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn write_export(path: String, data: String) -> Result<(), String> {
   use base64::Engine as _;
   let bytes = base64::engine::general_purpose::STANDARD
@@ -1366,7 +1447,7 @@ fn strip_xml_preamble(svg: &str) -> String {
 }
 
 /// Overrides for one file; every field absent means "follow the global default".
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_file_settings(
   app: AppHandle,
   path: String,
@@ -1374,7 +1455,7 @@ pub fn get_file_settings(
   crate::file_settings::get(&app, &path)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_file_settings(
   app: AppHandle,
   path: String,
@@ -1384,7 +1465,7 @@ pub fn save_file_settings(
 }
 
 /// Back to the global defaults for this file.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn clear_file_settings(app: AppHandle, path: String) -> Result<(), String> {
   crate::file_settings::clear(&app, &path)
 }
@@ -1394,7 +1475,7 @@ pub fn clear_file_settings(app: AppHandle, path: String) -> Result<(), String> {
 /// A sealed draft of a locked file also answers `None`, and deliberately stays on disk: it
 /// is not broken, only unreadable until the file is unlocked, and the edits in it come back
 /// at that point.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_draft(
   app: AppHandle,
   state: State<'_, UnlockStore>,
@@ -1410,7 +1491,7 @@ pub fn get_draft(
 /// runs in the background while the user types, so that is not reported as an error: a
 /// dialog about something nobody asked for is noise, and saving the document itself fails
 /// loudly, so no text is lost without the user being told.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_draft(
   app: AppHandle,
   state: State<'_, UnlockStore>,
@@ -1422,7 +1503,7 @@ pub fn save_draft(
   draft::save(&app, &path, &content, cursor, key)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn clear_draft(app: AppHandle, path: String) -> Result<bool, String> {
   draft::clear(&app, &path)
 }

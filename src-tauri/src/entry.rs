@@ -99,7 +99,7 @@ pub(crate) fn new_entry_path(
 ///
 /// The file starts empty: it is a file the user asked to exist, not one with anything in it,
 /// and an editor that invented content would be writing text nobody typed.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_file(parent: String, name: String) -> Result<FsEntry, String> {
   let (path, named) = new_entry_path(&parent, &name, DEFAULT_EXT)?;
   // `create_new` rather than a plain write: it refuses a name that was taken between the
@@ -119,7 +119,7 @@ pub fn create_file(parent: String, name: String) -> Result<FsEntry, String> {
 }
 
 /// Create a folder inside `parent`.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_dir(parent: String, name: String) -> Result<FsEntry, String> {
   let named = check_name(&name).map_err(name_error)?;
   let path = target_of(&parent, &named)?;
@@ -205,7 +205,7 @@ fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
 /// The copy lands beside whatever else is there rather than replacing it, which is why the
 /// name it ends up with is the answer this returns: the caller shows the real name, so a
 /// paste that had to be numbered is not a surprise found later.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn copy_entry(source: String, target: String) -> Result<FsEntry, String> {
   let from = draft::normalize_path(&source);
   let dir = draft::normalize_path(&target);
@@ -290,7 +290,7 @@ pub struct ClipboardPaste {
 /// copy a folder into itself. One source that cannot be taken does not stop the rest — the
 /// count comes back so the caller can say what happened — but when nothing lands, the first
 /// reason is the error, because that is the one worth showing.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn paste_clipboard_files(target: String) -> Result<ClipboardPaste, String> {
   let dir = draft::normalize_path(&target);
   if dir.is_empty() {
@@ -340,7 +340,7 @@ fn name_at(path: &Path) -> String {
 ///
 /// Nothing is replaced here either: a second file kept under a name that is already parked
 /// takes the next free spelling, the same way a paste does.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn keep_file(
   app: AppHandle,
   path: String,
@@ -355,11 +355,9 @@ pub fn keep_file(
     .ok_or("keep_no_name")?;
   let target = free_name(&dir, &name)?;
   // The same encoding the file was read in, for the same reason a save uses it: a legacy
-  // file kept as UTF-8 would be garbage to every other tool that opens it.
-  let chosen = match encoding.filter(|e| !e.trim().is_empty()) {
-    Some(choice) => choice,
-    None => commands::stored_encoding(&app),
-  };
+  // file kept as UTF-8 would be garbage to every other tool that opens it. It has to be
+  // named, too — "auto" is a way to read a file, not a way to write one.
+  let chosen = commands::write_encoding(encoding)?;
   let written = crate::encoding::encode(&content, &chosen, bom.unwrap_or(false))?;
   if written.len() as u64 > commands::MAX_FILE_BYTES {
     return Err(format!("file_too_large:{}", written.len() / (1024 * 1024)));
@@ -386,7 +384,7 @@ pub fn keep_file(
 ///
 /// Nothing is moved and nothing is copied, so this cannot be taken back from inside the app
 /// and does not reach the Recycle Bin. That is the whole reason the frontend asks first.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn remove_entry(app: AppHandle, path: String) -> Result<(), String> {
   let target = draft::normalize_path(&path);
   if target.is_empty() {

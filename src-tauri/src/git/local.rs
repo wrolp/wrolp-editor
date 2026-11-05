@@ -297,7 +297,7 @@ fn is_skip_worktree(entry: &IndexEntry) -> bool {
 
 pub(crate) fn local_ignore(path: &str, locks: &GitLocks) -> Result<(), String> {
   let opened = discover_at(path)?;
-  let _guard = locks.acquire(opened.repo.commondir())?;
+  let _guard = locks.acquire(&opened.workdir)?;
   let rel = rel_of(&opened.workdir, path)?;
   let rel_text = git_path(&rel);
   let is_dir = opened.workdir.join(&rel).is_dir();
@@ -331,7 +331,7 @@ pub(crate) fn local_ignore(path: &str, locks: &GitLocks) -> Result<(), String> {
 
 pub(crate) fn repo_ignore(path: &str, locks: &GitLocks) -> Result<(), String> {
   let opened = discover_at(path)?;
-  let _guard = locks.acquire(opened.repo.commondir())?;
+  let _guard = locks.acquire(&opened.workdir)?;
   let rel = rel_of(&opened.workdir, path)?;
   let is_dir = opened.workdir.join(&rel).is_dir();
   let index = opened.repo.index().map_err(|e| fail("index", e))?;
@@ -358,7 +358,7 @@ pub(crate) fn local_unignore(root: &str, pattern: &str, locks: &GitLocks) -> Res
     return Err("git_pattern_invalid".into());
   }
   let opened = discover(root)?;
-  let _guard = locks.acquire(opened.repo.commondir())?;
+  let _guard = locks.acquire(&opened.workdir)?;
   remove_pattern(&exclude_path(&opened), pattern)
 }
 

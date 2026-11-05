@@ -153,7 +153,23 @@ fn lexically_normalize(path: &Path) -> PathBuf {
 /// filesystem is case-insensitive. Falls back to lexical absolutization when the
 /// file does not exist yet (e.g. a "Save as" destination).
 pub fn normalize_path(raw: &str) -> String {
-  normalize_to(raw, cfg!(windows))
+  normalize_to(raw, cfg!(windows), false)
+}
+
+/// The spelling a file is actually opened at.
+///
+/// [`normalize_path`] answers "which file is this", and lowercases on Windows because the
+/// filesystem there compares names without case. That answer is the wrong one to hand to
+/// `File::open` on a directory with case sensitivity turned on (WSL mounts, per-directory
+/// sensitivity in NTFS): the file on disk is `Report.txt`, the identity is `report.txt`,
+/// and opening the identity fails — or a save creates a second lowercase file beside the
+/// original.
+///
+/// So this keeps the spelling the filesystem reported, and keeps the verbatim prefix that
+/// canonicalization adds: that prefix is also what lets a path past the old 260-character
+/// limit be opened at all. Only identity keys and comparisons use [`normalize_path`].
+pub(crate) fn io_path(raw: &str) -> String {
+  normalize_to(raw, false, true)
 }
 
 /// The same normalization with the case kept, for a path that is shown to a person rather
@@ -161,10 +177,10 @@ pub fn normalize_path(raw: &str) -> String {
 /// spellings of one file stay one entry; the case-preserving form is what lets a stored
 /// name read like the file it names.
 pub(crate) fn normalize_path_preserved(raw: &str) -> String {
-  normalize_to(raw, false)
+  normalize_to(raw, false, false)
 }
 
-fn normalize_to(raw: &str, lowercase: bool) -> String {
+fn normalize_to(raw: &str, lowercase: bool, keep_verbatim: bool) -> String {
   let trimmed = raw.trim().trim_matches('"').trim_matches('\'');
   if trimmed.is_empty() {
     return String::new();
@@ -181,16 +197,37 @@ fn normalize_to(raw: &str, lowercase: bool) -> String {
     Ok(p) => p,
     Err(_) => lexically_normalize(&absolutized),
   };
-  let text = strip_verbatim(&resolved.to_string_lossy());
+  let resolved_text = resolved.to_string_lossy();
+  let text = if keep_verbatim {
+    resolved_text.into_owned()
+  } else {
+    strip_verbatim(&resolved_text)
+  };
   let text = if cfg!(windows) {
     text.replace('/', "\\")
   } else {
     text
   };
+  let text = if keep_verbatim { long_path(text) } else { text };
   if lowercase {
     text.to_lowercase()
   } else {
     text
+  }
+}
+
+/// Give a path past the 260-character limit the verbatim prefix that makes it usable.
+///
+/// A "Save as" destination does not exist yet, so canonicalization could not add the prefix
+/// that an existing file would have got; without it the write fails on Windows even though
+/// the path is perfectly valid.
+fn long_path(text: String) -> String {
+  if !cfg!(windows) || text.starts_with(r"\\?\") || text.len() <= 260 {
+    return text;
+  }
+  match text.strip_prefix(r"\\") {
+    Some(rest) => format!(r"\\?\UNC\{rest}"),
+    None => format!(r"\\?\{text}"),
   }
 }
 

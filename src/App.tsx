@@ -76,7 +76,6 @@ import { setLang, t } from "./lib/i18n";
 import { parseConflicts } from "./lib/mergeConflicts";
 import {
   basename,
-  dirname,
   isBitmapImage,
   isExecutableExt,
   isHtml,
@@ -112,6 +111,7 @@ import {
   copyText,
   errorMessage,
   listen,
+  parentOf,
   pickFile,
   pickFiles,
   pickFolder,
@@ -467,6 +467,12 @@ export default function App() {
     selectionLines: 0,
     totalChars: 0,
   });
+  /**
+   * Bumped on every buffer change, and the signal the preview text is keyed on. `stats` cannot
+   * serve: it also changes on caret moves, and reading a whole document for each arrow key is
+   * exactly the cost this avoids.
+   */
+  const [contentRev, setContentRev] = useState(0);
   const [menuTarget, setMenuTarget] = useState<MenuTarget | null>(null);
   /** Added/removed lines of the comparison on screen; null for every other tab. */
   const [diffStats, setDiffStats] = useState<DiffStats | null>(null);
@@ -641,12 +647,13 @@ export default function App() {
     for (const file of gatheredGitFiles(repoStatuses, repos.rows.map((row) => row.root), rootDir)) {
       // An ignored path is not a change, so it does not count towards a folder's badge.
       if (file.kind === "ignored") continue;
-      let dir = dirname(file.abs);
+      let dir = parentOf(file.abs);
       while (isUnder(dir, rootDir) && pathKey(dir) !== rootKey) {
         const key = pathKey(dir);
         counts.set(key, (counts.get(key) ?? 0) + 1);
-        const parent = dirname(dir);
-        if (parent === dir) break;
+        const parent = parentOf(dir);
+        // `""` is past the root: a drive root or a share has no parent to count.
+        if (!parent || parent === dir) break;
         dir = parent;
       }
     }
@@ -792,6 +799,12 @@ export default function App() {
 
   // Startup: settings, group session, then files from argv or a second instance.
   const bootStarted = useRef(false);
+  /**
+   * The group store could not be read. The default-group effect must not run then: a failed
+   * read says nothing about whether groups exist, and creating one would write an empty store
+   * over a list that is still on disk.
+   */
+  const groupsUnreadable = useRef(false);
   useEffect(() => {
     if (bootStarted.current) return;
     bootStarted.current = true;
@@ -827,6 +840,7 @@ export default function App() {
 
       const store = await groups.load().catch((e) => {
         toast(errorMessage(e));
+        groupsUnreadable.current = true;
         return null;
       });
       const active = store?.active ? store.items.find((w) => w.id === store.active) ?? null : null;
@@ -949,21 +963,36 @@ export default function App() {
    */
   useEffect(() => {
     if (!booted || groups.store.items.length > 0) return;
+    // A store that could not be read is not an empty store: creating a group here would
+    // overwrite whatever is on disk with a single default one.
+    if (groupsUnreadable.current) return;
     groupsRef.current.create(t("grp.default"), rootRef.current ?? "");
     commitLive(true);
   }, [booted, commitLive, groups.store.items.length]);
 
   // Land the caret where the group remembered, once the model for that tab is attached.
+  // The callback is kept in a ref and only the active tab id is a dependency: the controller
+  // object used to change on every render, which turned this into a ~60fps rAF loop while an
+  // editor was mounted.
+  const applyPendingCursorRef = useRef(tabs.applyPendingCursor);
+  applyPendingCursorRef.current = tabs.applyPendingCursor;
   useEffect(() => {
-    tabs.applyPendingCursor();
+    applyPendingCursorRef.current();
     // The readout only follows Monaco's cursor events, which a model switch may not fire:
     // without this the status bar keeps showing the previous tab's position.
     const raf = requestAnimationFrame(() => {
       const position = editorRef.current?.editor.getPosition();
-      if (position) setCursor({ line: position.lineNumber, column: position.column });
+      if (!position) return;
+      // Same place as before: returning the previous state keeps React from scheduling a
+      // render for a frame that changed nothing.
+      setCursor((prev) =>
+        prev.line === position.lineNumber && prev.column === position.column
+          ? prev
+          : { line: position.lineNumber, column: position.column }
+      );
     });
     return () => cancelAnimationFrame(raf);
-  }, [tabs, tabs.activeId]);
+  }, [tabs.activeId]);
 
   /** Replace the whole tab set with another group's, keeping the outgoing one intact. */
   const switchGroup = useCallback(
@@ -989,6 +1018,49 @@ export default function App() {
         pausedCommit.current = false;
       }
       toast(t("grp.switched", { name: target.name }));
+    },
+    [draft, tabs, toast]
+  );
+
+  /**
+   * Remove a group from the list. Deleting the one on screen runs the same teardown as a
+   * switch: the tabs on screen still belong to the group that is going away, and leaving them
+   * there let the next commit write them into whichever group became active — one group's
+   * files appearing in another.
+   */
+  const removeGroup = useCallback(
+    async (id: string) => {
+      const store = groupsRef.current.store;
+      if (store.active !== id) {
+        groupsRef.current.remove(id);
+        return;
+      }
+      const next = store.items.find((item) => item.id !== id) ?? null;
+      pausedCommit.current = true;
+      try {
+        await draft.flushAll();
+        // Park the outgoing tabs before the record goes, so the store being written stays
+        // coherent for the moment it still exists.
+        groupsRef.current.commit(snapshotOf.current(), true);
+        groupsRef.current.remove(id);
+        tabs.clearAllTabs();
+        if (next) {
+          groupsRef.current.select(next.id);
+          rootRef.current = next.root || null;
+          setRootDir(next.root || null);
+          if (next.tabs.length > 0) {
+            const result = await tabs.restoreTabs(next.tabs, next.active);
+            if (result.skipped > 0) toast(t("grp.skipped", { n: result.skipped }));
+          }
+        } else {
+          // Nothing is left to show; the startup effect makes a default group next time.
+          rootRef.current = null;
+          setRootDir(null);
+        }
+        groupsRef.current.commit(snapshotOf.current(), true);
+      } finally {
+        pausedCommit.current = false;
+      }
     },
     [draft, tabs, toast]
   );
@@ -1755,7 +1827,7 @@ export default function App() {
         setSidebarView("explorer");
         setSidebarVisible(true);
         // A view action only: the folder belongs to the sidebar, not to the group.
-        setSidebarRoot(dirname(path));
+        setSidebarRoot(parentOf(path));
       }
     },
     [menuTabPath, setSidebarRoot, toast]
@@ -2590,15 +2662,27 @@ const defaultModeFor = useCallback(
     return () => cancelAnimationFrame(raf);
   }, [previewMode, showDiff, editorTab?.path]);
 
-  // Preview text is read straight off the model on every render rather than mirrored
-  // into state: `editorRef` is only filled in by `onReady`, which lands after the first
-  // render, so an effect that seeds it would see a null handle and never retry. Reading
-  // the model for the *current* path also avoids a one-frame flash of the previous file.
-  // `setStats` fires on every content change, so this stays in step while typing.
-  const docText = (() => {
-    const handle = editorRef.current;
+  // Preview text is read straight off the model rather than mirrored into state: `editorRef`
+  // is only filled in by `onReady`, which lands after the first render, so an effect that
+  // seeded it would see a null handle and never retry. Reading the model for the *current*
+  // path also avoids a one-frame flash of the previous file.
+  //
+  // Memoized, and only while a pane that draws text is actually showing: App re-renders on
+  // every keystroke, and a bare model.getValue() here would copy the whole document for each
+  // one even with the preview closed. `contentRev` is what says the text may have moved;
+  // `stats` cannot, because caret moves change it too.
+  const needsPreviewText =
+    showPreview &&
+    !showSettings &&
+    !showGallery &&
+    !!editorTab &&
+    (previewKind === "markdown" ||
+      previewKind === "html" ||
+      (previewKind === "image" && isSvg(editorTab.path)));
+  const previewText = useMemo(() => {
     const path = editorTab?.path;
-    if (!path) return "";
+    if (!needsPreviewText || !path) return "";
+    const handle = editorRef.current;
     if (!handle) {
       // The editor can be unmounted (settings tab is showing). Fall back to the tab's
       // baseline content rather than rendering nothing.
@@ -2606,7 +2690,40 @@ const defaultModeFor = useCallback(
     }
     const model = handle.monaco.editor.getModel(handle.monaco.Uri.parse(modelUri(path)));
     return model?.getValue() ?? editorTab?.original ?? "";
-  })();
+  }, [needsPreviewText, editorTab?.path, editorTab?.original, contentRev]);
+
+  /**
+   * A debounced copy of `previewText`. Markdown is re-parsed and an HTML frame is rebuilt
+   * from this, and doing either on every keystroke is what makes typing in a long document
+   * stutter. A different file is shown at once: waiting to switch would look like a hang.
+   */
+  const [docText, setDocText] = useState("");
+  const previewPath = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const path = editorTab?.path;
+    if (!needsPreviewText || !path) {
+      previewPath.current = undefined;
+      // Emptying it on a hidden pane keeps a multi-megabyte string from sitting in state.
+      setDocText("");
+      return;
+    }
+    if (previewPath.current !== path) {
+      previewPath.current = path;
+      setDocText(previewText);
+      return;
+    }
+    const timer = window.setTimeout(() => setDocText(previewText), 300);
+    return () => clearTimeout(timer);
+  }, [needsPreviewText, editorTab?.path, previewText]);
+
+  /** The buffer changed: let the controller do its work and mark the preview text stale. */
+  const onEditorChange = useCallback(
+    (value: string) => {
+      setContentRev((rev) => rev + 1);
+      tabs.onEditorChange(value);
+    },
+    [tabs.onEditorChange]
+  );
 
   return (
     <div
@@ -2630,16 +2747,7 @@ const defaultModeFor = useCallback(
             onNew={() => setNewGroupOpen(true)}
             onRename={groups.rename}
             onClear={(id) => void clearGroup(id)}
-            onRemove={(id) => {
-              const wasActive = id === groups.store.active;
-              groups.remove(id);
-              if (!wasActive) return;
-              // The group on screen changed, so the Explorer follows it — the same folder
-              // rule a deliberate switch uses.
-              const next = groups.store.items.find((g) => g.id !== id) ?? null;
-              rootRef.current = next?.root || null;
-              setRootDir(next?.root || null);
-            }}
+            onRemove={(id) => void removeGroup(id)}
           />
         }
         // The control describes the tab on screen, and the Settings page has no pane for it.
@@ -2812,7 +2920,7 @@ const defaultModeFor = useCallback(
                 detectIndentation={detectIndentation}
                 scrollBeyondLastLine={settings.scrollBeyondLastLine}
               theme={theme}
-                onChange={tabs.onEditorChange}
+                onChange={onEditorChange}
                 onCursor={(position, offset) => {
                   setCursor({ line: position.lineNumber, column: position.column });
                   tabs.onCursorChange(offset);
@@ -2946,7 +3054,7 @@ const defaultModeFor = useCallback(
               text={isSvg(editorTab.path) ? docText : null}
               backdrop={settings.imageBackdrop}
               onSaveBackdrop={(value) => void saveSettings({ imageBackdrop: value })}
-              onBrowseFolder={(path) => void tabs.openGallery(dirname(path), path)}
+              onBrowseFolder={(path) => void tabs.openGallery(parentOf(path), path)}
             />
           )}
 

@@ -53,6 +53,7 @@ pub fn run() {
       commands::read_export_asset,
       commands::write_export,
       commands::stat_file,
+      commands::stat_files,
       commands::save_file,
       rename::rename_path,
       rename::rename_entries,

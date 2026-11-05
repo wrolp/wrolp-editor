@@ -1374,6 +1374,7 @@ export default function Sidebar(props: Props) {
         </button>
       </div>
 
+      {view === "explorer" && (
       <div
         className={`side-view${view === "explorer" ? " active" : ""}`}
         // Every part of the Explorer answers a right-click with the tree's own menu: the
@@ -1587,7 +1588,9 @@ export default function Sidebar(props: Props) {
           )}
         </div>
       </div>
+      )}
 
+      {view === "history" && (
       <div className={`side-view${view === "history" ? " active" : ""}`}>
         {history.length > 0 && (
           <div className="side-actions">
@@ -1658,10 +1661,12 @@ export default function Sidebar(props: Props) {
           })
         )}
       </div>
+      )}
 
       {/* Versions: the active file's timeline opened, everything else folded to one line. The
           list of other files comes from the store's own folders, so it costs no history walk to
           show — which is why it says when a file was last recorded rather than how many times. */}
+      {view === "versions" && (
       <div className={`side-view${view === "versions" ? " active" : ""}`}>
         {activePath && !isUntitled(activePath) ? (
           <div className="ver-current">
@@ -1725,8 +1730,11 @@ export default function Sidebar(props: Props) {
           </>
         )}
       </div>
+      )}
 
-      <div className={`side-view${view === "git" ? " active" : ""}`}>{props.gitPanel}</div>
+      {view === "git" && (
+        <div className={`side-view${view === "git" ? " active" : ""}`}>{props.gitPanel}</div>
+      )}
 
       {menu && (
         <div

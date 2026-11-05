@@ -43,6 +43,13 @@ export interface FileStat {
   bytes: number;
 }
 
+/** One entry of a batch stat: a `null` stat is "gone", an error is "could not look". */
+export interface StatResult {
+  path: string;
+  stat: FileStat | null;
+  error: string | null;
+}
+
 export interface Draft {
   path: string;
   content: string;
@@ -782,6 +789,11 @@ export const api = {
    * answering cannot be read as a change.
    */
   statFile: (path: string) => invoke<FileStat | null>("stat_file", { path }),
+  /**
+   * The same answer for several paths in one round-trip. Every path comes back, in the order
+   * it was asked for, so one unreadable file cannot hide the rest of the sweep.
+   */
+  statFiles: (paths: string[]) => invoke<StatResult[]>("stat_files", { paths }),
   /**
    * Write the text of a file that was deleted while it was open into the folder this app
    * keeps for that, under the name it had.

@@ -168,10 +168,33 @@ export default function HtmlPreview({ text, path, scrollRatio, beyondEnd, onScro
   const token = useMemo(() => Math.random().toString(36).slice(2) + Date.now().toString(36), []);
   /** Set once the frame says it is listening, so a ratio from before then is not lost. */
   const [ready, setReady] = useState(false);
+  /**
+   * Which document the frame is showing. Every new `srcDoc` reloads it, and the bridge in the
+   * fresh page reports its position immediately — a zero that used to arrive while the reader
+   * was typing and scroll the editor back to the top of the document. A ratio is only trusted
+   * once the new page has said it is ready and its single opening report has been discarded.
+   */
+  const generation = useRef(0);
+  const readyRef = useRef(false);
+  const readyFor = useRef(-1);
+  const skipRatios = useRef(0);
   /** A `following` for this side: the editor moved, the page has not reported back yet. */
   const echo = useRef(false);
 
   const source = useMemo(() => buildSource(text, path, token), [text, path, token]);
+
+  /**
+   * A new `srcDoc` means a new document, and that document will announce itself and then
+   * report the position it starts at. That opening report is not where the reader is, and
+   * accepting it dragged the editor to the top of the file a moment after every reload —
+   * which, while typing, looked like the view jumping under the caret.
+   */
+  useEffect(() => {
+    generation.current += 1;
+    readyRef.current = false;
+    skipRatios.current = 0;
+    setReady(false);
+  }, [source]);
 
   useEffect(() => {
     const onMessage = (e: MessageEvent) => {
@@ -184,10 +207,22 @@ export default function HtmlPreview({ text, path, scrollRatio, beyondEnd, onScro
         return;
       }
       if (data.t === "wrolp:ready") {
+        // The page that is now listening belongs to the document just loaded. Its one
+        // opening report is dropped; a ratio after that is a scroll someone made.
+        readyRef.current = true;
+        readyFor.current = generation.current;
+        skipRatios.current = 1;
         setReady(true);
         return;
       }
       if (data.t !== "wrolp:ratio" || echo.current) return;
+      // A report from a document that has been replaced, or from one that never announced
+      // itself, describes a page that is no longer on screen.
+      if (!readyRef.current || readyFor.current !== generation.current) return;
+      if (skipRatios.current > 0) {
+        skipRatios.current -= 1;
+        return;
+      }
       onScrollRatio(data.ratio);
     };
     window.addEventListener("message", onMessage);

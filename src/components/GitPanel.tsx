@@ -109,6 +109,27 @@ function splitPath(path: string): { name: string; dir: string } {
 /** How many actions fit in the header row; the rest move into the overflow menu. */
 const HEAD_ACTIONS = 8;
 
+/** One log row's height. `.git-log-row` in the stylesheet is 22px, and a window needs the number. */
+const LOG_ROW_HEIGHT = 22;
+/** Rows drawn above and below the visible band so a fast wheel does not show blank space. */
+const LOG_OVERSCAN = 5;
+
+/**
+ * The nearest ancestor that scrolls vertically.
+ *
+ * The history is not a scroll container of its own: the sidebar view holding the panel is the
+ * one that scrolls, so the window is worked out inside that element rather than the panel.
+ */
+function scrollHost(el: HTMLElement | null): HTMLElement | null {
+  let node = el?.parentElement ?? null;
+  while (node) {
+    const overflow = getComputedStyle(node).overflowY;
+    if (overflow === "auto" || overflow === "scroll") return node;
+    node = node.parentElement;
+  }
+  return null;
+}
+
 /**
  * One button in the panel header. `anchor` is whatever was clicked, so an action that opens a
  * menu can put it under the control the user actually pressed — the row's button or the "…".
@@ -191,6 +212,11 @@ export default function GitPanel({
   // view still costs nothing.
   const [logOpen, setLogOpen] = useState(true);
   const [logAsked, setLogAsked] = useState(false);
+  /** The slice of the history drawn while no commit is expanded, and the element it starts at. */
+  const [logWindow, setLogWindow] = useState({ start: 0, end: 0 });
+  const logRowsRef = useRef<HTMLDivElement>(null);
+  /** The scrolling sidebar found once, rather than looked up on every scroll event. */
+  const logHostRef = useRef<HTMLElement | null>(null);
   /** The repository whose remote addresses are being edited. */
   const [remotesOpen, setRemotesOpen] = useState(false);
   const [deleteAsk, setDeleteAsk] = useState<string | null>(null);
@@ -292,11 +318,13 @@ export default function GitPanel({
   }, [repoRoot]);
 
   useEffect(() => {
-    if (logOpen && active && git.status && !logAsked) {
+    // A list already in hand is left as it is: the panel is remounted whenever its view is
+    // shown again, and re-reading the first page would throw away the pages already loaded.
+    if (logOpen && active && git.status && !logAsked && git.log.length === 0) {
       setLogAsked(true);
       void git.loadLog();
     }
-  }, [logOpen, active, git.status, logAsked, git.loadLog]);
+  }, [logOpen, active, git.status, logAsked, git.log.length, git.loadLog]);
 
   const status = git.status;
   const stagedFiles = useMemo(
@@ -328,6 +356,58 @@ export default function GitPanel({
         : [],
     [logOpen, git.log]
   );
+
+  /**
+   * Whether the history can be scrolled as a fixed-height window.
+   *
+   * An expanded commit carries file rows of their own, so its section no longer answers to one
+   * row height. That case, and the moment before those rows are known, is drawn whole: the expansion
+   * is the part that has to be exact, and it is a single row rather than the length of the log.
+   */
+  const windowedLog = logOpen && commitOpen === null && !commitFilesLoading && git.log.length > 0;
+
+  /** Work out which rows the scrolling sidebar is showing, from the list's place inside it. */
+  const updateLogWindow = useCallback(() => {
+    const rows = logRowsRef.current;
+    if (!rows) return;
+    const host = logHostRef.current ?? scrollHost(rows);
+    if (!host) return;
+    logHostRef.current = host;
+    const listTop =
+      rows.getBoundingClientRect().top - host.getBoundingClientRect().top + host.scrollTop;
+    const top = Math.max(0, host.scrollTop - listTop);
+    const bottom = Math.max(0, host.scrollTop + host.clientHeight - listTop);
+    const total = git.log.length;
+    const start = Math.max(0, Math.floor(top / LOG_ROW_HEIGHT) - LOG_OVERSCAN);
+    const end = Math.min(total, Math.ceil(bottom / LOG_ROW_HEIGHT) + LOG_OVERSCAN);
+    setLogWindow((current) =>
+      current.start === start && current.end === end ? current : { start, end }
+    );
+  }, [git.log.length]);
+
+  useLayoutEffect(() => {
+    if (!windowedLog || !active) return;
+    const rows = logRowsRef.current;
+    if (!rows) return;
+    const host = scrollHost(rows);
+    if (!host) return;
+    logHostRef.current = host;
+    updateLogWindow();
+    host.addEventListener("scroll", updateLogWindow, { passive: true });
+    window.addEventListener("resize", updateLogWindow);
+    const observer = new ResizeObserver(updateLogWindow);
+    observer.observe(host);
+    return () => {
+      host.removeEventListener("scroll", updateLogWindow);
+      window.removeEventListener("resize", updateLogWindow);
+      observer.disconnect();
+      if (logHostRef.current === host) logHostRef.current = null;
+    };
+  }, [windowedLog, active, updateLogWindow, folded, repoRows.length, repoTruncated, decorateCapped]);
+
+  const logTotal = git.log.length;
+  const logStart = Math.min(logWindow.start, logTotal);
+  const logEnd = Math.min(Math.max(logWindow.end, logStart), logTotal);
 
   const head = status?.repo.head;
   const busy = git.busy !== null;
@@ -610,6 +690,90 @@ export default function GitPanel({
   }, [repoRoot, branchLabel, head?.ahead, head?.behind]);
 
   const errorCode = git.error ? git.error.split(":")[0] : "";
+
+  /** One history row, with its file rows underneath when it is the expanded commit. */
+  const renderLogRow = (entry: GitLogEntry, index: number) => {
+    const open = commitOpen === entry.oid;
+    const row = graphRows[index];
+    return (
+      <div key={entry.oid}>
+        <div
+          className={`git-log-row${open ? " open" : ""}`}
+          title={`${entry.oid}\n${entry.author} · ${formatWhen(entry.time)}${
+            entry.message.trimEnd() ? `\n\n${entry.message.trimEnd()}` : ""
+          }`}
+          onClick={() => void openCommit(entry)}
+          onContextMenu={(event) => {
+            // Taking the event before the row's click handler is what keeps a
+            // right-click from expanding or collapsing the commit as well.
+            event.preventDefault();
+            event.stopPropagation();
+            setCommitMenu({ entry, x: event.clientX, y: event.clientY });
+          }}
+        >
+          {row && (
+            <GraphCell
+              row={row}
+              head={entry.refs.some((ref) => ref.kind === "head")}
+              names={entry.refs.map((ref) => ref.name).join(", ")}
+            />
+          )}
+          <span className="git-log-short">{entry.short}</span>
+          <span className="git-log-summary">
+            {entry.summary || t("git.noMessage")}
+          </span>
+          {entry.refs.length > 0 && (
+            <span className="git-refs">
+              {entry.refs.slice(0, 2).map((ref) => (
+                <span
+                  key={`${ref.kind}:${ref.name}`}
+                  className={`git-ref ${ref.kind}`}
+                  title={ref.name}
+                >
+                  {ref.name}
+                </span>
+              ))}
+              {entry.refs.length > 2 && (
+                <span
+                  className="git-ref more"
+                  title={entry.refs.map((ref) => ref.name).join(", ")}
+                >
+                  +{entry.refs.length - 2}
+                </span>
+              )}
+            </span>
+          )}
+          <span className="git-log-time">{formatWhen(entry.time)}</span>
+          {/* The same instant without the date, for a row whose tip carries names in a narrow
+              sidebar. The full one above is hidden by a container query there; the row's title has
+              it in any case. */}
+          <span className="git-log-clock">{formatClock(entry.time)}</span>
+        </div>
+        {open &&
+          (commitFilesLoading ? (
+            <div className="git-log-file muted">{t("git.loading")}</div>
+          ) : (
+            commitFiles.map((file) => {
+              const { name, dir } = splitPath(file.path);
+              return (
+                <div
+                  key={`${entry.oid}:${file.path}`}
+                  className="git-log-file"
+                  title={file.path}
+                  onClick={() => onCommitFileDiff(entry, file, repoRoot)}
+                >
+                  <span className={`git-badge ${badgeTone(file.status)}`}>
+                    {file.status}
+                  </span>
+                  <span className="git-name">{name}</span>
+                  <span className="git-dir">{dir}</span>
+                </div>
+              );
+            })
+          ))}
+      </div>
+    );
+  };
 
   if (!workspaceRoot && repoRows.length === 0) {
     return <div className="empty">{t("git.noFolder")}</div>;
@@ -1361,88 +1525,23 @@ export default function GitPanel({
             </button>
             {logOpen && (
               <>
-                {git.log.map((entry, index) => {
-                  const open = commitOpen === entry.oid;
-                  const row = graphRows[index];
-                  return (
-                    <div key={entry.oid}>
-                      <div
-                        className={`git-log-row${open ? " open" : ""}`}
-                        title={`${entry.oid}\n${entry.author} · ${formatWhen(entry.time)}${
-                          entry.message.trimEnd() ? `\n\n${entry.message.trimEnd()}` : ""
-                        }`}
-                        onClick={() => void openCommit(entry)}
-                        onContextMenu={(event) => {
-                          // Taking the event before the row's click handler is what keeps a
-                          // right-click from expanding or collapsing the commit as well.
-                          event.preventDefault();
-                          event.stopPropagation();
-                          setCommitMenu({ entry, x: event.clientX, y: event.clientY });
-                        }}
-                      >
-                        {row && (
-                          <GraphCell
-                            row={row}
-                            head={entry.refs.some((ref) => ref.kind === "head")}
-                            names={entry.refs.map((ref) => ref.name).join(", ")}
-                          />
-                        )}
-                        <span className="git-log-short">{entry.short}</span>
-                        <span className="git-log-summary">
-                          {entry.summary || t("git.noMessage")}
-                        </span>
-                        {entry.refs.length > 0 && (
-                          <span className="git-refs">
-                            {entry.refs.slice(0, 2).map((ref) => (
-                              <span
-                                key={`${ref.kind}:${ref.name}`}
-                                className={`git-ref ${ref.kind}`}
-                                title={ref.name}
-                              >
-                                {ref.name}
-                              </span>
-                            ))}
-                            {entry.refs.length > 2 && (
-                              <span
-                                className="git-ref more"
-                                title={entry.refs.map((ref) => ref.name).join(", ")}
-                              >
-                                +{entry.refs.length - 2}
-                              </span>
-                            )}
-                          </span>
-                        )}
-                        <span className="git-log-time">{formatWhen(entry.time)}</span>
-                        {/* The same instant without the date, for a row whose tip carries names
-                            in a narrow sidebar. The full one above is hidden by a container
-                            query there; the row's title has it in any case. */}
-                        <span className="git-log-clock">{formatClock(entry.time)}</span>
-                      </div>
-                      {open &&
-                        (commitFilesLoading ? (
-                          <div className="git-log-file muted">{t("git.loading")}</div>
-                        ) : (
-                          commitFiles.map((file) => {
-                            const { name, dir } = splitPath(file.path);
-                            return (
-                              <div
-                                key={`${entry.oid}:${file.path}`}
-                                className="git-log-file"
-                                title={file.path}
-                                onClick={() => onCommitFileDiff(entry, file, repoRoot)}
-                              >
-                                <span className={`git-badge ${badgeTone(file.status)}`}>
-                                  {file.status}
-                                </span>
-                                <span className="git-name">{name}</span>
-                                <span className="git-dir">{dir}</span>
-                              </div>
-                            );
-                          })
-                        ))}
-                    </div>
-                  );
-                })}
+                {logTotal > 0 && (
+                  <div ref={logRowsRef}>
+                    {windowedLog ? (
+                      <>
+                        {/* Padding stands in for the rows above and below the window, so the
+                            scrollbar keeps the height the whole list would have. */}
+                        <div style={{ height: logStart * LOG_ROW_HEIGHT }} />
+                        {git.log
+                          .slice(logStart, logEnd)
+                          .map((entry, offset) => renderLogRow(entry, logStart + offset))}
+                        <div style={{ height: (logTotal - logEnd) * LOG_ROW_HEIGHT }} />
+                      </>
+                    ) : (
+                      git.log.map(renderLogRow)
+                    )}
+                  </div>
+                )}
                 {git.logHasMore && (
                   <div className="git-bulk">
                     <select

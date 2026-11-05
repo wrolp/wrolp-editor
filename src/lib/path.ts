@@ -48,11 +48,6 @@ export function basename(path: string): string {
   return idx < 0 ? path : path.slice(idx + 1);
 }
 
-export function dirname(path: string): string {
-  const idx = Math.max(path.lastIndexOf("\\"), path.lastIndexOf("/"));
-  return idx < 0 ? "." : path.slice(0, idx);
-}
-
 export function extOf(name: string): string {
   const base = basename(name);
   const dot = base.lastIndexOf(".");
@@ -75,7 +70,9 @@ export function isUntitled(path: string): boolean {
  */
 export function isUnder(path: string, root: string): boolean {
   const key = pathKey(path);
-  const from = pathKey(root);
+  // A root written with a trailing separator would otherwise demand that the child put a
+  // second separator after it: `C:\a\` would not contain `C:\a\b`.
+  const from = pathKey(root).replace(/[\\/]+$/, "");
   if (key === from) return true;
   const boundary = key.charAt(from.length);
   return key.startsWith(from) && boundary === "/";

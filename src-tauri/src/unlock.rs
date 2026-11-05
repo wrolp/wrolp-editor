@@ -16,7 +16,7 @@ use crate::crypto::{self, KEY_LEN};
 use crate::draft;
 use keyring_core::{CredentialStore, Entry};
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, State};
@@ -25,6 +25,9 @@ use zeroize::Zeroize;
 /// Credential Manager service. One owner for everything this app keeps, so the store shows
 /// a single application rather than one unrelated entry per feature.
 const SERVICE: &str = "com.wrolp.editor";
+/// Credential Manager service, shared with the git credential store so the store shows one
+/// application rather than one unrelated entry per feature.
+pub(crate) const CREDENTIAL_SERVICE: &str = SERVICE;
 /// Account prefix; the full account is `enc-` plus the path digest, so a readable path
 /// never lands in a store the user can browse.
 const ACCOUNT_PREFIX: &str = "enc-";
@@ -91,14 +94,14 @@ impl Default for UnlockStore {
 }
 
 #[cfg(windows)]
-fn system_store() -> Option<Arc<CredentialStore>> {
+pub(crate) fn system_store() -> Option<Arc<CredentialStore>> {
   windows_native_keyring_store::Store::new()
     .ok()
     .map(|store| -> Arc<CredentialStore> { store })
 }
 
 #[cfg(not(windows))]
-fn system_store() -> Option<Arc<CredentialStore>> {
+pub(crate) fn system_store() -> Option<Arc<CredentialStore>> {
   None
 }
 
@@ -321,7 +324,7 @@ impl UnlockStore {
 /// returned and not stored anywhere except the credential store, and only if the caller
 /// separately asks for that: an unlock that fails because the optional "remember" write
 /// failed would be a worse outcome than an unlock that reports the failure separately.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn unlock_file(
   app: AppHandle,
   state: State<'_, UnlockStore>,
@@ -351,7 +354,7 @@ pub fn unlock_file(
 /// refuses files bigger than its limit anyway. The cost parameters stay the file's own — a
 /// password change is not a moment to quietly lower the work factor — and the salt is fresh,
 /// so two files that once shared a password do not go on sharing a key.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn change_password(
   app: AppHandle,
   state: State<'_, UnlockStore>,
@@ -382,7 +385,7 @@ pub fn change_password(
     if bytes.len() as u64 > commands::MAX_FILE_BYTES {
       return Err(format!("file_too_large:{}", bytes.len() / (1024 * 1024)));
     }
-    commands::write_atomic(Path::new(&source.path), &bytes)?;
+    commands::write_atomic(Path::new(&draft::io_path(&source.path)), &bytes)?;
     Ok(bytes.len() as u64)
   })();
   plaintext.zeroize();
@@ -402,7 +405,7 @@ pub fn change_password(
     let _ = state.forget(&source.path);
   }
 
-  let mtime = std::fs::metadata(&source.path)
+  let mtime = std::fs::metadata(draft::io_path(&source.path))
     .map(|m| commands::mtime_ms(&m))
     .unwrap_or(0);
   Ok(commands::SavedFile {
@@ -419,7 +422,7 @@ pub fn change_password(
 /// The text goes out as UTF-8, which is what the container held. A document that was GBK
 /// before it was encrypted comes back as UTF-8: the encoding is not carried in the format,
 /// and guessing it back would be worse than the one honest answer.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn remove_encryption(
   state: State<'_, UnlockStore>,
   path: String,
@@ -449,7 +452,7 @@ pub fn remove_encryption(
       plaintext.len() / (1024 * 1024)
     ));
   }
-  let written = commands::write_atomic(Path::new(&source.path), &plaintext);
+  let written = commands::write_atomic(Path::new(&draft::io_path(&source.path)), &plaintext);
   let bytes = plaintext.len() as u64;
   plaintext.zeroize();
   written?;
@@ -460,7 +463,7 @@ pub fn remove_encryption(
   state.remove(&source.path);
   let _ = state.forget(&source.path);
 
-  let mtime = std::fs::metadata(&source.path)
+  let mtime = std::fs::metadata(draft::io_path(&source.path))
     .map(|m| commands::mtime_ms(&m))
     .unwrap_or(0);
   Ok(commands::SavedFile {
@@ -480,11 +483,12 @@ pub fn remove_encryption(
 /// password it was just handed.
 fn write_new_container(
   state: &UnlockStore,
-  normalized: &str,
+  path: &str,
   plaintext: &[u8],
   password: &str,
   idle: Option<Duration>,
 ) -> Result<u64, String> {
+  let normalized = draft::normalize_path(path);
   let salt = crypto::random_salt()?;
   let params = crypto::KdfParams::default();
   let mut key = crypto::derive_key(password, &salt, params)?;
@@ -496,12 +500,15 @@ fn write_new_container(
     if bytes.len() as u64 > commands::MAX_FILE_BYTES {
       return Err(format!("file_too_large:{}", bytes.len() / (1024 * 1024)));
     }
-    commands::write_atomic(Path::new(normalized), &bytes).map(|()| bytes.len() as u64)
+    // The file is written at the spelling the filesystem knows; the cache is filed under the
+    // identity, which `put` derives itself.
+    commands::write_atomic(Path::new(&draft::io_path(path)), &bytes)
+      .map(|()| bytes.len() as u64)
   });
   // Only a key that is on disk somewhere is worth caching: caching one whose write failed would
   // leave the session believing it can save a file that was never created.
   if written.is_ok() {
-    state.put(normalized, key, idle);
+    state.put(&normalized, key, idle);
   }
   key.zeroize();
   written
@@ -512,7 +519,7 @@ fn write_new_container(
 /// The text goes in as UTF-8 and nothing else. The format carries no encoding field, so a
 /// legacy encoding written inside a container would produce a file this app itself could not
 /// read back correctly — the one kind of damage encryption is supposed to prevent.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn save_file_as_encrypted(
   app: AppHandle,
   state: State<'_, UnlockStore>,
@@ -524,21 +531,22 @@ pub fn save_file_as_encrypted(
   if normalized.is_empty() {
     return Err("path_empty".into());
   }
-  let target = Path::new(&normalized);
+  // Same split as a plain save: identity for the key cache, the real spelling for the disk.
+  let target = PathBuf::from(draft::io_path(&path));
   if let Some(parent) = target.parent() {
     std::fs::create_dir_all(parent).map_err(|e| format!("dir_create:{e}"))?;
   }
   let mut content = content;
   let written = write_new_container(
     &state,
-    &normalized,
+    &path,
     content.as_bytes(),
     &password,
     idle_limit(&app),
   );
   content.zeroize();
   let bytes = written?;
-  let mtime = std::fs::metadata(target)
+  let mtime = std::fs::metadata(&target)
     .map(|m| commands::mtime_ms(&m))
     .unwrap_or(0);
   commands::push_history_entry(&app, &normalized)?;
@@ -555,7 +563,7 @@ pub fn save_file_as_encrypted(
 /// Empty rather than holding a placeholder, for the reason `create_file` has: it is a file the
 /// user asked to exist, not one with anything in it. Text nobody typed would be worse here than
 /// there, because it would arrive already encrypted.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_encrypted(
   app: AppHandle,
   state: State<'_, UnlockStore>,
@@ -574,7 +582,9 @@ pub fn create_encrypted(
     .open(&target)
     .map_err(|e| format!("create_failed:{e}"))?;
   let normalized = draft::normalize_path(&target.to_string_lossy());
-  if let Err(e) = write_new_container(&state, &normalized, &[], &password, idle_limit(&app)) {
+  // The reserved file is at `target`; the lowercased identity would not name the same file in
+  // a case-sensitive directory.
+  if let Err(e) = write_new_container(&state, &target.to_string_lossy(), &[], &password, idle_limit(&app)) {
     let _ = std::fs::remove_file(&target);
     return Err(e);
   }
@@ -595,7 +605,7 @@ pub fn lock_all(state: State<'_, UnlockStore>) {
   state.clear();
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn remember_password(
   state: State<'_, UnlockStore>,
   path: String,
@@ -604,24 +614,24 @@ pub fn remember_password(
   state.remember(&path, &password)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn forget_password(state: State<'_, UnlockStore>, path: String) -> Result<(), String> {
   state.forget(&path)
 }
 
 /// Only ever answers whether a password is remembered. The password itself stays in Rust:
 /// sending it to the frontend would put it in a JavaScript heap and a devtools console.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn recall_password(state: State<'_, UnlockStore>, path: String) -> bool {
   state.recall(&path).is_some()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn remembered_password_count(state: State<'_, UnlockStore>) -> Result<u32, String> {
   state.remembered_count()
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn clear_remembered_passwords(state: State<'_, UnlockStore>) -> Result<u32, String> {
   state.clear_remembered()
 }

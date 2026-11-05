@@ -7,7 +7,6 @@ src-tauri/icons/ios/
 dist*
 task
 .tauri
-package-lock.json
 
 probe
 

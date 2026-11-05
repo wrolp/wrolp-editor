@@ -20,7 +20,7 @@ use std::fs;
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::Path;
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::ipc::Channel;
@@ -358,11 +358,26 @@ pub(crate) fn clone_core(
     return Err("git_clone_exists".into());
   }
   let _guard = locks.acquire(parent_path)?;
+  // The check above ran before the lock: another clone into this folder can have created the
+  // same name while this one was waiting. Re-check under the lock, then clone into a temp
+  // directory of our own, so a failed attempt can only ever remove what it created itself.
+  if target.exists() {
+    return Err("git_clone_exists".into());
+  }
   preflight(url, &cancel)?;
   if cancel.load(Ordering::Relaxed) {
     return Err("git_canceled".into());
   }
 
+  let tmp = parent_path.join(format!(
+    ".{}.clone-{}-{}",
+    name,
+    std::process::id(),
+    SystemTime::now()
+      .duration_since(UNIX_EPOCH)
+      .map(|d| d.as_nanos())
+      .unwrap_or(0)
+  ));
   let hostkey: HostKeyNote = Arc::new(Mutex::new(None));
   let callbacks = callbacks(auth, Arc::clone(&cancel), sink.clone(), Arc::clone(&hostkey));
   let mut fetch = FetchOptions::new();
@@ -370,16 +385,27 @@ pub(crate) fn clone_core(
   let mut builder = RepoBuilder::new();
   builder.fetch_options(fetch);
   sink(starting());
-  match builder.clone(url, &target) {
+  match builder.clone(url, &tmp) {
     Ok(_) => {
+      // Someone else may have created the target while the clone was running; replacing it
+      // outright is not this operation's call.
+      if target.exists() {
+        let _ = fs::remove_dir_all(&tmp);
+        return Err("git_clone_exists".into());
+      }
+      if let Err(e) = fs::rename(&tmp, &target) {
+        let _ = fs::remove_dir_all(&tmp);
+        return Err(format!("git_clone_replace:{e}"));
+      }
       sink(done());
       Ok(target.to_string_lossy().to_string())
     }
     Err(error) => {
       let message = hostkey_note(&hostkey).unwrap_or_else(|| remote_fail("clone", error, &cancel));
       // A folder with half a clone in it is worse than none: it makes the retry fail for a
-      // reason that has nothing to do with the server.
-      let _ = fs::remove_dir_all(&target);
+      // reason that has nothing to do with the server. The temp directory is ours alone, so
+      // removing it cannot touch a folder that was already there.
+      let _ = fs::remove_dir_all(&tmp);
       Err(message)
     }
   }
@@ -753,17 +779,24 @@ fn callbacks(
       }
       if allowed.contains(CredentialType::USER_PASS_PLAINTEXT) {
         if let Some(credential) = lookup(&auth.https, &host) {
-          return Cred::userpass_plaintext(&credential.username, &credential.secret);
+          // The password lives in the credential store, not in the file the store was loaded
+          // from. A host that once had one but cannot recall it now needs a new answer, not a
+          // silent anonymous attempt that turns into a confusing authentication error.
+          let Some(secret) = auth.https_secret(&host) else {
+            return Err(git2::Error::from_str(&format!("git_auth_required:{host}")));
+          };
+          return Cred::userpass_plaintext(&credential.username, &secret);
         }
         return Err(git2::Error::from_str(&format!("git_auth_required:{host}")));
       }
       if allowed.contains(CredentialType::SSH_KEY) {
         if let Some(credential) = lookup(&auth.ssh, &host) {
+          let passphrase = auth.ssh_passphrase(&host);
           return Cred::ssh_key(
             username.unwrap_or("git"),
             None,
             Path::new(&credential.key_path),
-            credential.passphrase.as_deref(),
+            passphrase.as_deref(),
           );
         }
         return Err(git2::Error::from_str(&format!("git_auth_required:{host}")));
@@ -1218,23 +1251,29 @@ pub(crate) fn conflict_sides_of(
 
   // The working tree is what Apply overwrites, so its encoding, BOM and line endings are the
   // ones that matter — the blobs only contribute their text.
-  match fs::read(&abs) {
-    Ok(bytes) => {
-      if bytes.len() > MAX_DIFF_BYTES {
-        sides.too_large = true;
-      } else if bytes.iter().take(8000).any(|byte| *byte == 0) {
-        sides.binary = true;
-      } else if !sides.binary {
-        let decoded = encoding::decode(&bytes, preference)?;
-        sides.merged = Some(decoded.text);
-        sides.encoding = decoded.encoding;
-        sides.bom = decoded.bom;
-        let detected = detect_eol(&bytes);
-        if !detected.is_empty() {
-          sides.eol = detected;
+  // The size is checked before the read: the limit exists so a huge file never enters memory,
+  // and deciding that afterwards pays the whole cost first.
+  match fs::metadata(&abs) {
+    Ok(meta) if meta.len() > MAX_DIFF_BYTES as u64 => sides.too_large = true,
+    Ok(_) => match fs::read(&abs) {
+      Ok(bytes) => {
+        if bytes.iter().take(8000).any(|byte| *byte == 0) {
+          sides.binary = true;
+        } else if !sides.binary {
+          let decoded = encoding::decode(&bytes, preference)?;
+          sides.merged = Some(decoded.text);
+          sides.encoding = decoded.encoding;
+          sides.bom = decoded.bom;
+          let detected = detect_eol(&bytes);
+          if !detected.is_empty() {
+            sides.eol = detected;
+          }
         }
       }
-    }
+      // Gone between the metadata call and the read, which is the same as gone.
+      Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+      Err(error) => return Err(format!("git_conflict_read:{error}")),
+    },
     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
     Err(error) => return Err(format!("git_conflict_read:{error}")),
   }
@@ -1372,7 +1411,12 @@ pub(crate) fn write_resolution(
     return Err("git_not_conflicted".into());
   }
 
-  let existing = fs::read(&abs).ok();
+  // The existing text only chooses the encoding and line endings of the write, so a file past
+  // the limit is not read for it: the defaults are used instead of paying for every byte.
+  let existing = match fs::metadata(&abs) {
+    Ok(meta) if meta.len() <= MAX_DIFF_BYTES as u64 => fs::read(&abs).ok(),
+    _ => None,
+  };
   let (encoding_name, bom, eol) = match existing.as_ref() {
     Some(bytes) => {
       let decoded = encoding::decode(bytes, preference)?;

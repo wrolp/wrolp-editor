@@ -546,28 +546,87 @@ function contentTop(host: HTMLElement, el: HTMLElement): number {
   return el.getBoundingClientRect().top - host.getBoundingClientRect().top + host.scrollTop;
 }
 
+/** Where one page sits in the scroll content, and how tall it is. */
+interface PageGeometry {
+  page: number;
+  top: number;
+  height: number;
+}
+
+/**
+ * Every page's geometry for one document and size.
+ *
+ * `top` is measured against the scroll content rather than the viewport, so it does not change
+ * as the reader scrolls: one measurement per page serves every scroll event until the layout it
+ * was taken at changes. `scrollHeight` is part of the key because a page frame is measured after
+ * it is first drawn, and a measurement that grows the list moves every page below it.
+ */
+interface PageGeometryCache {
+  pageCount: number;
+  width: number;
+  zoom: number | null;
+  scrollHeight: number;
+  pages: PageGeometry[];
+}
+
+function measurePages(
+  host: HTMLElement,
+  pageCount: number,
+  width: number,
+  zoom: number | null,
+  cached: PageGeometryCache | null
+): PageGeometryCache {
+  const scrollHeight = host.scrollHeight;
+  if (
+    cached &&
+    cached.pageCount === pageCount &&
+    cached.width === width &&
+    cached.zoom === zoom &&
+    cached.scrollHeight === scrollHeight
+  ) {
+    return cached;
+  }
+  const hostTop = host.getBoundingClientRect().top;
+  const scrollTop = host.scrollTop;
+  const pages = Array.from(host.querySelectorAll<HTMLElement>(".pdf-page")).map((el) => ({
+    page: Number(el.dataset.page) || 1,
+    top: el.getBoundingClientRect().top - hostTop + scrollTop,
+    height: el.offsetHeight,
+  }));
+  return { pageCount, width, zoom, scrollHeight, pages };
+}
+
 /**
  * The place the pane is showing, as a page and a fraction of it.
  *
  * The fraction is measured within the page rather than across the document because a document's
  * pages differ in height, and because a page is the unit the reader thinks in: a window resize or
  * a zoom change moves the pixels, but leaves "halfway down page twelve" where it was.
+ *
+ * The pages are in document order, so the last one that starts at or above the top edge is the
+ * page being read. Finding it in the measured list is a binary search rather than a walk from the
+ * first page: page four hundred must not cost four hundred measurements on every scroll event.
  */
-function positionOf(host: HTMLElement): ReadingPosition {
-  const scrollTop = host.scrollTop;
-  let page = 1;
-  let ratio = 0;
-  for (const el of Array.from(host.querySelectorAll<HTMLElement>(".pdf-page"))) {
-    const top = contentTop(host, el);
-    // The pages are in document order, so the first one that starts below the top edge ends the walk.
-    if (top > scrollTop + 1) break;
-    page = Number(el.dataset.page) || page;
-    ratio =
-      el.offsetHeight > 0
-        ? Math.round(((scrollTop - top) / el.offsetHeight) * RATIO_PRECISION) / RATIO_PRECISION
-        : 0;
+function positionOf(geometry: PageGeometryCache, scrollTop: number): ReadingPosition {
+  const pages = geometry.pages;
+  let low = 0;
+  let high = pages.length - 1;
+  let hit: PageGeometry | null = null;
+  while (low <= high) {
+    const mid = (low + high) >> 1;
+    if (pages[mid].top <= scrollTop + 1) {
+      hit = pages[mid];
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
   }
-  return { page, ratio: Math.min(1, Math.max(0, ratio)) };
+  if (!hit) return { page: 1, ratio: 0 };
+  const ratio =
+    hit.height > 0
+      ? Math.round(((scrollTop - hit.top) / hit.height) * RATIO_PRECISION) / RATIO_PRECISION
+      : 0;
+  return { page: hit.page, ratio: Math.min(1, Math.max(0, ratio)) };
 }
 
 /**
@@ -670,6 +729,10 @@ export default function PdfViewer({
   const lastSavedAt = useRef(0);
   /** The write waiting for the reader to stop moving the page. */
   const saveTimer = useRef<number | null>(null);
+  /** The page geometry measured for this document and size, reused until the layout changes. */
+  const geometry = useRef<PageGeometryCache | null>(null);
+  /** The frame a scroll event is waiting for, so a burst of events costs one read. */
+  const scrollFrame = useRef<number | null>(null);
 
   /** What the pane is showing, whether the reader pinned it or the pane chose it. */
   const shownZoom = zoom ?? fitPercent;
@@ -742,6 +805,8 @@ export default function PdfViewer({
     let task: pdfjs.PDFDocumentLoadingTask | null = null;
     setDoc(null);
     setPageCount(0);
+    // Another document's pages are not this one's: the measured list starts over with it.
+    geometry.current = null;
     setError(null);
     setPageError(null);
     setAtEnd(false);
@@ -892,7 +957,9 @@ export default function PdfViewer({
       // leave, and the landing is about to put them back on it.
       return;
     }
-    const position = positionOf(host);
+    const measured = measurePages(host, pageCount, width, zoom, geometry.current);
+    geometry.current = measured;
+    const position = positionOf(measured, host.scrollTop);
     currentPlace.current = position;
     showPage(position.page);
     if (saveTimer.current !== null) window.clearTimeout(saveTimer.current);
@@ -905,7 +972,29 @@ export default function PdfViewer({
       saveTimer.current = null;
       writePosition(position);
     }, SAVE_SETTLE_MS);
-  }, [writePosition, showPage]);
+  }, [writePosition, showPage, pageCount, width, zoom]);
+
+  /**
+   * Take the latest scroll position once a frame rather than once per event: an automatic
+   * scroll fires many events between two paints, and all of them end at the same place.
+   */
+  const followScroll = useCallback(() => {
+    if (scrollFrame.current !== null) return;
+    scrollFrame.current = requestAnimationFrame(() => {
+      scrollFrame.current = null;
+      rememberPosition();
+    });
+  }, [rememberPosition]);
+
+  useEffect(
+    () => () => {
+      if (scrollFrame.current !== null) {
+        cancelAnimationFrame(scrollFrame.current);
+        scrollFrame.current = null;
+      }
+    },
+    []
+  );
 
   // The place before the pane goes away is the one that counts: switching tabs remounts the reader,
   // and a quit can land between the last scroll and the timer that would have written it. The
@@ -1255,7 +1344,7 @@ export default function PdfViewer({
       <div
         className="pdf-scroll"
         ref={hostRef}
-        onScroll={rememberPosition}
+        onScroll={followScroll}
         onWheel={pauseForHand}
         // A single click only clears the tools; the automatic scroll keeps going. Stopping is a
         // deliberate double click, so a reader who taps the page to read does not lose their place.

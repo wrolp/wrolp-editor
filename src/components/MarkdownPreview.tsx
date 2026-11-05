@@ -28,6 +28,13 @@ import { useMenuPlacement } from "../hooks/useMenuPlacement";
 import { api, errorMessage, openUrl } from "../lib/tauri";
 import { IconCollapse, IconOutline } from "./icons";
 
+/**
+ * Directories this window has already been granted to the asset protocol. Kept outside the
+ * component so a remount — a tab switch, a layout change — does not re-issue grants the
+ * backend already holds, and so the same folder is never asked for twice in a session.
+ */
+const grantedDirs = new Set<string>();
+
 interface Props {
   /** Current buffer text. */
   text: string;
@@ -274,19 +281,32 @@ export default function MarkdownPreview({
   // Grant access before any src is rewritten. Setting an asset URL the backend has not
   // been told about yet would 404, and the browser does not retry an <img> on its own,
   // so the order matters rather than being a micro-optimisation.
+  //
+  // The grants are remembered for the life of the window rather than re-issued on every
+  // parse: `referencedDirs` is a new array each time the document changes, and the old code
+  // reset `granted` on every keystroke — dropping the rewritten html back to the raw one and
+  // making every picture in a long document blink while its author typed.
   const [granted, setGranted] = useState(false);
   useEffect(() => {
     let live = true;
-    setGranted(false);
-    if (referencedDirs.length === 0) {
+    const missing = referencedDirs.filter((dir) => !grantedDirs.has(dir));
+    if (missing.length === 0) {
       setGranted(true);
       return;
     }
-    Promise.all(referencedDirs.map((dir) => api.allowAssetDir(dir).catch(() => {}))).then(
-      () => {
-        if (live) setGranted(true);
-      }
-    );
+    setGranted(false);
+    Promise.all(
+      missing.map(async (dir) => {
+        try {
+          await api.allowAssetDir(dir);
+          grantedDirs.add(dir);
+        } catch {
+          // Refused or gone: the image stays broken, and the next parse tries again.
+        }
+      })
+    ).then(() => {
+      if (live) setGranted(true);
+    });
     return () => {
       live = false;
     };

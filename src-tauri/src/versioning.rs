@@ -373,7 +373,8 @@ fn iso(seconds: i64) -> String {
 /// The mtime a baseline should carry, so the first row of a timeline is dated when the file last
 /// changed on disk rather than when the editor happened to be looking at it.
 pub fn modified_epoch(path: &str) -> Option<i64> {
-  std::fs::metadata(draft::normalize_path(path))
+  // The file is looked at where it lives; `normalize_path` is its identity, not its address.
+  std::fs::metadata(draft::io_path(path))
     .ok()
     .and_then(|m| m.modified().ok())
     .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
@@ -679,13 +680,13 @@ fn state_of(app: &AppHandle, path: &str) -> Result<VersionState, String> {
 ///
 /// Asked rather than computed in the frontend: the override beats the default, and a rule spelled
 /// out in two places is a rule that drifts.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn versioning_state(app: AppHandle, path: String) -> Result<VersionState, String> {
   state_of(&app, &path)
 }
 
 /// Force a file on or off, or let it follow the default again with `None`.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn set_version_override(
   app: AppHandle,
   path: String,
@@ -700,7 +701,7 @@ pub fn set_version_override(
 /// Tracking is checked here rather than trusted from the caller: the same rule that decides what
 /// the sidebar shows has to decide what gets written, or a stale frontend records a file the user
 /// just switched off. `automatic` says the write came from the timer, which is off by default.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn add_version(
   app: AppHandle,
   path: String,
@@ -735,7 +736,7 @@ pub fn add_version(
 }
 
 /// A file's timeline, newest first, as deep as the setting allows.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_versions(app: AppHandle, path: String) -> Result<Vec<VersionEntry>, String> {
   let settings = crate::commands::settings_of(&app);
   let base = base_dir(&app)?;
@@ -743,20 +744,20 @@ pub fn get_versions(app: AppHandle, path: String) -> Result<Vec<VersionEntry>, S
 }
 
 /// One version's text, read only when it is about to be shown or restored.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn get_version_content(app: AppHandle, path: String, oid: String) -> Result<String, String> {
   let base = base_dir(&app)?;
   content_at(&base, &path, &oid)
 }
 
 /// Every file with history, newest first.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_versions(app: AppHandle) -> Result<Vec<VersionSummary>, String> {
   let base = base_dir(&app)?;
   list(&base)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn clear_versions(app: AppHandle) -> Result<(), String> {
   let base = base_dir(&app)?;
   clear(&base)

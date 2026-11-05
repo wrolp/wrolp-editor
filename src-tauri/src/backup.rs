@@ -331,7 +331,7 @@ fn restore_from(state: &Path, dir: &Path, target: &Path) -> Result<usize, String
   apply_bundle(state, &bundle)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn create_config_backup(app: AppHandle) -> Result<BackupInfo, String> {
   let settings = current_settings(&app);
   create_with(&app, &settings, "manual")
@@ -343,14 +343,14 @@ pub fn create_config_backup(app: AppHandle) -> Result<BackupInfo, String> {
 /// and this is not one of them — nor can it be: a folder the user picked can be anywhere, while
 /// the capability is compiled in. The path is resolved here from the app's own setting, so
 /// handing it to the shell needs no permission from the webview.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn open_backup_folder(app: AppHandle) -> Result<(), String> {
   let settings = current_settings(&app);
   let dir = backup_dir(&app, &settings)?;
   tauri_plugin_opener::open_path(&dir, None::<&str>).map_err(|e| format!("backup_open:{e}"))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn list_config_backups(app: AppHandle) -> Result<BackupList, String> {
   let settings = current_settings(&app);
   let dir = backup_dir(&app, &settings)?;
@@ -361,7 +361,7 @@ pub fn list_config_backups(app: AppHandle) -> Result<BackupList, String> {
   })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn restore_config_backup(app: AppHandle, path: String) -> Result<usize, String> {
   let settings = current_settings(&app);
   let dir = backup_dir(&app, &settings)?;
@@ -383,7 +383,7 @@ pub fn restore_config_backup(app: AppHandle, path: String) -> Result<usize, Stri
 /// `force` is the open/close path: write a new snapshot and drop the previous automatic ones
 /// from today, so the day holds the configuration as it stood at that transition. Without it
 /// (the hourly check) an existing snapshot is left alone and only a missing day is filled in.
-#[tauri::command]
+#[tauri::command(async)]
 pub fn maybe_auto_backup(app: AppHandle, force: bool) -> Result<Option<BackupInfo>, String> {
   let settings = current_settings(&app);
   let dir = backup_dir(&app, &settings)?;

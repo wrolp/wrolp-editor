@@ -45,17 +45,33 @@ export function decodeRef(part: string): string {
 }
 
 /**
- * Walk `ref` from the document's folder, `..` included. Null when the walk ends above the root
- * it started from, which is a fold the document does not actually live in.
+ * Walk `ref` from the document's folder. Null when the walk would leave that folder: a
+ * document must not be able to name `../../Photos/x.png` and have the backend grant a
+ * directory it never lived in. `..` is only allowed after the walk has gone deeper than the
+ * folder it started from.
+ *
+ * A UNC folder keeps its `\\server\share` head — splitting on separators drops the leading
+ * `\\`, and without it a picture on a network share could never be resolved.
  */
 export function joinToLocal(ref: string, baseDir: string): string | null {
-  const segments = (baseDir ? `${baseDir}\\` : "").split(/[\\/]+/).filter(Boolean);
+  const unc = /^[\\/]{2}[^\\/]/.test(baseDir);
+  const parts = (baseDir ? `${baseDir}\\` : "").split(/[\\/]+/).filter(Boolean);
+  const baseDepth = parts.length;
+  const segments = [...parts];
   for (const part of ref.replace(/\//g, "\\").split("\\")) {
     if (part === "" || part === ".") continue;
-    if (part === "..") segments.pop();
-    else segments.push(part);
+    if (part === "..") {
+      if (segments.length <= baseDepth) return null;
+      segments.pop();
+    } else {
+      segments.push(part);
+    }
   }
-  return segments.length > 1 ? segments.join("\\") : null;
+  // A bare drive (`C:`) or a bare UNC share (`\\server\share`) is not a directory a file
+  // could sit in, so there is nothing for the asset protocol to open.
+  const minimum = unc ? 3 : 2;
+  if (segments.length < minimum) return null;
+  return unc ? `\\\\${segments.join("\\")}` : segments.join("\\");
 }
 
 /**

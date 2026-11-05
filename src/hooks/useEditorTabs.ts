@@ -1,20 +1,20 @@
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { t } from "../lib/i18n";
 import {
   api,
   errorMessage,
+  parentOf,
   pickSaveAs,
   EMPTY_FILE_SETTINGS,
   type Draft,
   type FileSettings,
-  type FileStat,
   type GroupTab,
   type OpenedFile,
   type SavedFile,
+  type StatResult,
 } from "../lib/tauri";
 import {
   basename,
-  dirname,
   isPdf,
   isUntitled,
   langOf,
@@ -629,7 +629,7 @@ export function useEditorTabs({
       void applyLineEnding(disk.path, disk.content, own);
       // A document can show its own pictures, so allow the asset protocol to read the one
       // folder it sits in. Fire-and-forget: a document without images works either way.
-      void api.allowAssetDir(dirname(disk.path)).catch(() => {});
+      void api.allowAssetDir(parentOf(disk.path)).catch(() => {});
       if (draftInfo && draftInfo.content !== disk.content) {
         const req: PendingRestore = {
           tabId,
@@ -718,7 +718,7 @@ export function useEditorTabs({
       const opened = tabsRef.current.find(
         (t) => isFileTab(t) && pathKey(t.path) === pathKey(disk.path)
       );
-      if (record) onFileOpened?.(dirname(disk.path));
+      if (record) onFileOpened?.(parentOf(disk.path));
 
       let target: Tab;
       if (opened) {
@@ -1144,7 +1144,7 @@ export function useEditorTabs({
     const last = lastFileTabRef.current;
     if (last) lastFileTabRef.current = rekeyed(last);
     // A document can point at its own pictures, and the grant covered the old folder.
-    for (const next of moved.values()) void api.allowAssetDir(dirname(next)).catch(() => {});
+    for (const next of moved.values()) void api.allowAssetDir(parentOf(next)).catch(() => {});
   }, []);
 
   /** One pair, for a rename that moves a single entry. */
@@ -1163,7 +1163,12 @@ export function useEditorTabs({
       (t) => isFileTab(t) && (!t.unopenable || isPdf(t.path))
     );
     const tabs = live.map((tab) => {
-      const model = h?.monaco.editor.getModel(h.monaco.Uri.parse(modelUri(tab.path)));
+      // Only an untitled tab's text is worth copying here: `toStoredTab` drops the value for
+      // a file tab, whose content lives on disk and in its draft. Reading the whole buffer of
+      // every open file once per commit was pure work, and it grew with every document open.
+      const model = isUntitled(tab.path)
+        ? h?.monaco.editor.getModel(h.monaco.Uri.parse(modelUri(tab.path)))
+        : null;
       return toStoredTab({
         path: tab.path,
         name: tab.name,
@@ -1296,7 +1301,7 @@ export function useEditorTabs({
             api.getDraft(tab.path).catch(() => null),
             api.fileSettingsView(tab.path).catch(() => ({ overrides: EMPTY_FILE_SETTINGS })),
           ]);
-          void api.allowAssetDir(dirname(tab.path)).catch(() => {});
+          void api.allowAssetDir(parentOf(tab.path)).catch(() => {});
           return { id: tab.id, overrides: view.overrides, draft };
         })
       );
@@ -1780,6 +1785,14 @@ export function useEditorTabs({
   }, []);
 
   /**
+   * The last save started for each tab. Two saves on one tab can overlap — the automatic one
+   * and a Ctrl+S, or two clicks on a slow network share — and the write that returns last is
+   * not necessarily the one holding the newest text, so only the newest generation may write
+   * the tab's state back.
+   */
+  const saveGen = useRef(new Map<number, number>());
+
+  /**
    * Write one tab back to disk. Resolves false when nothing was written, which is what a
    * declined "Save as", a picture with no buffer, a file another program has since changed,
    * and a failed write all amount to: the caller has to know, because a close that was asked
@@ -1829,6 +1842,10 @@ export function useEditorTabs({
         return false;
       }
     }
+    // From here on this save owns the tab's state unless a newer one starts. Captured before
+    // the write because that is the point the text is taken from the model.
+    const generation = (saveGen.current.get(tab.id) ?? 0) + 1;
+    saveGen.current.set(tab.id, generation);
     try {
       // The cleanups happen once the save is committed to happening: turning down the "changed on
       // disk" question above should not leave the text tidied as a side effect of not saving.
@@ -1837,8 +1854,17 @@ export function useEditorTabs({
       if (isUntitled(tab.path)) {
         const target = await pickSaveAs(tab.name);
         if (!target) return false;
-        const saved = await api.saveFile(target, content, encodingRef.current, false);
+        // A new file has no encoding of its own yet, and "auto" is a way of reading one,
+        // not a way of writing one: the preference decides only when it names a codec,
+        // and UTF-8 is the contract for a file that was just created.
+        const chosenEncoding =
+          encodingRef.current && encodingRef.current !== "auto" ? encodingRef.current : "UTF-8";
+        const saved = await api.saveFile(target, content, chosenEncoding, false);
         draft.forget(tab.path);
+        // The buffer was live while the write was on its way, so `content` is not automatically
+        // what the tab holds now: text typed in the meantime is still unsaved.
+        const latest = model && !model.isDisposed() ? model.getValue() : content;
+        const unchanged = latest === content;
         const oldUri = h.monaco.Uri.parse(modelUri(tab.path));
         const oldModel = h.monaco.editor.getModel(oldUri);
         setTabs((prev) =>
@@ -1851,7 +1877,7 @@ export function useEditorTabs({
                   language: langOf(saved.path),
                   original: content,
                   mtime: saved.mtime,
-                  dirty: false,
+                  dirty: !unchanged,
                   encoding: saved.encoding,
                   bom: false,
                   bytes: saved.bytes,
@@ -1860,7 +1886,7 @@ export function useEditorTabs({
           )
         );
         setTimeout(() => oldModel?.dispose(), 0);
-        onFileOpened?.(dirname(saved.path));
+        onFileOpened?.(parentOf(saved.path));
         // Recorded after the write. A file that has just been named has no earlier state to stand
         // on, so the text that went to disk is its first version rather than a second row.
         if (!tab.encrypted) {
@@ -1873,16 +1899,31 @@ export function useEditorTabs({
       // Write back in the encoding this file was read in, or a GBK file would be
       // saved as UTF-8 and read as garbage by every other Windows tool.
       const saved = await api.saveFile(tab.path, content, tab.encoding, tab.bom);
-      draft.forget(tab.path);
-      await api.clearDraft(tab.path);
+      // A newer save has already taken over this tab: it holds the text and the answers, so
+      // whatever this older write says about mtime and dirtiness must not replace its state.
+      if (saveGen.current.get(tab.id) !== generation) return true;
+      // The buffer stayed live while the write was on its way, so text typed in the meantime
+      // never reached the disk. Only a buffer that still matches was actually saved; the rest
+      // stays dirty and keeps its draft, or a keystroke during a save would be silently lost.
+      const matchesWritten = () =>
+        model && !model.isDisposed() ? model.getValue() === content : true;
+      if (matchesWritten()) {
+        draft.forget(tab.path);
+        await api.clearDraft(tab.path);
+      }
+      // Read again after the await above: a keystroke during it is newer than this save and
+      // must leave the tab dirty rather than be marked saved by a stale comparison.
+      const unchanged = matchesWritten();
       setTabs((prev) =>
         prev.map((t) =>
           t.id === tab.id
             ? {
                 ...t,
+                // `original` is what the file on disk now holds, which is what the tab has to
+                // be compared against; `dirty` says whether the buffer has moved past it.
                 original: content,
                 mtime: saved.mtime,
-                dirty: false,
+                dirty: !unchanged,
                 encoding: saved.encoding,
                 bom: t.bom,
                 bytes: saved.bytes,
@@ -1922,7 +1963,9 @@ export function useEditorTabs({
       if (!opts?.quiet) toast(t("menu.saved", { name: tab.name }));
       return true;
     } catch (e) {
-      toast(errorMessage(e));
+      // A save that was superseded has no business reporting: the newer one owns the tab and
+      // will say what happened to it.
+      if (saveGen.current.get(tab.id) === generation) toast(errorMessage(e));
       return false;
     }
   }, [applySaveCleanup, askForTab, draft, editorRef, onFileOpened, toast]);
@@ -2276,7 +2319,7 @@ export function useEditorTabs({
       // Nothing in the old model is unsaved any more, and keeping it would keep the undo stack
       // of a document this tab no longer shows.
       setTimeout(() => oldModel?.dispose(), 0);
-      onFileOpened?.(dirname(saved.path));
+      onFileOpened?.(parentOf(saved.path));
       toast(t("enc.encrypted", { name: basename(saved.path) }));
     },
     [draft, editorRef, onFileOpened, toast]
@@ -2506,6 +2549,9 @@ export function useEditorTabs({
         ...staleRef.current.map((a) => a.tabId),
         ...goneRef.current.map((a) => a.tabId),
       ]);
+      // Which tabs the sweep has a question for, gathered before anything is asked: the batch
+      // stat has to name all of them in one call, and the answers come back in the same order.
+      const candidates: Tab[] = [];
       for (const tab of tabsRef.current) {
         // A picture has no text in it: the "buffer" behind one is the empty stand-in for its
         // bytes, so there is nothing here to keep and the preview going blank is the whole
@@ -2520,12 +2566,25 @@ export function useEditorTabs({
         // conflict prompt open is waiting for an answer: reloading either would move the
         // text under a dialog that describes it.
         if (asked.has(tab.id) || waiting.has(pathKey(tab.path))) continue;
-        let stat: FileStat | null;
-        try {
-          stat = await api.statFile(tab.path);
-        } catch {
-          continue;
-        }
+        candidates.push(tab);
+      }
+      if (candidates.length === 0) return;
+      let answers: StatResult[];
+      try {
+        answers = await api.statFiles(candidates.map((tab) => tab.path));
+      } catch {
+        // The batch itself failed — the window is closing, or the command is not there.
+        // Nothing is known about any of the files, which is the same as a failed single stat.
+        return;
+      }
+      for (let index = 0; index < candidates.length; index += 1) {
+        const tab = candidates[index];
+        const answer = answers[index];
+        // A path that could not be looked at says nothing about the file: a share that is not
+        // answering must not be read as "gone" or as "changed". The single-stat command used to
+        // reject here; the batch keeps that answer per file instead of losing the others.
+        if (answer?.error) continue;
+        const stat = answer?.stat ?? null;
         if (stat === null) {
           // Deleted, moved, or renamed by something outside the app. The tab keeps holding
           // the text, so nothing is lost yet — but nothing can be saved back either.
@@ -2741,90 +2800,151 @@ export function useEditorTabs({
   // editor keeps showing behind the Settings tab.
   if (activeTab && isFileTab(activeTab)) lastFileTabRef.current = activeTab;
 
-  return {
-    tabs,
-    activeId,
-    activeTab,
-    cursorRev,
-    /** Where Editor takes path/defaultValue: keeps the last file tab while Settings shows. */
-    editorTab:
-      activeTab && !activeTab.isSettings && !activeTab.gallery
-        ? activeTab
-        : lastFileTabRef.current,
-    /**
-     * The last real file tab. Editor must stay mounted on this one even while a
-     * comparison is on screen: @monaco-editor/react disposes a model when its editor
-     * unmounts, and that model is the only place a file's unsaved edits and undo stack
-     * live. So a comparison is shown *beside* the hidden editor, never in place of it.
-     */
-    fileTab: lastFileTabRef.current,
-    restoreQueue,
-    /** Conflict prompts, one at a time, in the order the files were found changed. */
-    stale,
-    /** Files found to be gone from the disk, one prompt at a time. */
-    gone,
-    answerGone,
-    /** Encrypted files waiting for a password, one dialog at a time. */
-    passwordAsk,
-    /** Which dialog the head of that queue needs. */
-    passwordMode: passwordModeOf(passwordAsk[0]?.then),
-    /** Why the password at the head of that queue last failed, or null. */
-    passwordError,
-    passwordBusy,
-    submitPassword,
-    cancelPassword,
-    /** Ask again for a tab that is already open and locked. */
-    unlockTab,
-    /** Pick a path, then ask for the password the copy of this buffer will be written under. */
-    saveAsEncrypted,
-    /** Ask for a new password for a file that already has one. */
-    changeEncryptedPassword,
-    /** Ask for the password in order to write the file back as plain UTF-8. */
-    removeEncryptionFrom,
-    /** Ask for the password of an encrypted file the Explorer is about to create. */
-    createEncryptedIn,
-    /** Mark every encrypted tab locked; the caller has already dropped the keys. */
-    lockEncrypted,
-    /** The conflict comparison popup, while it is open. */
-    conflict,
-    showConflict,
-    hideConflict,
-    checkDisk,
-    answerStale,
-    openPath,
-    openCompare,
-    /** A comparison from two sides whose text the caller already holds (git means this). */
-    openSnapshotCompare: showCompare,
-    /** The text a tab holds now, for a caller that only has its id. */
-    tabText,
-    swapCompare,
-    openUntitled,
-    openSettings,
-    openGallery,
-    openMerge,
-    openCommitTab,
-    setMergeDirty,
-    setMergeResult,
-    closeTab,
-    closeTabs,
-    moveTab,
-    clearAllTabs,
-    rekeyTabs,
-    /** Re-home every tab after a batch of renames, as one simultaneous substitution. */
-    rekeyTabsMany,
-    selectTab: activate,
-    saveActive,
-    saveTab,
-    reloadTab,
-    onEditorChange,
-    onCursorChange,
-    setFileSettings,
-    resolveRestore,
-    /** Put a version's text into the editor, unsaved. */
-    restoreVersion,
-    resolveAllRestores,
-    snapshotTabs,
-    restoreTabs,
-    applyPendingCursor,
-  };
+  // Memoized as a whole: App.tsx keeps this controller in refs and effect dependencies, and a
+  // fresh object literal on every render would re-run those effects on every keystroke.
+  return useMemo(
+    () => ({
+      tabs,
+      activeId,
+      activeTab,
+      cursorRev,
+      /** Where Editor takes path/defaultValue: keeps the last file tab while Settings shows. */
+      editorTab:
+        activeTab && !activeTab.isSettings && !activeTab.gallery
+          ? activeTab
+          : lastFileTabRef.current,
+      /**
+       * The last real file tab. Editor must stay mounted on this one even while a
+       * comparison is on screen: @monaco-editor/react disposes a model when its editor
+       * unmounts, and that model is the only place a file's unsaved edits and undo stack
+       * live. So a comparison is shown *beside* the hidden editor, never in place of it.
+       */
+      fileTab: lastFileTabRef.current,
+      restoreQueue,
+      /** Conflict prompts, one at a time, in the order the files were found changed. */
+      stale,
+      /** Files found to be gone from the disk, one prompt at a time. */
+      gone,
+      answerGone,
+      /** Encrypted files waiting for a password, one dialog at a time. */
+      passwordAsk,
+      /** Which dialog the head of that queue needs. */
+      passwordMode: passwordModeOf(passwordAsk[0]?.then),
+      /** Why the password at the head of that queue last failed, or null. */
+      passwordError,
+      passwordBusy,
+      submitPassword,
+      cancelPassword,
+      /** Ask again for a tab that is already open and locked. */
+      unlockTab,
+      /** Pick a path, then ask for the password the copy of this buffer will be written under. */
+      saveAsEncrypted,
+      /** Ask for a new password for a file that already has one. */
+      changeEncryptedPassword,
+      /** Ask for the password in order to write the file back as plain UTF-8. */
+      removeEncryptionFrom,
+      /** Ask for the password of an encrypted file the Explorer is about to create. */
+      createEncryptedIn,
+      /** Mark every encrypted tab locked; the caller has already dropped the keys. */
+      lockEncrypted,
+      /** The conflict comparison popup, while it is open. */
+      conflict,
+      showConflict,
+      hideConflict,
+      checkDisk,
+      answerStale,
+      openPath,
+      openCompare,
+      /** A comparison from two sides whose text the caller already holds (git means this). */
+      openSnapshotCompare: showCompare,
+      /** The text a tab holds now, for a caller that only has its id. */
+      tabText,
+      swapCompare,
+      openUntitled,
+      openSettings,
+      openGallery,
+      openMerge,
+      openCommitTab,
+      setMergeDirty,
+      setMergeResult,
+      closeTab,
+      closeTabs,
+      moveTab,
+      clearAllTabs,
+      rekeyTabs,
+      /** Re-home every tab after a batch of renames, as one simultaneous substitution. */
+      rekeyTabsMany,
+      selectTab: activate,
+      saveActive,
+      saveTab,
+      reloadTab,
+      onEditorChange,
+      onCursorChange,
+      setFileSettings,
+      resolveRestore,
+      /** Put a version's text into the editor, unsaved. */
+      restoreVersion,
+      resolveAllRestores,
+      snapshotTabs,
+      restoreTabs,
+      applyPendingCursor,
+    }),
+    [
+      tabs,
+      activeId,
+      activeTab,
+      cursorRev,
+      restoreQueue,
+      stale,
+      gone,
+      answerGone,
+      passwordAsk,
+      passwordError,
+      passwordBusy,
+      submitPassword,
+      cancelPassword,
+      unlockTab,
+      saveAsEncrypted,
+      changeEncryptedPassword,
+      removeEncryptionFrom,
+      createEncryptedIn,
+      lockEncrypted,
+      conflict,
+      showConflict,
+      hideConflict,
+      checkDisk,
+      answerStale,
+      openPath,
+      openCompare,
+      showCompare,
+      tabText,
+      swapCompare,
+      openUntitled,
+      openSettings,
+      openGallery,
+      openMerge,
+      openCommitTab,
+      setMergeDirty,
+      setMergeResult,
+      closeTab,
+      closeTabs,
+      moveTab,
+      clearAllTabs,
+      rekeyTabs,
+      rekeyTabsMany,
+      activate,
+      saveActive,
+      saveTab,
+      reloadTab,
+      onEditorChange,
+      onCursorChange,
+      setFileSettings,
+      resolveRestore,
+      restoreVersion,
+      resolveAllRestores,
+      snapshotTabs,
+      restoreTabs,
+      applyPendingCursor,
+    ]
+  );
 }

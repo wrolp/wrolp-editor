@@ -457,20 +457,37 @@ export function useGitRepos({
   const waitingForScan =
     active && !!rootDir && !scanView && !scanError && !scanning;
 
-  return {
-    rows,
-    selectedRoot,
-    scanning: scanning || waitingForScan,
-    scanError,
-    truncated: scanView?.truncated ?? false,
-    decorationsCapped: entries.length > DECORATE_LIMIT,
-    summaries,
-    summaryErrors,
-    statusByRepo,
-    select,
-    rescan,
-    refreshSummaries,
-  };
+  return useMemo(
+    () => ({
+      rows,
+      selectedRoot,
+      scanning: scanning || waitingForScan,
+      scanError,
+      truncated: scanView?.truncated ?? false,
+      decorationsCapped: entries.length > DECORATE_LIMIT,
+      summaries,
+      summaryErrors,
+      statusByRepo,
+      select,
+      rescan,
+      refreshSummaries,
+    }),
+    [
+      rows,
+      selectedRoot,
+      scanning,
+      waitingForScan,
+      scanError,
+      scanView,
+      entries,
+      summaries,
+      summaryErrors,
+      statusByRepo,
+      select,
+      rescan,
+      refreshSummaries,
+    ]
+  );
 }
 
 function relativeLabel(root: string, rootDir: string | null): string {

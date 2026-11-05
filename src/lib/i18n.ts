@@ -1055,6 +1055,7 @@ const EN: Table = {
   "err.encrypted_random": "The system would not give out random bytes: {detail}",
   "err.encrypted_keyring_unavailable": "The Windows credential store is not available",
   "err.encrypted_remembered_full": "Too many passwords are remembered, and the oldest would not be dropped",
+  "err.git_auth_keyring_unavailable": "The Windows credential store is not available, so the git credential was not changed",
 };
 
 const ZH: Table = {
@@ -2096,6 +2097,7 @@ const ZH: Table = {
   "err.encrypted_random": "系统拒绝提供随机字节：{detail}",
   "err.encrypted_keyring_unavailable": "Windows 凭据管理器不可用",
   "err.encrypted_remembered_full": "记住的口令太多，而最旧的一条也不肯让位",
+  "err.git_auth_keyring_unavailable": "Windows 凭据管理器不可用，Git 凭据未能更新",
 };
 
 const TABLES: Record<Lang, Table> = { en: EN, zh: ZH };

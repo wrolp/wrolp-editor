@@ -243,7 +243,7 @@ pub struct FileSettingsView {
   pub whitespace: Vec<String>,
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 pub fn file_settings_view(app: AppHandle, path: String) -> Result<FileSettingsView, String> {
   // Read settings.json once: it is a full parse and this is a panel opening.
   let settings = crate::commands::settings_of(&app).filled();
