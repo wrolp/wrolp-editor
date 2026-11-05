@@ -215,7 +215,7 @@ const EN: Table = {
   "settings.explorerEllipsis.middle": "Cut in the middle",
   "settings.explorerEllipsis.end": "Cut at the end",
   "settings.explorerEllipsisDesc":
-    "How a name too wide for the Explorer's column is shortened. Cutting in the middle keeps both ends, so the extension and the part that tells two similar names apart stay readable.",
+    "How a name too wide for its column or tab is shortened. Cutting in the middle keeps both ends, so the extension and the part that tells two similar names apart stay readable.",
   "settings.minimap": "Show minimap",
   "settings.showStatusBar": "Show status bar",
   "settings.showStatusBarDesc": "The bar along the bottom: file size, cursor position, selection counts, encoding and line ending",
@@ -1553,7 +1553,7 @@ const ZH: Table = {
   "settings.explorerEllipsis.middle": "中间省略",
   "settings.explorerEllipsis.end": "末尾省略",
   "settings.explorerEllipsisDesc":
-    "文件名宽度不够时如何截断。中间省略会保留首尾两端，扩展名和区分两个相似文件名的那一截都能看见。",
+    "文件名或标签页宽度不够时如何截断。中间省略会保留首尾两端，扩展名和区分两个相似文件名的那一截都能看见。",
   "settings.minimap": "显示缩略图（minimap）",
   "settings.showStatusBar": "显示状态栏",
   "settings.showStatusBarDesc": "窗口底部的信息栏：文件大小、光标位置、选区计数、编码与换行符",

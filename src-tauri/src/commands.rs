@@ -157,7 +157,7 @@ pub struct Settings {
   /// Defaults to the 12 px the tree was pinned at before this existed, so installing the build
   /// changes nothing until somebody moves the number.
   pub sidebar_font: f64,
-  /// How a name too wide for the Explorer's column is cut: `middle` keeps both ends and puts the
+  /// How a name too wide for its column or tab is cut: `middle` keeps both ends and puts the
   /// ellipsis between them, `end` keeps the head and lets the name run out at the right edge.
   /// Middle by default, because the end of a file name is where the extension sits and, for a
   /// long name, usually the half that tells two files apart.

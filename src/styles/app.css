@@ -480,6 +480,26 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* A middle cut has to keep the width the whole name would take. A tab is sized by its content,
+   so replacing the text in place narrows the tab, and the next measurement cuts a little more:
+   measured in a repro, a long name lost a character per frame and ended on a bare ellipsis.
+   The hidden copy stays in flow to hold that width; the cut text is drawn over it. */
+.tab .tab-name.pinned {
+  position: relative;
+  display: block;
+  /* The hidden copy is meant to overflow this box, and `text-overflow` would draw a second
+     ellipsis at the right edge on top of the middle one the label already shows. */
+  text-overflow: clip;
+}
+.tab .tab-name.pinned .name-ghost {
+  visibility: hidden;
+}
+.tab .tab-name.pinned .name-cut {
+  position: absolute;
+  left: 0;
+  top: 0;
+  white-space: nowrap;
+}
 /* The field that stands in for a tab's name while it is renamed. Bounded rather than
    flexible: a tab sizes itself to its label, and an input that grew with every keystroke
    would shove the rest of the strip sideways. */

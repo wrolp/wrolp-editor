@@ -3,6 +3,8 @@ import { t } from "../lib/i18n";
 import { TabIcon } from "./FileIcon";
 import { IconLock } from "./icons";
 import type { Tab } from "../lib/types";
+import type { NameEllipsis } from "../lib/nameEllipsis";
+import NameText from "./NameText";
 
 interface Props {
   tabs: Tab[];
@@ -17,6 +19,8 @@ interface Props {
   onContextMenu: (id: number, x: number, y: number) => void;
   /** Drop a dragged tab at this position in the strip. */
   onReorder: (id: number, toIndex: number) => void;
+  /** Where a tab's name is cut when the tab cannot hold it: both ends, or the end. */
+  nameEllipsis: NameEllipsis;
   /** The tab whose name is being edited in place, or null. */
   renamingId: number | null;
   /** Renames the file behind the tab; resolves false when the name was refused. */
@@ -107,6 +111,7 @@ export default function TabBar({
   onSave,
   onContextMenu,
   onReorder,
+  nameEllipsis,
   renamingId,
   onRename,
   onRenameEnd,
@@ -390,7 +395,7 @@ export default function TabBar({
               onCancel={onRenameEnd}
             />
           ) : (
-            <span className="tab-name">{tab.name}</span>
+            <NameText name={tab.name} mode={nameEllipsis} className="tab-name" pinned />
           )}
           {/* The lock sits on the name rather than next to the dirty mark: it says what the
               file is, not what is pending for it, and it has to stay put while the dirty

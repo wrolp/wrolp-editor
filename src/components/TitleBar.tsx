@@ -17,6 +17,7 @@ import {
   IconSidebar,
 } from "./icons";
 import type { Tab } from "../lib/types";
+import type { NameEllipsis } from "../lib/nameEllipsis";
 
 /** How the editor and the markdown preview share the space. */
 export type PreviewMode = "text" | "split" | "preview";
@@ -43,6 +44,8 @@ interface Props {
   onTabContextMenu: (id: number, x: number, y: number) => void;
   /** Drop a dragged tab at this position in the strip. */
   onReorder: (id: number, toIndex: number) => void;
+  /** Where a tab's name is cut when the tab cannot hold it: both ends, or the end. */
+  nameEllipsis: NameEllipsis;
   /** The tab whose name is being edited in place, or null. */
   renamingId: number | null;
   /** Renames the file behind the tab; resolves false when the name was refused. */
@@ -117,6 +120,7 @@ export default function TitleBar(props: Props) {
         onSave={props.onSave}
         onContextMenu={props.onTabContextMenu}
         onReorder={props.onReorder}
+        nameEllipsis={props.nameEllipsis}
         renamingId={props.renamingId}
         onRename={props.onRenameTab}
         onRenameEnd={props.onRenameTabEnd}

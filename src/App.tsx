@@ -2618,6 +2618,9 @@ const defaultModeFor = useCallback(
       <TitleBar
         tabs={tabs.tabs}
         activeId={tabs.activeId}
+        // The backend normalizes this value; anything else falls back here rather than
+        // reaching the strip as a third, unhandled mode.
+        nameEllipsis={settings.explorerNameEllipsis === "end" ? "end" : "middle"}
         sidebarVisible={sidebarShown}
         groupSlot={
           <GroupChip

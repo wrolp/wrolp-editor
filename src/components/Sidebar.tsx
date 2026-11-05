@@ -2,7 +2,6 @@ import {
   memo,
   useCallback,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -50,7 +49,8 @@ import {
   type VersionSummary,
 } from "../lib/tauri";
 import { basename, isUnder, isUntitled } from "../lib/path";
-import { cutMiddle, type NameEllipsis } from "../lib/nameEllipsis";
+import type { NameEllipsis } from "../lib/nameEllipsis";
+import NameText from "./NameText";
 import { pathKey, type GitMark, type SidebarView } from "../lib/types";
 import { useMenuPlacement } from "../hooks/useMenuPlacement";
 
@@ -203,47 +203,6 @@ function TreeTooltip({ children, name, detail }: TipProps) {
 }
 
 /**
- * The name of a row, shortened where it is wider than the row.
- *
- * `end` is plain CSS: the name is handed over whole and `text-overflow` draws the ellipsis at
- * the right edge. `middle` cannot be done in CSS — it needs the row's measured width and the
- * measured width of the text — so it is computed here, and again whenever either changes:
- * the sidebar is resized, the text size is changed, or another row takes width away.
- */
-function NameText({ name, mode }: { name: string; mode: NameEllipsis }) {
-  const ref = useRef<HTMLSpanElement>(null);
-
-  useLayoutEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const fit = () => {
-      // `end`, and any row whose width is not known yet, is the stylesheet's own
-      // `text-overflow`: the name is written out whole and the browser draws the ellipsis.
-      // A width of 0 means the row is outside the viewport and skipped (`content-visibility`),
-      // and cutting every one of those down to the ellipsis would be worse than the full name.
-      const width = mode === "middle" ? el.getBoundingClientRect().width : 0;
-      const next = width > 1 ? cutMiddle(el, name, width - 1) : name;
-      // Written straight to the node rather than through state: a row is not a view that
-      // needs re-rendering, and an observer callback that sets state repaints the whole row
-      // a frame later — for a name that was already on screen.
-      if (el.textContent !== next) el.textContent = next;
-    };
-    fit();
-    if (mode !== "middle") return;
-    const observer = new ResizeObserver(fit);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [name, mode]);
-
-  // The whole name is what React owns; the cut text is written over it by the effect above.
-  return (
-    <span ref={ref} className="tn">
-      {name}
-    </span>
-  );
-}
-
-/**
  * The name of a tree row, or the input that stands in for it while that row is renamed.
  *
  * The text being typed lives here rather than in the sidebar: one row edits at a time, and
@@ -279,7 +238,7 @@ function RowName({
     if (editing) setValue(current);
   }, [editing, current]);
 
-  if (!editing) return <NameText name={current} mode={mode} />;
+  if (!editing) return <NameText name={current} mode={mode} className="tn" />;
 
   const submit = () => {
     if (busy.current) return;

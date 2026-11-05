@@ -120,7 +120,7 @@ export interface Settings {
   /** Sidebar text size in CSS pixels, 11 to 20. 12 is the size the file tree was pinned at. */
   sidebarFont: number;
   /**
-   * Where an Explorer name too wide for its column loses characters: `middle` keeps both ends
+   * Where a name too wide for its column or tab loses characters: `middle` keeps both ends
    * and cuts between them, `end` keeps the head and runs into an ellipsis at the right edge.
    * `middle` by default: the end of a name carries the extension, and usually the half that
    * tells two names apart. Unknown values read as `middle`.
