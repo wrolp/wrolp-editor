@@ -2,6 +2,7 @@ import {
   memo,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -295,6 +296,14 @@ interface TreeHandlers {
 
 interface NodeProps extends TreeHandlers {
   depth: number;
+  /**
+   * Folded folders, by `pathKey`: the user's own answer. It lives above the rows because
+   * showing another view unmounts the Explorer, and a fold is a choice about the folder rather
+   * than about the view on screen. A folder with no entry follows `expandLimit`.
+   */
+  folded: ReadonlyMap<string, boolean>;
+  /** Folds or opens a folder, remembering the answer for this root folder. */
+  onFold: (key: string, folded: boolean) => void;
 }
 
 interface LevelProps extends NodeProps {
@@ -458,9 +467,14 @@ function FolderNode({
   siblings,
   ...handlers
 }: NodeProps & { entry: FsEntry; siblings: NodeTarget[] }) {
-  // The initial state only: a folder the user folded stays folded, so the setting applies
-  // when a directory is opened, not to the tree already on screen or to a refresh of it.
-  const [collapsed, setCollapsed] = useState(depth >= expandLimit);
+  const key = pathKey(entry.path);
+  // The setting decides a folder nobody has touched. Once this one is folded or opened by hand,
+  // that answer outlives the rows: another view unmounts them, and a fold is about the folder,
+  // not about which view is looked at. Read on mount only, so folding one folder re-renders
+  // that node rather than every row on screen.
+  const [collapsed, setCollapsed] = useState(
+    () => handlers.folded.get(key) ?? depth >= expandLimit
+  );
   /**
    * The listing, with the refetch counter it was read for. Keeping the counter next to the
    * entries is what lets one folder be re-read without touching the rest of the tree: a
@@ -471,8 +485,7 @@ function FolderNode({
   // Two ways to be asked for the same listing again: a counter of this folder's own, and the
   // counter of a refresh aimed at a folder above it. The higher one wins, so a folder always
   // re-reads at the newest request that covers it and never falls back to a stale question.
-  const token = Math.max(refreshed[pathKey(entry.path)] ?? 0, covers(refresh, entry.path));
-  const key = pathKey(entry.path);
+  const token = Math.max(refreshed[key] ?? 0, covers(refresh, entry.path));
   const editing = renaming === key;
   const naming = !!creating && pathKey(creating.dir) === key;
   const folderCount = handlers.gitDirs.get(key) ?? 0;
@@ -484,8 +497,10 @@ function FolderNode({
   // A folder being added to has to be open: an input row created inside a collapsed folder
   // would be off screen, taking the focus with it.
   useEffect(() => {
-    if (naming) setCollapsed(false);
-  }, [naming]);
+    if (!naming || !collapsed) return;
+    setCollapsed(false);
+    handlers.onFold(key, false);
+  }, [naming, collapsed, key, handlers.onFold]);
 
   useEffect(() => {
     // `>=` and not `===`: a listing read for a later counter than this folder has been asked
@@ -534,7 +549,9 @@ function FolderNode({
                     onSelectRange(target, siblings);
                     return;
                   }
-                  setCollapsed((v) => !v);
+                  const next = !collapsed;
+                  setCollapsed(next);
+                  handlers.onFold(key, next);
                 }
           }
           onContextMenu={(e) => {
@@ -1297,6 +1314,74 @@ export default function Sidebar(props: Props) {
     setHistAnchor(null);
   }, [view, rootDir]);
 
+  /**
+   * Folded folders by `pathKey`, the user's own answer. A ref rather than state: it is read
+   * only when a row is created, and remembering a fold must not re-render a tree that already
+   * shows the answer. It lives here because showing another view unmounts the Explorer, and the
+   * fold is about the folder rather than about the view on screen.
+   */
+  const folded = useRef(new Map<string, boolean>());
+  const rememberFold = useCallback((key: string, value: boolean) => {
+    folded.current.set(key, value);
+  }, []);
+  // Another root folder is another tree, so the folds that named rows of the old one are
+  // dropped before the new rows are created, not after: clearing once the tree was built could
+  // hand a folder of the new root a fold that was made about a same-named folder of the old one.
+  const foldedRoot = useRef(rootDir);
+  if (foldedRoot.current !== rootDir) {
+    foldedRoot.current = rootDir;
+    folded.current.clear();
+  }
+
+  /**
+   * Where each view was scrolled to, by name. Only the active view is mounted, so its scrollTop
+   * goes with it; this is what brings the position back when the view returns.
+   */
+  const scrollTops = useRef(new Map<string, number>());
+  const viewHost = useRef<HTMLDivElement | null>(null);
+
+  // Scroll does not bubble, but a capture listener still reaches the element that owns the bar:
+  // the view itself in one stylesheet, the Explorer's tree in another. Remembering the target's
+  // position covers both without asking which one is in force.
+  useEffect(() => {
+    const host = viewHost.current;
+    if (!host) return;
+    const remember = (e: Event) => {
+      if (!(e.target instanceof HTMLElement) || !e.target.isConnected) return;
+      scrollTops.current.set(view, e.target.scrollTop);
+    };
+    host.addEventListener("scroll", remember, true);
+    return () => host.removeEventListener("scroll", remember, true);
+  }, [view]);
+
+  useLayoutEffect(() => {
+    const host = viewHost.current;
+    const saved = scrollTops.current.get(view);
+    if (!host || saved === undefined) return;
+    const tree = host.querySelector<HTMLElement>(".tree");
+    const apply = () => {
+      host.scrollTop = saved;
+      if (tree) tree.scrollTop = saved;
+    };
+    apply();
+    if (saved === 0) return;
+    // An Explorer that comes back re-reads the folders that were open, so the height the saved
+    // position needs may not exist yet. Every row that lands is a chance to put it back, and
+    // the user's first gesture ends the attempt so the view never fights them.
+    const observer = new MutationObserver(apply);
+    observer.observe(host, { childList: true, subtree: true });
+    const stop = () => observer.disconnect();
+    host.addEventListener("wheel", stop, { passive: true });
+    host.addEventListener("pointerdown", stop);
+    host.addEventListener("keydown", stop);
+    return () => {
+      observer.disconnect();
+      host.removeEventListener("wheel", stop);
+      host.removeEventListener("pointerdown", stop);
+      host.removeEventListener("keydown", stop);
+    };
+  }, [view]);
+
   if (!visible) return null;
 
   return (
@@ -1337,6 +1422,7 @@ export default function Sidebar(props: Props) {
       {view === "explorer" && (
       <div
         className={`side-view${view === "explorer" ? " active" : ""}`}
+        ref={viewHost}
         // Every part of the Explorer answers a right-click with the tree's own menu: the
         // path bar, the buttons and the blank space below the rows alike. The browser's menu
         // offers nothing here a text editor can do, and a native one opening over a dark
@@ -1519,6 +1605,8 @@ export default function Sidebar(props: Props) {
                 onCreateEnd={() => setCreating(null)}
                 refreshed={refreshed}
                 refresh={refresh}
+                folded={folded.current}
+                onFold={rememberFold}
                 gitMarks={props.gitMarks}
                 gitDirs={props.gitDirs}
                 selected={new Set(selected.keys())}
@@ -1551,7 +1639,7 @@ export default function Sidebar(props: Props) {
       )}
 
       {view === "history" && (
-      <div className={`side-view${view === "history" ? " active" : ""}`}>
+      <div className={`side-view${view === "history" ? " active" : ""}`} ref={viewHost}>
         {history.length > 0 && (
           <div className="side-actions">
             {histSelected.size > 0 && (
@@ -1627,7 +1715,7 @@ export default function Sidebar(props: Props) {
           list of other files comes from the store's own folders, so it costs no history walk to
           show — which is why it says when a file was last recorded rather than how many times. */}
       {view === "versions" && (
-      <div className={`side-view${view === "versions" ? " active" : ""}`}>
+      <div className={`side-view${view === "versions" ? " active" : ""}`} ref={viewHost}>
         {activePath && !isUntitled(activePath) ? (
           <div className="ver-current">
             <div className="ver-head" title={activePath}>
@@ -1693,7 +1781,9 @@ export default function Sidebar(props: Props) {
       )}
 
       {view === "git" && (
-        <div className={`side-view${view === "git" ? " active" : ""}`}>{props.gitPanel}</div>
+        <div className={`side-view${view === "git" ? " active" : ""}`} ref={viewHost}>
+          {props.gitPanel}
+        </div>
       )}
 
       {menu && (

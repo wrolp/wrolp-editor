@@ -45,23 +45,32 @@ export function decodeRef(part: string): string {
 }
 
 /**
- * Walk `ref` from the document's folder. Null when the walk would leave that folder: a
- * document must not be able to name `../../Photos/x.png` and have the backend grant a
- * directory it never lived in. `..` is only allowed after the walk has gone deeper than the
- * folder it started from.
+ * Walk `ref` from the document's folder. `..` may climb above that folder — two documents
+ * sharing a parent is an ordinary layout — but not past the path's root: a drive (`C:\`) or a
+ * UNC share (`\\server\share\`) is where the walk stops, and one more `..` returns null rather
+ * than a path with no root left on it.
+ *
+ * What a document is allowed to reach is the backend's question, not this resolver's:
+ * `allow_asset_dir` refuses whole drives, shares and the user's profile however the path is
+ * spelled, so a reference that walks out of the document's folder still has to be granted
+ * before anything can read it.
  *
  * A UNC folder keeps its `\\server\share` head — splitting on separators drops the leading
  * `\\`, and without it a picture on a network share could never be resolved.
  */
 export function joinToLocal(ref: string, baseDir: string): string | null {
   const unc = /^[\\/]{2}[^\\/]/.test(baseDir);
+  const drive = /^[A-Za-z]:/.test(baseDir);
   const parts = (baseDir ? `${baseDir}\\` : "").split(/[\\/]+/).filter(Boolean);
-  const baseDepth = parts.length;
+  // The component `..` cannot pop: the drive letter, both halves of a UNC share, or — for a
+  // spelling this resolver cannot rebuild (a relative folder, a POSIX path) — the folder it
+  // started in, which is the old floor.
+  const rootDepth = unc ? 2 : drive ? 1 : parts.length;
   const segments = [...parts];
   for (const part of ref.replace(/\//g, "\\").split("\\")) {
     if (part === "" || part === ".") continue;
     if (part === "..") {
-      if (segments.length <= baseDepth) return null;
+      if (segments.length <= rootDepth) return null;
       segments.pop();
     } else {
       segments.push(part);

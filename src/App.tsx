@@ -2148,10 +2148,26 @@ export default function App() {
   );
 
   const { openUntitled, openSettings } = tabs;
+  /**
+   * The latest answer to "does a dialog own the window", read by the shortcut handler below.
+   * A ref rather than a dependency so that answering a prompt does not tear the listener down
+   * and put it back: what it has to read is filled in on every render, before effects run.
+   */
+  const modalOpenRef = useRef(false);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.ctrlKey || e.metaKey)) return;
       const key = e.key.toLowerCase();
+      // A dialog is up: the window behind it is not the thing with the keyboard, and Ctrl+S/W
+      // while someone is answering a question is the reflex that writes over the wrong file.
+      // Esc is untouched, and the browser's own Save/Open/Close is kept out of the window exactly
+      // as before — only the editor's action is skipped.
+      if (modalOpenRef.current) {
+        if (key === "s" || key === "o" || key === "n" || key === "b" || key === "w") {
+          e.preventDefault();
+        }
+        return;
+      }
       if (key === "s") {
         e.preventDefault();
         handSave();
@@ -2311,6 +2327,36 @@ export default function App() {
     language: string;
     currentText: string;
   } | null>(null);
+
+  /**
+   * Whether a modal is up and owns the window, so the shortcuts read below it are not commands
+   * for the editor. One list, read by the shortcut handler above through `modalOpenRef`, so a
+   * dialog added here is covered there by being added in this one place.
+   *
+   * Every overlay counts, whichever question it asks: two can be open at once (a per-file
+   * setting sheet with a close confirmation over it, say), and `||` means either one blocks
+   * instead of the later one replacing the earlier. The floating export panel is deliberately
+   * absent — no backdrop, draggable aside, editor still usable — so it is not a modal.
+   */
+  const modalOpen = Boolean(
+    passwordAsk ||
+      (conflictView && conflictTab) ||
+      closeAskTab ||
+      reloadAskTab ||
+      (staleAsk && staleTab) ||
+      (!staleAsk && goneAsk && goneTab) ||
+      versionNote ||
+      versionDiff ||
+      confirmingClear ||
+      runConfirm ||
+      tabs.restoreQueue.length > 0 ||
+      compareFrom ||
+      newGroupOpen ||
+      fileSettingsTab ||
+      localSettingsRoot ||
+      (cloneOpen && rootDir)
+  );
+  modalOpenRef.current = modalOpen;
 
   const openVersionDiff = useCallback(
     async (path: string, oid: string) => {
