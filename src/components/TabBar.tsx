@@ -3,8 +3,10 @@ import { t } from "../lib/i18n";
 import { TabIcon } from "./FileIcon";
 import { IconLock } from "./icons";
 import type { Tab } from "../lib/types";
+import { isUntitled } from "../lib/path";
 import type { NameEllipsis } from "../lib/nameEllipsis";
 import NameText from "./NameText";
+import PathTip, { useHoverTip } from "./PathTip";
 
 interface Props {
   tabs: Tab[];
@@ -103,6 +105,27 @@ const DRAG_THRESHOLD = 4;
 const EDGE_ZONE = 44;
 const MAX_SCROLL_STEP = 9;
 
+/**
+ * What the two-line hover bubble says for a tab: the name on top, the place underneath, the
+ * same shape the Explorer's rows use. A tab with no place of its own (Settings, an untitled
+ * buffer) has no second line, and then no bubble is drawn at all.
+ */
+function tipFor(tab: Tab): { name: string; detail: string } {
+  if (tab.compare) {
+    return {
+      name: tab.name,
+      detail: `${tab.compare.left.path}  ↔  ${tab.compare.right.path}`,
+    };
+  }
+  if (tab.commit) {
+    return { name: tab.name, detail: `${tab.commit.entry.author} · ${tab.commit.entry.oid}` };
+  }
+  if (tab.merge) return { name: tab.name, detail: tab.merge.path };
+  if (tab.gallery) return { name: tab.name, detail: tab.gallery.dir };
+  if (tab.isSettings || isUntitled(tab.path)) return { name: tab.name, detail: "" };
+  return { name: tab.name, detail: tab.path };
+}
+
 export default function TabBar({
   tabs,
   activeId,
@@ -117,6 +140,8 @@ export default function TabBar({
   onRenameEnd,
 }: Props) {
   const barRef = useRef<HTMLDivElement>(null);
+  /** One bubble for the whole strip: a tab passes its id when the pointer rests on it. */
+  const { tip, show: showTip, hide: hideTip } = useHoverTip<number>();
   /**
    * Drag state for reordering. The strip is not rearranged while the pointer moves: doing
    * that changes which tab sits under the cursor mid-gesture, so the strip keeps swapping
@@ -231,6 +256,9 @@ export default function TabBar({
   };
 
   const beginDrag = (id: number, x: number) => {
+    // A bubble left over from resting on the tab before the drag would follow the pointer
+    // across the strip, describing whichever tab it started on.
+    hideTip();
     const spot = dropAt(x);
     gesture.current = true;
     setDrag({ id, x: spot.x, index: spot.index });
@@ -277,6 +305,11 @@ export default function TabBar({
       </div>
     );
   }
+
+  // The tab the bubble describes, looked up by id: a tab closed while the pointer rests on it
+  // leaves nothing behind. A tab with no place of its own yields no bubble at all.
+  const hovered = tip ? tabs.find((tab) => tab.id === tip.key) : undefined;
+  const hoveredTip = hovered ? tipFor(hovered) : null;
 
   return (
     <div
@@ -377,15 +410,13 @@ export default function TabBar({
           className={`tab${tab.id === activeId ? " active" : ""}${
             drag?.id === tab.id ? " dragging" : ""
           }`}
-          title={
-            tab.compare
-              ? `${tab.compare.left.path}\n↔\n${tab.compare.right.path}`
-              : tab.commit
-                ? `${tab.commit.entry.oid}\n${tab.commit.entry.author}\n\n${tab.commit.entry.message.trimEnd()}`
-                : tab.isSettings
-                  ? t("tab.settings")
-                  : tab.path
-          }
+          // The bubble replaces the native `title`: the path needs a line of its own, which
+          // an OS-drawn tooltip cannot do. A drag passes over many tabs and means none of
+          // them, so nothing is armed while one is in progress.
+          onMouseEnter={(e) => {
+            if (!drag) showTip(e, tab.id);
+          }}
+          onMouseLeave={hideTip}
         >
           <TabIcon tab={tab} />
           {tab.id === renamingId ? (
@@ -437,6 +468,12 @@ export default function TabBar({
       {drag && !dropIsNoop(drag) && (
         <div className="tab-drop-line" style={{ left: dropOffset(drag.x) }}
         />
+      )}
+
+      {/* Below the tab rather than above it: the strip sits at the top of the window, and a
+          bubble over the tab would cover the name it is describing. */}
+      {tip && hoveredTip && (
+        <PathTip spot={tip.spot} name={hoveredTip.name} detail={hoveredTip.detail} />
       )}
     </div>
   );

@@ -51,6 +51,7 @@ import {
 import { basename, isUnder, isUntitled } from "../lib/path";
 import type { NameEllipsis } from "../lib/nameEllipsis";
 import NameText from "./NameText";
+import PathTip, { useHoverTip } from "./PathTip";
 import { pathKey, type GitMark, type SidebarView } from "../lib/types";
 import { useMenuPlacement } from "../hooks/useMenuPlacement";
 
@@ -132,12 +133,6 @@ const FOLDER_MENU_WIDTH = 260;
 const FOLDER_MENU_CARET = 6;
 
 /**
- * How long the pointer has to rest on a row before its bubble appears. Sweeping the mouse
- * across the tree passes a hundred names and means none of them in particular.
- */
-const TIP_DELAY_MS = 500;
-
-/**
  * How many rows one folder may draw in a single commit.
  *
  * A listing of a few thousand names otherwise turns into a few thousand rows in one go: the
@@ -156,48 +151,13 @@ const LEVEL_CHUNK = 200;
  * covers the very thing being pointed at, and the tree reserves room at the bottom.
  */
 function TreeTooltip({ children, name, detail }: TipProps) {
-  // `alignEnd` right-aligns the bubble to the cursor when there is not enough room to
-  // the right, which is what keeps it on screen near the window edge.
-  const [tip, setTip] = useState<{ x: number; y: number; alignEnd: boolean } | null>(null);
-  const pending = useRef<number | undefined>(undefined);
-  // A row can unmount while its bubble is still being waited for, when the folder holding it
-  // is collapsed. The timer has to go with it rather than fire into a component that is gone.
-  useEffect(() => () => window.clearTimeout(pending.current), []);
+  const { tip, show, hide } = useHoverTip();
   return (
     <>
-      <div
-        onMouseEnter={(e) => {
-          // Measured here rather than inside the timeout: this is the last moment the row is
-          // guaranteed to be under the pointer.
-          const rect = e.currentTarget.getBoundingClientRect();
-          const widest = 444; // the CSS max-width plus a little breathing room
-          const at = {
-            x: e.clientX,
-            y: rect.bottom,
-            alignEnd: e.clientX > window.innerWidth - widest,
-          };
-          window.clearTimeout(pending.current);
-          pending.current = window.setTimeout(() => setTip(at), TIP_DELAY_MS);
-        }}
-        onMouseLeave={() => {
-          // Cancels a bubble still on its way, which is the point of the delay: leaving early
-          // has to mean never showing at all.
-          window.clearTimeout(pending.current);
-          setTip(null);
-        }}
-      >
+      <div onMouseEnter={show} onMouseLeave={hide}>
         {children}
       </div>
-      {tip && detail && (
-        <div
-          className={`tree-tip${tip.alignEnd ? " align-end" : ""}`}
-          style={{ left: tip.x, top: tip.y }}
-          role="tooltip"
-        >
-          <span className="tree-tip-name">{name}</span>
-          <span className="tree-tip-path">{detail}</span>
-        </div>
-      )}
+      <PathTip spot={tip?.spot ?? null} name={name} detail={detail ?? ""} />
     </>
   );
 }
