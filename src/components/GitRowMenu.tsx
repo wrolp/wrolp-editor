@@ -10,6 +10,8 @@ interface Props {
   x: number;
   y: number;
   onClose: () => void;
+  /** Open the file itself — the same thing the row's own icon button does. */
+  onOpen: () => void;
   onIgnore: () => void;
   /** Write the pattern to the tracked `.gitignore` rather than this machine's exclude file. */
   onIgnoreRepo: () => void;
@@ -29,6 +31,7 @@ export default function GitRowMenu({
   x,
   y,
   onClose,
+  onOpen,
   onIgnore,
   onIgnoreRepo,
   onAssume,
@@ -71,6 +74,15 @@ export default function GitRowMenu({
       style={{ display: "block", left: at.left, top: at.top }}
       onMouseDown={(event) => event.stopPropagation()}
     >
+      {/* First, because it is the one thing here that acts on the file rather than on git's
+          view of it — and because the row's own open button only appears under the pointer. */}
+      <div className="ctx-item" onClick={onOpen}>
+        <span className="ctx-icon">
+          <IconFile size={14} />
+        </span>
+        {t("git.open")}
+      </div>
+      <div className="ws-sep" />
       {action === "ignore" && (
         <>
           <div className="ctx-item" onClick={onIgnore}>

@@ -1721,6 +1721,11 @@ export default function GitPanel({
           x={rowMenu.x}
           y={rowMenu.y}
           onClose={closeRowMenu}
+          onOpen={() => {
+            const file = rowMenu.file;
+            closeRowMenu();
+            onOpenFile(file.abs);
+          }}
           onIgnore={() => {
             const file = rowMenu.file;
             closeRowMenu();
