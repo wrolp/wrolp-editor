@@ -461,6 +461,8 @@ export default function App() {
   const [previewPref, setPreviewPref] = useState<Record<string, PreviewMode>>({});
   const previewPrefRef = useRef(previewPref);
   previewPrefRef.current = previewPref;
+  /** Files whose "open as text" hint the reader closed; the next file still gets told. */
+  const [hintClosed, setHintClosed] = useState<ReadonlySet<string>>(() => new Set());
   const [scrollRatio, setScrollRatio] = useState(0);
   const [stats, setStats] = useState<EditStats>({
     selectionChars: 0,
@@ -2657,12 +2659,27 @@ const defaultModeFor = useCallback(
    * point of view, since the pane simply stayed empty. The hint names the cause and offers
    * the way back, instead of leaving a file that looks broken.
    */
-  const showPictureAsText = previewKind === "image" && previewMode === "text" && !lockedToPicture;
-  const setPreviewMode = useCallback((mode: PreviewMode) => {
-    const path = tabs.activeTab?.path;
-    if (!path) return;
-    commitPreviewModes({ ...previewPrefRef.current, [path]: mode });
-  }, [tabs.activeTab?.path, commitPreviewModes]);
+  const showPictureAsText =
+    previewKind === "image" &&
+    previewMode === "text" &&
+    !lockedToPicture &&
+    !(editorTab && hintClosed.has(editorTab.path));
+  const setPreviewMode = useCallback(
+    (mode: PreviewMode) => {
+      const path = tabs.activeTab?.path;
+      if (!path) return;
+      // Changing the mode reopens the question the hint asked, so a closed hint comes back
+      // rather than staying buried under a preference the reader did not really choose.
+      setHintClosed((closed) => {
+        if (!closed.has(path)) return closed;
+        const next = new Set(closed);
+        next.delete(path);
+        return next;
+      });
+      commitPreviewModes({ ...previewPrefRef.current, [path]: mode });
+    },
+    [tabs.activeTab?.path, commitPreviewModes]
+  );
 
   /**
    * Context-menu shortcut: walks the layouts this file actually has instead of a fixed
@@ -3107,11 +3124,26 @@ const defaultModeFor = useCallback(
           {showPictureAsText && !showGallery && editorTab && (
             <div className="pane-hint">
               <span>{t("preview.hintImage")}</span>
-              <button
-                className="btn small"
-                onClick={() => setPreviewMode(defaultModeFor(editorTab.path))}
-              >
+              {/* The picture itself, not the layout's default: when the layout is text-only the
+                  default for an SVG is text again, and the button would change nothing — the one
+                  thing a hint's escape must never do. */}
+              <button className="btn small" onClick={() => setPreviewMode("preview")}>
                 {t("preview.hintShow")}
+              </button>
+              <button
+                type="button"
+                className="pane-hint-close"
+                title={t("preview.hintDismiss")}
+                aria-label={t("preview.hintDismiss")}
+                onClick={() =>
+                  setHintClosed((closed) => {
+                    const next = new Set(closed);
+                    next.add(editorTab.path);
+                    return next;
+                  })
+                }
+              >
+                ×
               </button>
             </div>
           )}

@@ -3668,6 +3668,26 @@ body.resizing .editor-host {
   color: var(--text);
   white-space: nowrap;
 }
+/* A hint is advice, not a fixture: an × lets the reader send it away for this file. */
+.pane-hint-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.pane-hint-close:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
 .img-preview {
   display: flex;
   flex-direction: column;
