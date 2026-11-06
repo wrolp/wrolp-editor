@@ -24,6 +24,7 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | Restore | On open, disk content is compared with the draft; a differing draft is loaded back and the tab stays marked unsaved. Settings can switch this to a per-file Restore / Discard dialog |
 | Sidebar | Explorer file tree (lazy folders, refresh button, folders first and names in natural order — `2.txt` before `10.txt`), a History list of recently opened files, a Versions view, and a Source Control view. Drag the divider to resize (180–640 px, double-click resets); the width is persisted. The tree's text size is a setting, 11–20 px |
 | Markdown preview | A `.md` tab renders beside its source: GitHub-flavoured markdown, a table of contents, code coloured by Monaco, `mermaid` / `plantuml` / `graphviz` fences drawn as SVG, and pictures that sit beside the document loaded through the asset protocol. What the document spells in HTML is rendered too, within an allow-list: the tags that mean something in a document, inline `style` filtered down to presentational properties, and no script, event handler, `<style>` block or `id` |
+| PDF reading | A `.pdf` is drawn by pdf.js in place of the text editor: pages in one continuous column, fitted to the pane or at a typed size (25–400 %), on white, warm, green or night paper, or a colour of your own. The document's own bookmarks open in a column from a corner tab, on either edge (Settings → Preview), folding a branch at a time or the whole tree at once and jumping to the page a title names. Automatic scroll runs at a pace you set and stops on a wheel or a double click. The page you leave comes back per file |
 | Picture gallery | A whole folder in one tab, in natural order (`IMG_2` before `IMG_10`): stacked, one at a time, slideshow, or a grid. Subfolders are opt-in and walked four levels deep; one listing stops at 2,000 pictures and says so. Pictures are drawn through the asset protocol, so the editor's text-size limit does not apply. HEIC and TIFF are listed and marked as formats this renderer cannot draw |
 | Batch rename | Multi-select rows or rename a whole folder at once; one pattern (`{name}`, `{ext}`, `{n}`) or a regular expression with a replacement, a live preview, and an order — name, extension, modified time or manual — that `{n}` counts. See [Batch rename](#batch-rename) |
 | Version history | Off by default. On, every save by hand records what the file said, and any two of them — a version against a version, or either against what is open — can be compared side by side, folded down to the changes, or put back into the editor. One file's saves can be excluded, or forced in, from its tab menu. See [Version history](#version-history) |
@@ -52,6 +53,18 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 
 Scrolling the mouse wheel over the tab strip scrolls it sideways.
 
+## Reading PDFs
+
+A `.pdf` tab is drawn by pdf.js in place of the editor. The pages form one continuous column, the page box in the status bar jumps to a page by number, and where you stopped is written down per file — page and position in it — so a document reopens where it was left.
+
+**Size.** *Fit* (the default) keeps a page as wide as the pane and the box reports what that comes to; the arrows step 50, 75, 100, 150, 200 and 300 %, and a percentage can be typed (25–400). Fitting is measured on the page's own width, so a scan of an unusual size still fills the pane the same way.
+
+**Paper.** White, warm, green, night, or any colour the system picker gives you. Night inverts the sheet and the text but cuts the pictures out of the inversion, so a photograph on the page stays the photograph it was. The choice is remembered.
+
+**Bookmarks.** A document with an outline can show it as a column on the edge set in Settings → Preview; it opens with the document only when the same page says so, and otherwise waits behind the corner tab. Branches fold from their `−`/`+` box one at a time, or all at once from the column's header, and the dotted guide under each level keeps a deep outline readable. A title jumps to the page it names; a bookmark pointing outside the document leaves the reader where they are.
+
+**Automatic scroll.** The tool sets the pages moving and the slower / faster buttons change the pace (10–240 px/s). A wheel or a double click stops it — a single click only folds the tools away, so tapping the page to read does not lose the place.
+
 ## Picture gallery
 
 Right-click a folder in the Explorer — or the blank space under the tree — and choose **Browse pictures**. The folder opens in its own tab with four ways to look at the same naturally ordered list:
@@ -66,6 +79,8 @@ A picture opened in a normal tab has a **Browse folder** button that opens its f
 Behind a picture's transparent pixels sits a checkerboard taken from the theme. The row of swatches in the picture's toolbar — the same ones are in Settings → General — swaps that for white, black, or any colour the system picker gives you, which is how a white logo stops vanishing into a light backdrop; the choice covers the gallery's thumbnails as well, and is remembered for every picture.
 
 Only pictures near the viewport are mounted, and ones two screens away are removed from the DOM so Chromium can release the decoded bitmap; in the stacked view the space they occupied is kept, so scrolling back does not jump. In the stacked view `Up`/`Down` scroll the column and `Left`/`Right` move between pictures; in one-by-one and slideshow `Left`/`Right` move between pictures. `Home`/`End` jump to the ends, `Space` plays or pauses a slideshow (and pages the stacked view), and `Esc` returns to one-by-one. Folder changes made in the Explorer refresh an open gallery. `gallery://` tabs are never written into a saved group, so restarting brings back files only.
+
+A picture that is also text — an SVG above all — can be looked at either way. Switched to text-only it says so in a hint, whose **Show the picture** goes straight to the picture and whose `×` sends the notice away for that file.
 
 ## Batch rename
 
@@ -211,7 +226,8 @@ commands the frontend can call. By purpose: open/save/drafts (`open_file`, `save
 session (`get_groups`, `save_groups`, `transfer_tabs`, `get_window_state`, `save_window_state`,
 `plan_window_placement`), settings, backups and the context menu (`get_settings`, `save_settings`,
 `get_store_dirs`, `create_config_backup`, `list_config_backups`, `restore_config_backup`,
-`maybe_auto_backup`, `context_menu_target`, `install_context_menu`, `uninstall_context_menu`), version
+`maybe_auto_backup`, `context_menu_target`, `install_context_menu`, `uninstall_context_menu`), PDF
+reading (`read_file_range`, `get_pdf_position`, `save_pdf_position`), version
 history (`versioning_state`, `set_version_override`, `add_version`, `get_versions`,
 `get_version_content`, `list_versions`, `clear_versions`), and encryption
 (`unlock_file`, `lock_file`, `lock_all`, `save_file_as_encrypted`, `create_encrypted`,

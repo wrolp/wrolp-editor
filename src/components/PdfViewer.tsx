@@ -1162,8 +1162,8 @@ export default function PdfViewer({
     return () => cancelAnimationFrame(frame);
   }, [autoScroll, speed]);
 
-  // A wheel or a drag means the reader has taken over; the automatic scroll steps aside rather
-  // than fighting the hand that is already moving the page.
+  // A wheel or a double click means the reader has taken over; the automatic scroll steps aside
+  // rather than fighting the hand that is already moving the page.
   const pauseForHand = useCallback(() => {
     setAutoScroll((on) => (on ? false : on));
   }, []);
