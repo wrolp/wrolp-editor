@@ -1076,6 +1076,56 @@ textarea.ver-note-body {
 .ctx-item:hover .ctx-check {
   color: var(--on-accent);
 }
+/* A row that opens a second-level menu points at it from the same end of the row a tick
+   sits at, so the two never argue over the label. */
+.ctx-sub {
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--muted);
+}
+.ctx-item:hover .ctx-sub {
+  color: inherit;
+}
+/* A flyout's row carries its own menu inside this wrapper: the wrapper is what the pointer
+   has to leave for the flyout to close, so walking from the row onto the flyout — a DOM
+   child of it — keeps the second level open. The row stays lit while that is happening,
+   which is what says the flyout belongs to it. */
+.ctx-subwrap {
+  position: relative;
+}
+.ctx-subwrap:hover > .ctx-item {
+  background: var(--accent-soft);
+  color: var(--text-strong);
+}
+/* The second level opens beside the row instead of replacing the menu, and sits above it in
+   the stack. Fixed like the menu it belongs to: an `absolute` child of a scrolled menu would
+   be clipped by it. */
+/* 270px is the measured width the longest Chinese row needs on one line (显示缩略图（minimap）
+   with its value and arrow); the longer English labels wrap instead of overflowing. */
+.ctx-flyout {
+  z-index: 101;
+  width: 270px;
+}
+/* The settings rows are a label, its current value and an arrow. A long label — the English
+   "Detect indentation from file" is the widest — wraps rather than pushing the value out of
+   the flyout. */
+.ctx-flyout .ctx-item {
+  white-space: normal;
+}
+/* The value a setting resolves to, read at the end of the row. A value already claims the
+   free space, so an arrow after it only gets the padding it asks for. */
+.ctx-value {
+  margin-left: auto;
+  padding-left: 16px;
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+.ctx-value + .ctx-sub {
+  margin-left: 0;
+}
+.ctx-item:hover .ctx-value {
+  color: var(--on-accent);
+}
 
 /* ---------- Main area: sidebar + editor ---------- */
 .main {

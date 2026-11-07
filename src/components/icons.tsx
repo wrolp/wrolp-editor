@@ -392,6 +392,75 @@ export function IconMinimap({ size = 14 }: IconProps) {
 }
 
 /**
+ * Visible whitespace: the three marks an editor draws where the spaces are. The line beneath
+ * them is the text they sit between, which is what keeps them from reading as an ellipsis.
+ */
+export function IconWhitespace({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <circle cx="6.5" cy="10" r="1.3" />
+      <circle cx="12" cy="10" r="1.3" />
+      <circle cx="17.5" cy="10" r="1.3" />
+      <line x1="4" y1="16.5" x2="20" y2="16.5" />
+    </svg>
+  );
+}
+
+/** Indentation width: a distance marked out between two ends. */
+export function IconIndentWidth({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <line x1="4" y1="6" x2="4" y2="18" />
+      <line x1="20" y1="6" x2="20" y2="18" />
+      <line x1="5.5" y1="12" x2="18.5" y2="12" />
+    </svg>
+  );
+}
+
+/** A tab stop: the arrow that runs up against a fixed column. */
+export function IconTabStop({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <line x1="19" y1="5" x2="19" y2="19" />
+      <line x1="4" y1="12" x2="15.5" y2="12" />
+      <polyline points="12.5 8.5 16 12 12.5 15.5" />
+    </svg>
+  );
+}
+
+/** Sticky scroll: the enclosing scope held at the top while the text runs on underneath. */
+export function IconStickyScroll({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <rect x="4" y="3.5" width="16" height="17" rx="2" />
+      <line x1="4" y1="9" x2="20" y2="9" />
+      <line x1="8" y1="14" x2="16" y2="14" />
+      <line x1="8" y1="17.5" x2="14" y2="17.5" />
+    </svg>
+  );
+}
+
+/** Detection: the magnifier that reads the file rather than a setting. */
+export function IconDetect({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <circle cx="10.5" cy="10.5" r="6" />
+      <line x1="15" y1="15" x2="20" y2="20" />
+    </svg>
+  );
+}
+
+/** A line ending: the return a paragraph makes at the end of its last line. */
+export function IconLineEnding({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <path d="M20 5v6a4 4 0 0 1-4 4H6" />
+      <polyline points="9 11.5 5.5 15 9 18.5" />
+    </svg>
+  );
+}
+
+/**
  * A file under encryption.
  *
  * `locked` closes the shackle: the same shape says "this document is encrypted" and "this

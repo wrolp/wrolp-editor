@@ -3,9 +3,11 @@ import {
   lazy,
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
+  type ComponentType,
   type CSSProperties,
 } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -50,8 +52,11 @@ import {
   IconClose,
   IconCompare,
   IconCopy,
+  IconDetect,
   IconFile,
   IconFolder,
+  IconIndentWidth,
+  IconLineEnding,
   IconLock,
   IconMinimap,
   IconModePreview,
@@ -61,7 +66,11 @@ import {
   IconReload,
   IconSettings,
   IconSidebar,
+  IconStickyScroll,
+  IconTabStop,
   IconVersions,
+  IconWhitespace,
+  IconWordWrap,
 } from "./components/icons";
 import { useDraft } from "./hooks/useDraft";
 import { useEditorTabs } from "./hooks/useEditorTabs";
@@ -92,6 +101,7 @@ import {
 import { printMarkdown } from "./lib/markdownExport";
 import { renderDocx, saveDocx } from "./lib/docxExport";
 import {
+  LINE_ENDINGS,
   isFileTab,
   isLockedBlank,
   lineEndingFor,
@@ -117,6 +127,7 @@ import {
   pickFolder,
   pickSaveAs,
   revealItemInDir,
+  type FileSettings,
   type FolderHistoryEntry,
   type GitCommitFile,
   type GitDiffText,
@@ -394,6 +405,34 @@ const TOAST_MS = 4000;
  */
 const TOAST_LINGER_MS = 2500;
 
+/**
+ * Width of the tab menu's flyout, in pixels. Kept in step with `.ctx-flyout` in the
+ * stylesheet: it is what decides whether there is room to open beside the row or only over
+ * it, and the measured correction afterwards can pull the flyout inward but not re-flip it.
+ */
+const FLYOUT_WIDTH = 270;
+
+/**
+ * The per-file settings the tab menu writes, in the order the dialog lists them. The label is
+ * an i18n key, so the table is fixed and each read takes the language the window is in.
+ */
+const FILE_SETTING_ROWS: {
+  key: keyof FileSettings;
+  label: string;
+  icon: ComponentType<{ size?: number }>;
+}[] = [
+  { key: "renderWhitespace", label: "settings.renderWhitespace", icon: IconWhitespace },
+  { key: "wordWrap", label: "settings.wordWrap", icon: IconWordWrap },
+  { key: "stickyScroll", label: "settings.stickyScroll", icon: IconStickyScroll },
+  { key: "tabSize", label: "settings.tabSize", icon: IconIndentWidth },
+  { key: "insertSpaces", label: "settings.insertSpaces", icon: IconTabStop },
+  { key: "detectIndentation", label: "settings.detectIndentation", icon: IconDetect },
+  { key: "minimap", label: "settings.minimap", icon: IconMinimap },
+  { key: "encoding", label: "settings.encoding", icon: IconFile },
+  { key: "lineEnding", label: "settings.lineEnding", icon: IconLineEnding },
+  { key: "versioning", label: "fileSettingsMenu.versioning", icon: IconVersions },
+];
+
 export default function App() {
   const [toastState, setToastState] = useState({ message: "", visible: false });
   const toastTimer = useRef<number | undefined>(undefined);
@@ -499,6 +538,32 @@ export default function App() {
   } | null>(null);
   const tabMenuRef = useRef<HTMLDivElement>(null);
   const tabMenuAt = useMenuPlacement(tabMenu, tabMenuRef);
+  /**
+   * Where the file-settings flyout sits, or null while it is closed. A flyout beside the
+   * row rather than a panel in place of the menu: the file actions stay where the eye left
+   * them, and the settings are a side trip rather than a place the menu moved to.
+   */
+  const [settingsMenuAt, setSettingsMenuAt] = useState<{ left: number; top: number } | null>(
+    null
+  );
+  const settingsMenuRef = useRef<HTMLDivElement>(null);
+  /**
+   * Where the flyout sat when it opened. A choice list is hung from the row that was clicked,
+   * lower down the list, so "back" has to put the flyout where it was rather than leave it at
+   * that height — otherwise returning to the list reads as the menu having slid downward.
+   */
+  const settingsMenuHome = useRef<{ left: number; top: number } | null>(null);
+  /**
+   * The setting whose choices the flyout is showing, or null while it lists the settings.
+   * A choice list replaces the list in the same flyout, the way the group rows swap the tab
+   * menu: one surface, one back row.
+   */
+  const [settingsPick, setSettingsPick] = useState<keyof FileSettings | null>(null);
+  /**
+   * The encodings the backend accepts, as `[value, label]` pairs. Read from the backend once
+   * per run rather than copied here, so this list and the dialog's cannot drift apart.
+   */
+  const [settingsEncodings, setSettingsEncodings] = useState<[string, string][] | null>(null);
   /** The tab whose name is being edited in place, or null. */
   const [renamingTab, setRenamingTab] = useState<number | null>(null);
   /** The tabs waiting on the unsaved-changes prompt, in the order they were closed. */
@@ -1691,23 +1756,14 @@ export default function App() {
     return tabs.tabs.find((tab) => tab.id === tabMenu.tabId)?.path ?? null;
   }, [tabMenu, tabs.tabs]);
 
-  /**
-   * Flip the minimap for one file. The menu is a quick toggle, so it writes a concrete
-   * true/false; "follow global" stays reachable through the per-file dialog. Other
-   * overrides on the same file are carried over, since saving replaces the whole entry.
-   */
-  const toggleFileMinimap = useCallback(
-    (path: string) => {
-      const tab = tabs.tabs.find((t) => t.path === path);
-      if (!tab) return;
-      const on = tab.fileSettings.minimap ?? settings.minimap;
-      void tabs.setFileSettings(path, { ...tab.fileSettings, minimap: !on });
-    },
-    [settings.minimap, tabs]
-  );
-
   useEffect(() => {
-    if (!tabMenu) return;
+    // A flyout belongs to the menu that raised it: once that is gone there is nothing left
+    // for it to sit beside.
+    if (!tabMenu) {
+      setSettingsMenuAt(null);
+      setSettingsPick(null);
+      return;
+    }
     const hide = (e: MouseEvent) => {
       const target = e.target as Node | null;
       // Panel switching happens by clicking inside the menu; that must not close it.
@@ -1736,6 +1792,70 @@ export default function App() {
       window.removeEventListener("blur", onBlur);
     };
   }, [tabMenu]);
+
+  /**
+   * Opens the per-file settings beside the row that names them. The flyout is guessed to the
+   * right of the row and flipped to its left when the window has no room there; the measured
+   * correction in the layout effect below then pulls it back inside either edge.
+   */
+  const openSettingsMenu = (row: HTMLElement) => {
+    const rect = row.getBoundingClientRect();
+    const at = {
+      // Overlaps the row by a couple of pixels rather than sitting a gap away from it: the
+      // flyout closes when the pointer leaves the row's wrapper, and a gap would be a strip
+      // of the menu behind it that the pointer has to cross — closing the flyout on the way
+      // into it. The two pixels are padding, so nothing of the menu is hidden by them.
+      left:
+        rect.right + FLYOUT_WIDTH + 8 <= window.innerWidth
+          ? rect.right - 2
+          : rect.left - FLYOUT_WIDTH + 2,
+      top: rect.top - 5,
+    };
+    // Remembered as opened, not as clamped: the measured correction below may move it, and
+    // "back" should end up at the same place either way.
+    settingsMenuHome.current = at;
+    setSettingsMenuAt(at);
+    // Every open starts on the list, not on whatever was being picked when it last closed.
+    setSettingsPick(null);
+    // The encoding choices are the backend's list, fetched the way the dialog fetches it and
+    // kept for the rest of the run: the set of encodings does not change while the app runs.
+    const path = menuTabPath;
+    if (path && !isUntitled(path) && settingsEncodings === null) {
+      api
+        .fileSettingsView(path)
+        .then((view) => setSettingsEncodings(view.encodings))
+        .catch(() => setSettingsEncodings(null));
+    }
+  };
+
+  // Measured after render rather than trusted from the guess: a row near the bottom edge
+  // would otherwise put the flyout's last item out of reach, below the window. Re-measured
+  // when the view changes too, because a choice list and the settings list are far apart in
+  // height and either can be the one that does not fit.
+  useLayoutEffect(() => {
+    const el = settingsMenuRef.current;
+    if (!el || !settingsMenuAt) return;
+    const { width, height } = el.getBoundingClientRect();
+    const left = Math.max(8, Math.min(settingsMenuAt.left, window.innerWidth - width - 8));
+    const top = Math.max(8, Math.min(settingsMenuAt.top, window.innerHeight - height - 8));
+    if (left !== settingsMenuAt.left || top !== settingsMenuAt.top) {
+      setSettingsMenuAt({ left, top });
+    }
+  }, [settingsMenuAt, settingsPick]);
+
+  /**
+   * Steps into one setting's choices, and re-hangs the flyout from the row that was clicked.
+   *
+   * The choice list is much shorter than the settings list it replaces, so a flyout that
+   * kept the list's top would shrink upward from the bottom and leave the pointer outside
+   * itself — and leaving the row's wrapper is exactly what dismisses the second level, so
+   * the choices would close on the click that asked for them.
+   */
+  const openSettingsPick = (key: keyof FileSettings, row: HTMLElement) => {
+    const rect = row.getBoundingClientRect();
+    setSettingsMenuAt((at) => at && { left: at.left, top: Math.max(8, rect.top - 5) });
+    setSettingsPick(key);
+  };
 
   /**
    * Hand a file to the OS's default application. Anything whose extension means "program,
@@ -2553,7 +2673,115 @@ export default function App() {
     },
     [tabs, toast]
   );
-  const menuMinimapOn = menuTab?.fileSettings.minimap ?? settings.minimap;
+  /**
+   * The rows of the settings flyout: each per-file field, and what it resolves to right now —
+   * the file's own value where it has one, the global default otherwise. Only a file on disk
+   * has an entry to keep the overrides in, so a scratch buffer gets no such rows.
+   */
+  const fileSettingRows = (() => {
+    if (!menuTab || isUntitled(menuTab.path)) return [];
+    const own = menuTab.fileSettings;
+    const onOff = (value: boolean) => t(value ? "fileSettingsMenu.on" : "fileSettingsMenu.off");
+    const encodingName = (value: string) => {
+      const pair = settingsEncodings?.find(([option]) => option === value);
+      return pair ? t(`settings.enc.${pair[1]}`) : value;
+    };
+    const values: Record<keyof FileSettings, string> = {
+      renderWhitespace: t(
+        `settings.whitespace.${own.renderWhitespace ?? settings.renderWhitespace}`
+      ),
+      wordWrap: onOff(own.wordWrap ?? settings.wordWrap),
+      stickyScroll: onOff(own.stickyScroll ?? settings.stickyScroll),
+      tabSize: String(own.tabSize ?? settings.tabSize),
+      insertSpaces: onOff(own.insertSpaces ?? settings.insertSpaces),
+      detectIndentation: onOff(own.detectIndentation ?? settings.detectIndentation),
+      minimap: onOff(own.minimap ?? settings.minimap),
+      // Without an override the file is read in whatever its bytes turned out to be, which is
+      // the honest answer here: the global "auto" says nothing about this one document.
+      encoding: encodingName(own.encoding ?? menuTab.encoding),
+      lineEnding: eolLabel(lineEndingFor(menuTab, settings.lineEnding)),
+      versioning: t(
+        (own.versioning ?? (settings.versioningEnabled ? "on" : "off")) === "on"
+          ? "ver.on"
+          : "ver.off"
+      ),
+    };
+    return FILE_SETTING_ROWS.map((row) => ({ ...row, value: values[row.key] }));
+  })();
+
+  /**
+   * The entries one setting's pick list offers. The first is "take the default" — worded
+   * differently where leaving the field alone means something other than following a setting,
+   * which is the line ending: it keeps whatever the file was read with.
+   */
+  const fileSettingChoices = (
+    key: keyof FileSettings
+  ): { value: string | number | boolean | null; label: string }[] => {
+    const follow = { value: null, label: t("fileSettingsMenu.follow") };
+    switch (key) {
+      case "renderWhitespace":
+        return [
+          follow,
+          ...WHITESPACE_MODES.map((mode) => ({
+            value: mode,
+            label: t(`settings.whitespace.${mode}`),
+          })),
+        ];
+      case "wordWrap":
+      case "stickyScroll":
+      case "insertSpaces":
+      case "detectIndentation":
+      case "minimap":
+        return [
+          follow,
+          { value: true, label: t("fileSettingsMenu.on") },
+          { value: false, label: t("fileSettingsMenu.off") },
+        ];
+      case "tabSize":
+        return [follow, ...[2, 4, 8].map((size) => ({ value: size, label: String(size) }))];
+      case "encoding":
+        return [
+          follow,
+          ...(settingsEncodings ?? []).map(([value, name]) => ({
+            value,
+            label: t(`settings.enc.${name}`),
+          })),
+        ];
+      case "lineEnding":
+        return [
+          {
+            value: null,
+            label: t("fileSettings.keepAsIs", {
+              eol: eolLabel(menuTab ? lineEndingFor(menuTab, settings.lineEnding) : ""),
+            }),
+          },
+          ...LINE_ENDINGS.map((value) => ({ value, label: t(`settings.lineEnding.${value}`) })),
+        ];
+      case "versioning":
+        return [
+          follow,
+          { value: "on", label: t("ver.on") },
+          { value: "off", label: t("ver.off") },
+        ];
+      default:
+        return [follow];
+    }
+  };
+
+  /**
+   * Writes one field of this file's overrides. The backend replaces the whole record, so the
+   * other fields are carried over as they stand; the choice list then steps back to the list
+   * so a second setting is one more click away.
+   */
+  const chooseFileSetting = (key: keyof FileSettings, value: string | number | boolean | null) => {
+    if (!menuTab) return;
+    void tabs.setFileSettings(menuTab.path, {
+      ...menuTab.fileSettings,
+      [key]: value,
+    } as FileSettings);
+    setSettingsPick(null);
+  };
+
   const wordWrap = editorTab?.fileSettings.wordWrap ?? settings.wordWrap;
   const stickyScroll = editorTab?.fileSettings.stickyScroll ?? settings.stickyScroll;
   const minimap = editorTab?.fileSettings.minimap ?? settings.minimap;
@@ -2827,7 +3055,12 @@ const defaultModeFor = useCallback(
         onClose={requestClose}
         onSave={handSave}
         onReorder={tabs.moveTab}
-        onTabContextMenu={(tabId, x, y) => setTabMenu({ tabId, x, y, panel: "root" })}
+        onTabContextMenu={(tabId, x, y) => {
+          // A menu re-pointed at another tab starts at the root, with no flyout left over
+          // from the previous one.
+          setSettingsMenuAt(null);
+          setTabMenu({ tabId, x, y, panel: "root" });
+        }}
         renamingId={renamingTab}
         onRenameTab={renameTab}
         onRenameTabEnd={() => setRenamingTab(null)}
@@ -3243,6 +3476,11 @@ const defaultModeFor = useCallback(
           className="ctx-menu"
           ref={tabMenuRef}
           style={{ display: "block", left: tabMenuAt.left, top: tabMenuAt.top }}
+          // A row that opens a panel or a choice list removes itself from the document while
+          // React commits the click. The window's dismiss listener would then be handed a
+          // detached target, `contains` would say "outside", and it would close the menu the
+          // click had just navigated. Keeping the click inside the menu settles that first.
+          onClick={(e) => e.stopPropagation()}
         >
           {tabMenu.panel === "root" && !menuTabIsFile ? (
             /* A comparison or the Settings panel is not a file, so every path action in
@@ -3515,55 +3753,132 @@ const defaultModeFor = useCallback(
                   </div>
                 )
               )}
-              <div
-                className="ctx-item"
-                onClick={() => {
-                  setTabMenu(null);
-                  setFileSettingsFor(menuTabPath);
-                }}
-              >
-                <span className="ctx-icon">
-                  <IconSettings size={14} />
-                </span>
-                {t("title.menuFileSettings")}
-              </div>
-              <div
-                className="ctx-item"
-                onClick={() => {
-                  if (menuTabPath) toggleFileMinimap(menuTabPath);
-                  setTabMenu(null);
-                }}
-              >
-                <span className="ctx-icon">
-                  <IconMinimap size={14} />
-                </span>
-                {t("title.menuMinimap")}
-                <span className="ctx-check">{menuMinimapOn ? "✓" : ""}</span>
-              </div>
-              {/* A raster image has no text pane to toggle to, so it is not offered. */}
-              {!isBitmapImage(menuTabPath) && (
+              {/* Everything the file-settings dialog holds opens beside the row, one level
+                  down and out of the way of the actions that change the file itself.
+                  Hovering is enough: a flyout is a side trip, not a place the menu
+                  navigates to, so those actions stay where the eye left them. */}
+              <div className="ctx-subwrap" onMouseLeave={() => setSettingsMenuAt(null)}>
                 <div
                   className="ctx-item"
-                  onClick={() => {
-                    if (menuTabPath) togglePreview(menuTabPath);
-                    setTabMenu(null);
-                  }}
+                  onMouseEnter={(e) => openSettingsMenu(e.currentTarget)}
+                  onClick={(e) => openSettingsMenu(e.currentTarget)}
                 >
                   <span className="ctx-icon">
-                    <IconModePreview size={14} />
+                    <IconSettings size={14} />
                   </span>
-                  {t("title.menuPreview")}
-                  <span className="ctx-check">
-                    {menuTabPath &&
-                    (previewPref[menuTabPath] ?? defaultModeFor(menuTabPath)) !== "text"
-                      ? "✓"
-                      : ""}
-                  </span>
+                  {t("title.menuFileSettingsGroup")}
+                  <span className="ctx-sub">›</span>
                 </div>
-              )}
+                {settingsMenuAt && (
+                  <div
+                    className="ctx-menu ctx-flyout"
+                    ref={settingsMenuRef}
+                    style={{ left: settingsMenuAt.left, top: settingsMenuAt.top }}
+                  >
+                    {settingsPick === null ? (
+                      <>
+                        {/* Preview is a layout rather than an override kept per file, so it
+                            stays a plain switch at the top of the list. A raster image has no
+                            text pane to toggle to, so it is not offered there. */}
+                        {!isBitmapImage(menuTabPath) && (
+                          <div
+                            className="ctx-item"
+                            onClick={() => {
+                              if (menuTabPath) togglePreview(menuTabPath);
+                              setTabMenu(null);
+                            }}
+                          >
+                            <span className="ctx-icon">
+                              <IconModePreview size={14} />
+                            </span>
+                            {t("title.menuPreview")}
+                            <span className="ctx-check">
+                              {menuTabPath &&
+                              (previewPref[menuTabPath] ?? defaultModeFor(menuTabPath)) !== "text"
+                                ? "✓"
+                                : ""}
+                            </span>
+                          </div>
+                        )}
+                        {fileSettingRows.length > 0 && (
+                          <>
+                            <div className="ws-sep" />
+                            {fileSettingRows.map(({ key, label, value, icon: Icon }) => (
+                              <div
+                                key={key}
+                                className="ctx-item"
+                                onClick={(e) => openSettingsPick(key, e.currentTarget)}
+                              >
+                                <span className="ctx-icon">
+                                  <Icon size={14} />
+                                </span>
+                                {t(label)}
+                                <span className="ctx-value">{value}</span>
+                                <span className="ctx-sub">›</span>
+                              </div>
+                            ))}
+                          </>
+                        )}
+                        <div className="ws-sep" />
+                        <div
+                          className="ctx-item"
+                          onClick={() => {
+                            setTabMenu(null);
+                            setFileSettingsFor(menuTabPath);
+                          }}
+                        >
+                          <span className="ctx-icon">
+                            <IconSettings size={14} />
+                          </span>
+                          {t("title.menuFileSettings")}
+                        </div>
+                      </>
+                    ) : (
+                      /* One setting's choices, in place of the list it came from. */
+                      <>
+                        <div
+                          className="ctx-item"
+                          onClick={() => {
+                            // Back to where the list opened, rather than to the height of the
+                            // row that was picked.
+                            if (settingsMenuHome.current) setSettingsMenuAt(settingsMenuHome.current);
+                            setSettingsPick(null);
+                          }}
+                        >
+                          <span className="ctx-icon">←</span>
+                          {t("grp.back")}
+                        </div>
+                        <div className="ws-sep" />
+                        {fileSettingChoices(settingsPick).map((choice) => (
+                          <div
+                            key={String(choice.value)}
+                            className="ctx-item"
+                            onClick={() => chooseFileSetting(settingsPick, choice.value)}
+                          >
+                            <span className="ctx-icon" />
+                            {choice.label}
+                            <span className="ctx-check">
+                              {(menuTab?.fileSettings[settingsPick] ?? null) === choice.value
+                                ? "✓"
+                                : ""}
+                            </span>
+                          </div>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
               <div className="ws-sep" />
               {(["move", "copy", "moveAll"] as const).map((panel) => (
-                <div key={panel} className="ctx-item" onClick={() => setTabMenu({ ...tabMenu, panel })}>
+                <div
+                  key={panel}
+                  className="ctx-item"
+                  onClick={() => {
+                    setSettingsMenuAt(null);
+                    setTabMenu({ ...tabMenu, panel });
+                  }}
+                >
                   {/* A copy leaves the tab behind, a move does not — the only difference
                       between two rows that otherwise read the same. */}
                   <span className="ctx-icon">

@@ -713,6 +713,7 @@ const EN: Table = {
   "err.text_not_encodable": "The text contains characters this file's encoding cannot hold. Save as UTF-8 instead.",
 
   "title.menuFileSettings": "File settings…",
+  "title.menuFileSettingsGroup": "File settings",
   "title.menuMinimap": "Show minimap",
   "cmp.menu": "Compare with…",
   "cmp.withSaved": "Compare with saved version",
@@ -889,6 +890,10 @@ const EN: Table = {
   "fileSettings.resetAll": "Reset to global",
   "fileSettings.cancel": "Cancel",
   "fileSettings.save": "Save",
+  "fileSettingsMenu.follow": "Follow global",
+  "fileSettingsMenu.on": "On",
+  "fileSettingsMenu.off": "Off",
+  "fileSettingsMenu.versioning": "Version history",
 
   "grp.chip": "Groups",
   "grp.new": "New group…",
@@ -1758,6 +1763,7 @@ const ZH: Table = {
   "err.text_not_encodable": "文本中含有该文件编码无法表示的字符，请改存为 UTF-8。",
 
   "title.menuFileSettings": "文件设置…",
+  "title.menuFileSettingsGroup": "文件设置",
   "title.menuMinimap": "显示缩略图",
   "cmp.menu": "与…对比",
   "cmp.withSaved": "与已保存版本比对",
@@ -1934,6 +1940,10 @@ const ZH: Table = {
   "fileSettings.resetAll": "恢复全局默认",
   "fileSettings.cancel": "取消",
   "fileSettings.save": "保存",
+  "fileSettingsMenu.follow": "跟随全局",
+  "fileSettingsMenu.on": "开",
+  "fileSettingsMenu.off": "关",
+  "fileSettingsMenu.versioning": "版本记录",
 
   "grp.chip": "分组",
   "grp.new": "新建分组…",
