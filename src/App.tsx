@@ -1582,6 +1582,36 @@ export default function App() {
     [toast]
   );
 
+  /** Files dropped anywhere but the Explorer open as tabs, one per path. */
+  const openDroppedFiles = useCallback(
+    (paths: string[]) => {
+      for (const path of paths) void tabs.openPath(path);
+    },
+    [tabs]
+  );
+
+  /**
+   * Copy the paths a file drop carried into the Explorer folder they were dropped on. The
+   * window owns the drop event; the tree only says which folder that was.
+   */
+  const dropFiles = useCallback(
+    async (paths: string[], dir: string): Promise<boolean> => {
+      const report = await api.copyDroppedFiles(paths, dir).catch((e) => {
+        toast(errorMessage(e));
+        return null;
+      });
+      if (!report) return false;
+      toast(
+        t(report.failed > 0 ? "side.droppedFilesSome" : "side.droppedFiles", {
+          count: report.copied.length,
+          failed: report.failed,
+        })
+      );
+      return true;
+    },
+    [toast]
+  );
+
   /**
    * Delete a file, or a folder and everything in it. Only reached once the prompt has been
    * answered, which is the only thing standing between a stray click and a recursive delete.
@@ -3166,6 +3196,8 @@ const defaultModeFor = useCallback(
           onCreate={createEntry}
           onPaste={pasteEntry}
           onPasteFiles={pasteFiles}
+          onDropFiles={dropFiles}
+          onOpenDroppedFiles={openDroppedFiles}
           onDelete={deleteEntry}
           onError={toast}
         />

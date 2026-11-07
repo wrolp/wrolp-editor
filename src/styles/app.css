@@ -1613,6 +1613,15 @@ body.resizing .editor-host {
   outline-offset: -1px;
   color: var(--text-strong);
 }
+/* The folder a file dragged in from Explorer would land in. A thicker ring than a selection
+   has: the fills are already spoken for by hover and by the file the editor is showing, and a
+   drag in progress is a different question ("where would this go") from either of them. */
+.tree-row.folder.drop-target {
+  background: var(--surface-active);
+  outline: 2px solid var(--accent-soft);
+  outline-offset: -2px;
+  color: var(--text-strong);
+}
 .tree-row .chev {
   flex: 0 0 12px;
   width: 12px;

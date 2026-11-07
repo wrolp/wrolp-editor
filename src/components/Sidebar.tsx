@@ -9,6 +9,7 @@ import {
   type CSSProperties,
   type ReactNode,
 } from "react";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { formatWhen, t } from "../lib/i18n";
 import {
   IconChevron,
@@ -403,6 +404,8 @@ function FileRow({
         className={`tree-row file${active ? " ctx-active" : ""}${selected.has(key) ? " sel" : ""}${
           ignored ? " ctx-ignored" : ""
         }`}
+        // A file drop over this row belongs in the folder holding it.
+        data-dir={parentOf(entry.path)}
         style={indent(depth)}
         // A click inside the row is the edit taking or losing the focus, not a request to
         // open the file the row happens to name.
@@ -560,6 +563,8 @@ function FolderNode({
           className={`tree-row folder${collapsed ? " collapsed" : ""}${selected.has(key) ? " sel" : ""}${
             folderIgnored ? " ctx-ignored" : ""
           }`}
+          // A file drop over a folder row belongs inside that folder.
+          data-dir={entry.path.replace(/[\\/]+$/, "")}
           style={indent(depth)}
           onClick={
             editing
@@ -810,6 +815,13 @@ interface Props extends Omit<
    * Resolves false when nothing landed, which leaves the tree showing what it already has.
    */
   onPasteFiles: (dir: string) => Promise<boolean>;
+  /**
+   * Copies the paths Windows Explorer dropped onto the tree into `dir`. Resolves false when
+   * nothing landed, which leaves the tree showing what it already has.
+   */
+  onDropFiles: (paths: string[], dir: string) => Promise<boolean>;
+  /** Open the paths dropped outside the Explorer as tabs, the way an editor takes a file. */
+  onOpenDroppedFiles: (paths: string[]) => void;
   /**
    * Deletes a file, or a folder and everything in it. The prompt is asked here rather than
    * in the tree, and the caller is only reached once the user has answered it.
@@ -1185,6 +1197,195 @@ export default function Sidebar(props: Props) {
     if (!(await props.onPasteFiles(dir))) return;
     bumpFolder(dir);
   };
+
+  /**
+   * The two gestures that bring files in from Windows Explorer. Both are window-level, not
+   * DOM events: WebView2 hands a file drop to Tauri rather than to the page, and the system
+   * clipboard is read by the backend. A ref keeps each listener registered once while still
+   * reading the folder, the view and the callbacks as they are now.
+   */
+  const dropState = {
+    onDropFiles: props.onDropFiles,
+    onOpenDroppedFiles: props.onOpenDroppedFiles,
+    onPasteFiles: props.onPasteFiles,
+    bumpFolder,
+    rootDir,
+    view,
+    visible,
+    width,
+  };
+  const dropRef = useRef(dropState);
+  dropRef.current = dropState;
+
+  /**
+   * The element under a drag position.
+   *
+   * Tauri reports physical pixels and `elementFromPoint` wants CSS ones, so the position is
+   * divided by the scale factor — always, with no "try it unscaled first" fallback. At 200%
+   * that fallback found a row: the doubled x still lands inside the sidebar, and the doubled y
+   * lands a few rows further down, so the folder under the pointer was reported as the one
+   * after it.
+   */
+  const elementAt = (position: { x: number; y: number }): HTMLElement | null => {
+    const scale = window.devicePixelRatio || 1;
+    return document.elementFromPoint(position.x / scale, position.y / scale) as HTMLElement | null;
+  };
+
+  /**
+   * Lights up the folder a drop would land in. Written straight to the row's class rather than
+   * through state: a drag reports a position many times a second, and re-rendering the tree on
+   * each of those is not worth a highlight.
+   */
+  const dropTargetRow = useRef<HTMLElement | null>(null);
+  const markDropTarget = (phase: string, position: { x: number; y: number }) => {
+    const clear = () => {
+      dropTargetRow.current?.classList.remove("drop-target");
+      dropTargetRow.current = null;
+    };
+    // Only a drag in the air lights anything: a drop ends it, and so does leaving the window.
+    if (phase !== "enter" && phase !== "over") {
+      clear();
+      return;
+    }
+    const state = dropRef.current;
+    if (!state.visible || state.view !== "explorer") {
+      clear();
+      return;
+    }
+    const row = elementAt(position)?.closest<HTMLElement>(".tree-row.folder") ?? null;
+    if (row === dropTargetRow.current) return;
+    clear();
+    row?.classList.add("drop-target");
+    dropTargetRow.current = row;
+  };
+
+  /**
+   * The same drop reaches the page twice: once as Tauri's `tauri://drag-drop` and once as
+   * `wrolp:file-drop`, emitted by the window event loop. Whichever arrives first does the
+   * work; the other is the same set of paths a moment later.
+   */
+  const lastDrop = useRef<{ key: string; at: number } | null>(null);
+  const handleFileDrop = (paths: string[], position: { x: number; y: number }) => {
+    if (!paths.length) return;
+    const key = paths.join("\u0000");
+    const now = Date.now();
+    if (lastDrop.current && lastDrop.current.key === key && now - lastDrop.current.at < 800) {
+      return;
+    }
+    lastDrop.current = { key, at: now };
+    const state = dropRef.current;
+    const scale = window.devicePixelRatio || 1;
+    const hit = elementAt(position);
+    // A hit test can come back empty during a native drag, so the sidebar's own column
+    // is a second way to recognise a drop over the tree.
+    const overSidebar =
+      state.visible && (!!hit?.closest(".sidebar") || position.x / scale <= state.width);
+    const dir = hit?.closest<HTMLElement>("[data-dir]")?.dataset.dir || state.rootDir;
+    // Over the Explorer the files land in the folder it names. Everywhere else — the
+    // editor, the other sidebar views, a hidden sidebar — a file dropped on an editor
+    // opens as a tab, which is what makes the gesture visible wherever it lands.
+    if (overSidebar && state.view === "explorer" && dir) {
+      void state.onDropFiles(paths, dir).then((ok) => {
+        if (ok) state.bumpFolder(dir);
+      });
+    } else {
+      state.onOpenDroppedFiles(paths);
+    }
+  };
+  const dropHandler = useRef(handleFileDrop);
+  dropHandler.current = handleFileDrop;
+  const dragMark = useRef(markDropTarget);
+  dragMark.current = markDropTarget;
+
+  useEffect(() => {
+    let alive = true;
+    let stopWindow: (() => void) | undefined;
+    let stops: ((() => void) | undefined)[] = [];
+    void getCurrentWindow()
+      .onDragDropEvent((event) => {
+        const payload = event.payload;
+        if (payload.type === "drop") {
+          dragMark.current("leave", payload.position);
+          dropHandler.current(payload.paths, payload.position);
+          return;
+        }
+        if (payload.type === "enter" || payload.type === "over") {
+          dragMark.current(payload.type, payload.position);
+          return;
+        }
+        // `leave`: the drag was cancelled or left the window.
+        dragMark.current("leave", { x: 0, y: 0 });
+      })
+      .then((f) => {
+        if (alive) stopWindow = f;
+        else f();
+      });
+    const subscribe = (
+      event: string,
+      handler: (payload: { paths?: string[]; phase?: string; x: number; y: number }) => void
+    ) =>
+      void listen<{ paths?: string[]; phase?: string; x: number; y: number }>(event, (e) =>
+        handler(e.payload)
+      ).then((f) => {
+        if (alive) stops.push(f);
+        else f();
+      });
+    subscribe("wrolp:file-drop", (payload) => {
+      const position = { x: payload.x, y: payload.y };
+      dragMark.current("leave", position);
+      if (payload.paths?.length) dropHandler.current(payload.paths, position);
+    });
+    subscribe("wrolp:file-drag", (payload) => {
+      dragMark.current(payload.phase ?? "leave", { x: payload.x, y: payload.y });
+    });
+    return () => {
+      alive = false;
+      stopWindow?.();
+      for (const stop of stops) stop?.();
+      stops = [];
+      dragMark.current("leave", { x: 0, y: 0 });
+    };
+  }, []);
+
+  /**
+   * Where the last press landed in this sidebar. A shortcut follows the last place used, and
+   * a press on a row names the folder that row belongs to; a press on the blank space of the
+   * tree names the folder being shown.
+   */
+  const sidebarPress = useRef<{ used: boolean; dir: string | null }>({ used: false, dir: null });
+  useEffect(() => {
+    const track = (e: PointerEvent) => {
+      const el = e.target as HTMLElement | null;
+      sidebarPress.current = {
+        used: !!el?.closest(".sidebar"),
+        dir: el?.closest<HTMLElement>("[data-dir]")?.dataset.dir ?? null,
+      };
+    };
+    window.addEventListener("pointerdown", track, true);
+    return () => window.removeEventListener("pointerdown", track, true);
+  }, []);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "v") return;
+      const el = e.target as HTMLElement | null;
+      // Monaco, a rename field and any dialog keep their own paste.
+      if (el?.closest("input, textarea, [contenteditable], .monaco-editor, .modal")) return;
+      // So does the rest of the window: a Ctrl+V aimed at the editor is not a request to
+      // copy files into the folder, even when the editor happens not to hold the focus.
+      if (!sidebarPress.current.used) return;
+      const state = dropRef.current;
+      if (!state.visible || state.view !== "explorer") return;
+      const dir = sidebarPress.current.dir || state.rootDir;
+      if (!dir) return;
+      e.preventDefault();
+      void state.onPasteFiles(dir).then((ok) => {
+        if (ok) state.bumpFolder(dir);
+      });
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   /**
    * Carry out a delete the user has confirmed. The prompt is the only thing standing

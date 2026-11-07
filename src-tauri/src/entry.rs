@@ -283,25 +283,20 @@ pub struct ClipboardPaste {
   pub failed: usize,
 }
 
-/// Copy every file the system clipboard lists into `target`.
+/// Copy a set of sources into `target`, whichever gesture supplied them.
 ///
 /// The copy itself is `copy_entry`, so the rules are the ones a paste inside the tree already
 /// follows: never overwrite, number a name that is taken, refuse system folders, and never
 /// copy a folder into itself. One source that cannot be taken does not stop the rest — the
 /// count comes back so the caller can say what happened — but when nothing lands, the first
 /// reason is the error, because that is the one worth showing.
-#[tauri::command(async)]
-pub fn paste_clipboard_files(target: String) -> Result<ClipboardPaste, String> {
+fn copy_sources(sources: Vec<PathBuf>, target: String) -> Result<ClipboardPaste, String> {
   let dir = draft::normalize_path(&target);
   if dir.is_empty() {
     return Err("path_empty".into());
   }
   if !Path::new(&dir).is_dir() {
     return Err("copy_no_target".into());
-  }
-  let sources = clipboard_files()?;
-  if sources.is_empty() {
-    return Err("clipboard_empty".into());
   }
   let mut copied: Vec<FsEntry> = Vec::new();
   let mut first_error: Option<String> = None;
@@ -320,6 +315,28 @@ pub fn paste_clipboard_files(target: String) -> Result<ClipboardPaste, String> {
     failed: sources.len() - copied.len(),
     copied,
   })
+}
+
+/// Copy every file the system clipboard lists into `target`.
+#[tauri::command(async)]
+pub fn paste_clipboard_files(target: String) -> Result<ClipboardPaste, String> {
+  let sources = clipboard_files()?;
+  if sources.is_empty() {
+    return Err("clipboard_empty".into());
+  }
+  copy_sources(sources, target)
+}
+
+/// Copy the paths Windows Explorer dropped on the window into `target`.
+///
+/// A drop already carries absolute paths, so there is no clipboard to read — but the naming,
+/// the refusals and the report are the very same ones a clipboard paste goes through.
+#[tauri::command(async)]
+pub fn copy_dropped_files(paths: Vec<String>, target: String) -> Result<ClipboardPaste, String> {
+  if paths.is_empty() {
+    return Err("clipboard_empty".into());
+  }
+  copy_sources(paths.into_iter().map(PathBuf::from).collect(), target)
 }
 
 /// The last segment of `path`, which for a numbered copy is the name it was given.

@@ -16,7 +16,35 @@ mod unlock;
 mod versioning;
 mod window;
 
-use tauri::Manager;
+use tauri::{DragDropEvent, Emitter, Manager, WindowEvent};
+
+/// What the window saw when files were dropped on it, handed to the page under our own name.
+///
+/// The JS `onDragDropEvent` listens on the window's event target; announcing the same drop
+/// here as well means one path that cannot be lost to event-target routing, with the page
+/// ignoring whichever of the two arrives second.
+#[derive(serde::Serialize, Clone)]
+struct FileDropPayload {
+  paths: Vec<String>,
+  x: f64,
+  y: f64,
+}
+
+/// One step of a drag still in the air, so the page can light up the folder under the pointer.
+#[derive(serde::Serialize, Clone)]
+struct FileDragPayload {
+  phase: String,
+  x: f64,
+  y: f64,
+}
+
+fn drag_phase(phase: &str, position: &tauri::PhysicalPosition<f64>) -> FileDragPayload {
+  FileDragPayload {
+    phase: phase.to_string(),
+    x: position.x,
+    y: position.y,
+  }
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -61,6 +89,7 @@ pub fn run() {
       entry::create_dir,
       entry::copy_entry,
       entry::paste_clipboard_files,
+      entry::copy_dropped_files,
       entry::keep_file,
       entry::remove_entry,
       commands::get_draft,
@@ -181,6 +210,35 @@ pub fn run() {
   }
 
   builder
+    .on_window_event(|window, event| {
+      let WindowEvent::DragDrop(drag) = event else {
+        return;
+      };
+      match drag {
+        DragDropEvent::Enter { position, .. } => {
+          let _ = window.emit("wrolp:file-drag", drag_phase("enter", position));
+        }
+        DragDropEvent::Over { position } => {
+          let _ = window.emit("wrolp:file-drag", drag_phase("over", position));
+        }
+        DragDropEvent::Leave => {
+          let _ = window.emit("wrolp:file-drag", drag_phase("leave", &(0.0, 0.0).into()));
+        }
+        DragDropEvent::Drop { paths, position } => {
+          let payload = FileDropPayload {
+            paths: paths
+              .iter()
+              .map(|p| p.to_string_lossy().into_owned())
+              .collect(),
+            x: position.x,
+            y: position.y,
+          };
+          let _ = window.emit("wrolp:file-drop", payload);
+          let _ = window.emit("wrolp:file-drag", drag_phase("leave", position));
+        }
+        _ => {}
+      }
+    })
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }

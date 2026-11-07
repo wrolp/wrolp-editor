@@ -855,6 +855,12 @@ export const api = {
   pasteClipboardFiles: (target: string) =>
     invoke<ClipboardPaste>("paste_clipboard_files", { target }),
   /**
+   * Copy the paths Windows Explorer dropped on the window into `target`. The same naming and
+   * refusal rules as a clipboard paste, with the same per-source report.
+   */
+  copyDroppedFiles: (paths: string[], target: string) =>
+    invoke<ClipboardPaste>("copy_dropped_files", { paths, target }),
+  /**
    * Delete a file, or a folder and everything in it, and stop the store pointing at it.
    *
    * Nothing is moved, so there is nothing to undo and nothing reaches the Recycle Bin: the
