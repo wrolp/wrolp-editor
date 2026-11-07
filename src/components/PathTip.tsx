@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent } from "react";
 
 /** How long the pointer has to rest before the bubble appears. */
 const TIP_DELAY_MS = 500;
@@ -103,9 +103,31 @@ export default function PathTip({
   name: string;
   detail: string;
 }) {
+  const ref = useRef<HTMLDivElement>(null);
+  /**
+   * A wrapped path makes the bubble taller than the two-line estimate its anchor placed it
+   * with, so the bottom is measured once and pulled back inside the window when it does not
+   * fit. Written straight to the node: this is a correction of one placement, not state the
+   * next render would need.
+   */
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el || !spot) return;
+    el.style.left = `${spot.x}px`;
+    el.style.top = `${spot.y}px`;
+    const rect = el.getBoundingClientRect();
+    // Below the row unless that would run past the bottom; mirrored to the cursor's left near
+    // the right edge, which can in turn overhang the left one.
+    const below = rect.bottom - (window.innerHeight - 8);
+    if (below > 0) el.style.top = `${Math.max(8, spot.y - below)}px`;
+    const left = 8 - rect.left;
+    if (left > 0) el.style.left = `${spot.x + left}px`;
+  }, [spot, name, detail]);
+
   if (!spot || !detail) return null;
   return (
     <div
+      ref={ref}
       className={`tree-tip${spot.alignEnd ? " align-end" : ""}`}
       style={{ left: spot.x, top: spot.y }}
       role="tooltip"

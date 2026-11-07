@@ -1345,17 +1345,18 @@ body.resizing .editor-host {
 .tree-tip.align-end {
   transform: translateY(3px) translateX(-100%);
 }
+/* The bubble exists to say what the row could not, so neither line is cut short: a long name
+   or path wraps instead, and a run with no break in it (a deep path has none) breaks where it
+   must rather than running out of the bubble. */
 .tree-tip-name {
   font-size: 12px;
   color: var(--text);
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .tree-tip-path {
   font-size: 11px;
   color: var(--text-faint);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow-wrap: anywhere;
 }
 .side-actions {
   display: flex;
