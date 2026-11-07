@@ -4,6 +4,40 @@
 
 ---
 
+## v0.0.3 — 2026-11-07
+
+The third release: PDFs get a reader of their own, the tab menu grows a flyout for the per-file settings, and files can be pasted or dropped into the Explorer from Windows.
+
+### Features
+
+- **PDF reader** — a PDF opens in its own tab drawn by a reader: pages are read by byte range and drawn on demand, the view scrolls on its own, and the page is remembered so a reopened document continues where it was left. The status bar names the file as a PDF, shows the page and seeks to it, bookmarks fold out as a scale tree with expand and collapse all, and the reader's tools sit behind a corner tab.
+- **Markdown outline** — the contents column lives behind a corner tab and can open by default.
+- **Tab strip** — the hover bubble names the file and the folder holding it; long tab names are cut with the same ellipsis setting as the tree; tabs close all at once or to one side; a tab moves to either end from its menu; and the strip's tabs size to their labels.
+- **Tab menu: file settings** — *File settings* opens a flyout beside the row instead of a panel that replaces the menu: preview, minimap and the ten per-file overrides (visible whitespace, wrap, sticky scroll, indentation width, insert spaces, detect indentation, minimap, encoding, line ending, version history) are switched in place, each with its current value and a list of choices. The dialog stays, for the detected encoding and for resetting everything to the global defaults.
+- **Explorer** — files pasted from Windows (Ctrl+V) or dropped from it land in the folder under the pointer, which lights up while dragging; a drop anywhere else opens the files as tabs. *Properties* shows a file's or folder's size, timestamps and attributes in the app's own dialog.
+- **Source control** — clone a remote from the panel; manage staged and locally ignored paths; overflow the header actions into a menu as the panel narrows; fold unchanged regions and switch split or unified; edit remote addresses; open a changed file from a row's menu; group the change list by folder, remembered across restarts; and stop a push that is already running.
+- **Settings** — the General page is grouped into cards, the status bar can be hidden, and the language and theme follow the system by default.
+- **Updates** — a new release is looked for after startup and every six hours, and the updater reads every published release.
+
+### Fixes
+
+- A hover bubble shows its path whole rather than cutting it, and stays inside the window; the Source panel's bubble names the folder instead of repeating the file name.
+- Tooltips stay clear of the pointer and of the row name they describe.
+- Shortcuts stay behind dialogs, and parent paths can be copied from the tree.
+- The Explorer tree and the Source panel stay responsive on large trees and long histories.
+- A wide mermaid flowchart lays out correctly.
+- A staged count truncates instead of wrapping.
+- The native context menu is suppressed over the app's own menus.
+- A picture keeps its own colours on a turned page.
+- Saves stay durable and git secrets stay out of the configuration file.
+
+### Internal
+
+- Version bumped to 0.0.3
+- The release build cleans `target/` and `dist/` before it starts
+
+---
+
 ## v0.0.2 — 2026-10-31
 
 The second release: source control arrives, comparison learns to fold and wrap, Markdown gains export, and the editor and preview get their own right-click menus.
