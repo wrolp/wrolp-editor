@@ -122,7 +122,7 @@ pub fn kept_dir(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 /// Strip the Windows `\\?\` / `\\.\` verbatim prefix that canonicalize() adds.
-fn strip_verbatim(path: &str) -> String {
+pub(crate) fn strip_verbatim(path: &str) -> String {
   if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
     return format!(r"\\{rest}");
   }

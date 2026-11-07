@@ -993,6 +993,82 @@ pub fn open_in_system(path: String) -> Result<(), String> {
   tauri_plugin_opener::open_path(&file, None::<&str>).map_err(|e| format!("open_system:{e}"))
 }
 
+/// What the Explorer's Properties dialog shows: the few facts a reader asks of a file.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileProperties {
+  /// The spelling the file is opened at, which is what the dialog prints.
+  pub path: String,
+  pub name: String,
+  pub is_dir: bool,
+  /// Bytes on disk. A folder has no size of its own, only the sizes of what is inside it, so
+  /// this is 0 there and `entries` carries the number instead.
+  pub bytes: u64,
+  /// Entries directly inside a folder; `None` for a file, or a folder that would not open.
+  pub entries: Option<usize>,
+  /// ISO-8601 in UTC; the dialog prints them in the reader's own timezone.
+  pub created: Option<String>,
+  pub modified: Option<String>,
+  /// The two attributes a reader may actually need to know about.
+  pub readonly: bool,
+  pub hidden: bool,
+}
+
+/// A filesystem timestamp as an ISO-8601 instant, or `None` where the platform has no such time.
+fn iso_time(value: std::io::Result<std::time::SystemTime>) -> Option<String> {
+  let time: chrono::DateTime<chrono::Utc> = value.ok()?.into();
+  Some(time.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
+}
+
+/// Metadata for the Properties dialog. One call rather than several, because the dialog shows
+/// the whole set at once and a file can be renamed between two of them.
+#[tauri::command(async)]
+pub fn file_properties(path: String) -> Result<FileProperties, String> {
+  // The spelling the file is opened at, not the lowercased identity: the dialog prints the
+  // name, and a case-sensitive folder would not answer for a lowercased one.
+  let path = draft::io_path(&path);
+  if path.is_empty() {
+    return Err("path_empty".into());
+  }
+  let target = PathBuf::from(&path);
+  let meta = std::fs::metadata(&target).map_err(|e| format!("file_access:{e}"))?;
+  let is_dir = meta.is_dir();
+  let name = target
+    .file_name()
+    .map(|n| n.to_string_lossy().into_owned())
+    // A drive root or a share has no final segment; its own spelling is its name.
+    .unwrap_or_else(|| path.clone());
+  let entries = if is_dir {
+    std::fs::read_dir(&target)
+      .ok()
+      .map(|read| read.flatten().count())
+  } else {
+    None
+  };
+  #[cfg(windows)]
+  let hidden = {
+    use std::os::windows::fs::MetadataExt;
+    const FILE_ATTRIBUTE_HIDDEN: u32 = 0x2;
+    meta.file_attributes() & FILE_ATTRIBUTE_HIDDEN != 0
+  };
+  #[cfg(not(windows))]
+  let hidden = false;
+  Ok(FileProperties {
+    name,
+    // Shown without the `\\?\` prefix canonicalize adds: that is how Windows addresses a long
+    // path, not part of the name a reader typed or would recognise. Opening still uses the
+    // verbatim form, which is what keeps a path past the 260-character limit working.
+    path: draft::strip_verbatim(&path),
+    is_dir,
+    bytes: if is_dir { 0 } else { meta.len() },
+    entries,
+    created: iso_time(meta.created()),
+    modified: iso_time(meta.modified()),
+    readonly: meta.permissions().readonly(),
+    hidden,
+  })
+}
+
 /// Current mtime and size, for the check that asks whether another program wrote the file.
 /// `None` when there is no such file any more.
 ///
@@ -2194,6 +2270,35 @@ mod tests {
     let mut long = vec![b'x'; 9000];
     long.push(0);
     assert!(!is_binary_content(&long));
+  }
+
+  #[test]
+  fn file_properties_reads_a_real_file_and_rejects_bad_paths() {
+    let file = std::env::temp_dir().join("wrolp-properties-test.txt");
+    std::fs::write(&file, b"hello").expect("write the sample file");
+    let props = file_properties(file.to_string_lossy().into_owned()).expect("read properties");
+    assert!(!props.is_dir);
+    assert_eq!(props.bytes, 5);
+    assert_eq!(props.entries, None);
+    assert_eq!(props.name, "wrolp-properties-test.txt");
+    assert!(props.modified.is_some(), "a written file has a modification time");
+    assert!(
+      !props.path.starts_with(r"\\?\"),
+      "the verbatim prefix canonicalize adds is not part of the path shown"
+    );
+    assert!(
+      props.path.ends_with("wrolp-properties-test.txt"),
+      "the displayed path still names the file"
+    );
+    let _ = std::fs::remove_file(&file);
+
+    assert_eq!(file_properties(String::new()).unwrap_err(), "path_empty");
+    assert!(
+      file_properties(r"Z:\wrolp-definitely-not-here\nothing.txt".into())
+        .unwrap_err()
+        .starts_with("file_access:"),
+      "a path that does not exist is a file_access error"
+    );
   }
 
   /// The checks run before anything is launched, so they are exercisable without starting a

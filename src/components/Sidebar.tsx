@@ -24,6 +24,7 @@ import {
   IconFolderPlus,
   IconGoUp,
   IconImage,
+  IconInfo,
   IconOpenFolder,
   IconPaste,
   IconPencil,
@@ -38,10 +39,12 @@ import {
 import FileIcon from "./FileIcon";
 import DeleteEntryDialog from "./DeleteEntryDialog";
 import BatchRenameDialog from "./BatchRenameDialog";
+import FilePropertiesDialog from "./FilePropertiesDialog";
 import {
   api,
   copyText,
   errorMessage,
+  listen,
   parentOf,
   type FolderHistoryEntry,
   type FsEntry,
@@ -909,6 +912,8 @@ export default function Sidebar(props: Props) {
   const [creating, setCreating] = useState<CreatingTarget | null>(null);
   /** The node waiting on the delete prompt, or null. */
   const [deleting, setDeleting] = useState<NodeTarget | null>(null);
+  /** The file or folder whose properties dialog is open, or null. */
+  const [propsFor, setPropsFor] = useState<string | null>(null);
   /**
    * The rows picked for a batch, by `pathKey`, each with the name it answers to.
    *
@@ -2296,6 +2301,21 @@ export default function Sidebar(props: Props) {
                 </span>
                 {t("side.menuReveal")}
               </div>
+              {/* Beside the row that reveals the file in Explorer: both answer "where is
+                  this and what is it", one by handing the path to Windows and one here.
+                  A folder has the same facts to show, so both kinds of row offer it. */}
+              <div
+                className="ctx-item"
+                onClick={() => {
+                  setPropsFor(menu.path);
+                  setMenu(null);
+                }}
+              >
+                <span className="ctx-icon">
+                  <IconInfo size={14} />
+                </span>
+                {t("side.menuProperties")}
+              </div>
               <div className="ws-sep" />
               {/* Both edits replace this menu, so the node they were aimed at is
                   remembered first. A new entry goes *into* a folder, never out of a
@@ -2610,6 +2630,10 @@ export default function Sidebar(props: Props) {
           onDelete={() => void confirmDelete()}
           onCancel={() => setDeleting(null)}
         />
+      )}
+
+      {propsFor && (
+        <FilePropertiesDialog path={propsFor} onClose={() => setPropsFor(null)} />
       )}
 
       {batch && (

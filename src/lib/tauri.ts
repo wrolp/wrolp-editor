@@ -43,6 +43,22 @@ export interface FileStat {
   bytes: number;
 }
 
+/** What the Explorer's Properties dialog shows about one file or folder. */
+export interface FileProperties {
+  path: string;
+  name: string;
+  isDir: boolean;
+  /** Bytes on disk; 0 for a folder, whose size is what is inside it. */
+  bytes: number;
+  /** Entries directly inside a folder, or `null` for a file. */
+  entries: number | null;
+  /** ISO-8601 in UTC; shown in the reader's own timezone. */
+  created: string | null;
+  modified: string | null;
+  readonly: boolean;
+  hidden: boolean;
+}
+
 /** One entry of a batch stat: a `null` stat is "gone", an error is "could not look". */
 export interface StatResult {
   path: string;
@@ -785,6 +801,11 @@ export const api = {
     invoke<OpenedFile>("open_file", { path, record, encoding: encoding ?? null }),
   /** Hand a file to the OS's default application. Validated on the backend, not via scope. */
   openInSystem: (path: string) => invoke<void>("open_in_system", { path }),
+  /**
+   * Metadata for the Properties dialog: size, timestamps and the two attributes a reader may
+   * need. Folders report the number of entries instead of a byte count.
+   */
+  fileProperties: (path: string) => invoke<FileProperties>("file_properties", { path }),
   /** Read one image a document references, as base64, under the asset-protocol scope. */
   readExportAsset: (path: string) => invoke<string>("read_export_asset", { path }),
   /** Write an exported document (.docx/.pdf); base64 so big bytes stay off the JSON wire. */

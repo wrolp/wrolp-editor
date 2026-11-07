@@ -361,6 +361,17 @@ export function IconTarget({ size = 14 }: IconProps) {
   );
 }
 
+/** The sheet of facts about a file: the circled i a menu uses for "what is this". */
+export function IconInfo({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <circle cx="12" cy="12" r="8.5" />
+      <line x1="12" y1="11" x2="12" y2="16.5" />
+      <circle cx="12" cy="7.9" r="0.95" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 /** Reload from disk: the same turn the refresh button makes, with a head on it. */
 export function IconReload({ size = 14 }: IconProps) {
   return (

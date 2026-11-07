@@ -5424,6 +5424,38 @@ button.pdf-outline-twist:hover {
   gap: 10px;
   margin-top: 20px;
 }
+/* The Properties dialog. The path is the widest thing in it and has no break opportunity, so
+   the box is wider than a question-sized modal and the value column wraps rather than pushing
+   the dialog out of shape. */
+.modal.props-modal {
+  width: 520px;
+}
+.props-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.props-row {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  gap: 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+.props-label {
+  color: var(--muted);
+}
+/* Selectable, because the one thing anybody does with a path in a dialog is copy it. */
+.props-value {
+  min-width: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.props-name {
+  color: var(--text-strong);
+  font-weight: 600;
+}
 /* The batch rename dialog. The preview list is the whole point, so this one is wider than the
    question-sized modals, and the list scrolls under a fixed dialog rather than stretching it. */
 .modal.batch-modal {

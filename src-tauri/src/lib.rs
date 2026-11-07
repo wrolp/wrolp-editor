@@ -78,6 +78,7 @@ pub fn run() {
       commands::open_file,
       commands::read_file_range,
       commands::open_in_system,
+      commands::file_properties,
       commands::read_export_asset,
       commands::write_export,
       commands::stat_file,
