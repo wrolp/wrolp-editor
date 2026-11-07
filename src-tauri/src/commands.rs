@@ -309,6 +309,10 @@ pub struct Settings {
   /// repositories. 0 means only the folder itself; 2 is the default. The panel never enters a
   /// repository it has already found, so this bounds the walk rather than the project layout.
   pub git_scan_depth: u32,
+  /// Whether the panel's file lists group their rows by folder. Remembered like the comparison
+  /// view's own switches: how somebody reads a change list is not a property of one commit, and
+  /// re-picking it on every visit is the only reason to store it.
+  pub git_tree_view: bool,
   /// Where configuration backups are written. Empty means `wrolp/backups`, beside the state
   /// folder; a path the user picked is kept as given. The folder is created when a backup is
   /// taken or the list is read, so a choice that cannot be reached yet is still remembered.
@@ -379,6 +383,9 @@ impl Default for Settings {
       // Empty means `wrolp/backups`, a sibling of the state folder: next to the configuration,
       // without mixing snapshots into the files the app reads as its current state.
       git_scan_depth: 2,
+      // Flat by default: a short list of changed files is what most working trees hold, and a
+      // folder row per file would be more indentation than information.
+      git_tree_view: false,
       backup_dir: String::new(),
       backup_retain: crate::backup::DEFAULT_RETAIN,
       auto_check_updates: true,
@@ -638,6 +645,7 @@ impl Settings {
       auto_save_versions: self.auto_save_versions,
       ask_note_on_save: self.ask_note_on_save,
       git_scan_depth: self.git_scan_depth.min(5),
+      git_tree_view: self.git_tree_view,
       backup_dir: self.backup_dir.trim().to_string(),
       // A zero would leave no snapshot at all after the next write, and a hundred is already more
       // history than a configuration needs.

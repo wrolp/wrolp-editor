@@ -633,6 +633,17 @@ export function IconOutline({ size = 14 }: IconProps) {
   );
 }
 
+/** A flat list: three lines of equal length, the opposite of the indented outline. */
+export function IconList({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <line x1="4" y1="7" x2="20" y2="7" />
+      <line x1="4" y1="12" x2="20" y2="12" />
+      <line x1="4" y1="17" x2="20" y2="17" />
+    </svg>
+  );
+}
+
 /** The pennant a PDF viewer puts beside every entry of its outline. */
 export function IconBookmark({ size = 14 }: IconProps) {
   return (

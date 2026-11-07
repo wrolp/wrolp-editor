@@ -18,9 +18,11 @@ import type {
   GitProgress,
   GitStatusEntry,
 } from "../lib/tauri";
-import { api, errorMessage } from "../lib/tauri";
+import { api, errorMessage, parentOf } from "../lib/tauri";
 import { badgeTone } from "../lib/gitStatus";
+import { basename } from "../lib/path";
 import { useMenuPlacement } from "../hooks/useMenuPlacement";
+import PathTip, { useHoverTip } from "./PathTip";
 import { LOG_PAGE_CHOICES, type GitController } from "../hooks/useGit";
 import type { GitRepoRow } from "../hooks/useGitRepos";
 import { buildGraph } from "../lib/gitGraph";
@@ -36,6 +38,8 @@ import {
   IconFetch,
   IconFile,
   IconFolder,
+  IconList,
+  IconOutline,
   IconPull,
   IconPush,
   IconReload,
@@ -90,6 +94,10 @@ interface Props {
   onOpenLocalSettings: (root: string) => void;
   /** Open one commit's changed files as a new tab. */
   onOpenCommitTab: (entry: GitLogEntry, root: string | null) => void;
+  /** Whether the file lists group their rows by folder instead of listing whole paths. */
+  treeView: boolean;
+  /** Switch that grouping on or off. Remembered in the settings, like the other view switches. */
+  onTreeViewChange: (next: boolean) => void;
 }
 
 type Scope = "workdir" | "index";
@@ -104,6 +112,45 @@ function splitPath(path: string): { name: string; dir: string } {
   const cut = path.lastIndexOf("/");
   if (cut < 0) return { name: path, dir: "" };
   return { name: path.slice(cut + 1), dir: path.slice(0, cut) };
+}
+
+/** A folder in the grouped view. `path` is the repo-relative folder, and also its key. */
+interface GitTreeDir {
+  name: string;
+  path: string;
+  dirs: GitTreeDir[];
+  files: GitStatusEntry[];
+}
+
+/**
+ * Fold a flat status list into the folders its paths name.
+ *
+ * The status comes back sorted by path, so folders and files are created in that order and the
+ * tree needs no sort of its own. A file directly in the repository root sits at the top level,
+ * beside the folders rather than in a row of its own.
+ */
+function buildGitTree(files: GitStatusEntry[]): GitTreeDir {
+  const root: GitTreeDir = { name: "", path: "", dirs: [], files: [] };
+  for (const file of files) {
+    const parts = file.path.split("/");
+    let node = root;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const name = parts[i];
+      let next = node.dirs.find((dir) => dir.name === name);
+      if (!next) {
+        next = { name, path: parts.slice(0, i + 1).join("/"), dirs: [], files: [] };
+        node.dirs.push(next);
+      }
+      node = next;
+    }
+    node.files.push(file);
+  }
+  return root;
+}
+
+/** Everything under a folder, which is the number its row shows. */
+function countGitTree(dir: GitTreeDir): number {
+  return dir.dirs.reduce((n, child) => n + countGitTree(child), dir.files.length);
 }
 
 /** How many actions fit in the header row; the rest move into the overflow menu. */
@@ -193,8 +240,22 @@ export default function GitPanel({
   onNotice,
   onOpenLocalSettings,
   onOpenCommitTab,
+  treeView,
+  onTreeViewChange,
 }: Props) {
   const [message, setMessage] = useState("");
+  /**
+   * Folders the grouped view has closed. Keyed by repository-relative folder, and kept here
+   * rather than in the settings: which folders somebody happens to have collapsed is a state of
+   * this reading, not a preference of theirs.
+   */
+  const [collapsedDirs, setCollapsedDirs] = useState<Record<string, boolean>>({});
+  /**
+   * One hover bubble for every file row in the panel, keyed by the file's absolute path — the
+   * two-line shape the Explorer draws, because a native `title` cannot put the path on a line
+   * of its own or dim it.
+   */
+  const { tip: fileTip, show: showFileTip, hide: hideFileTip } = useHoverTip<string>("pointer");
   const [amend, setAmend] = useState(false);
   /** The message HEAD had when amend was turned on, so switching it off can drop just that text. */
   const [amendBase, setAmendBase] = useState("");
@@ -759,7 +820,8 @@ export default function GitPanel({
                 <div
                   key={`${entry.oid}:${file.path}`}
                   className="git-log-file"
-                  title={file.path}
+                  onMouseEnter={(event) => showFileTip(event, file.abs)}
+                  onMouseLeave={hideFileTip}
                   onClick={() => onCommitFileDiff(entry, file, repoRoot)}
                 >
                   <span className={`git-badge ${badgeTone(file.status)}`}>
@@ -773,6 +835,119 @@ export default function GitPanel({
           ))}
       </div>
     );
+  };
+
+  /**
+   * One file row. The two lists differ only in which half of the status the letter reads and
+   * which buttons the row offers, so both shapes live here rather than being written twice.
+   *
+   * `depth` is the folder level in the grouped view. There the folder is already a row above,
+   * so the row drops the dimmed path it carries in the flat view.
+   */
+  const fileRow = (file: GitStatusEntry, scope: Scope, depth: number) => {
+    const { name, dir } = splitPath(file.path);
+    const letter = badgeLetter(file, scope);
+    return (
+      <div
+        key={`${scope}:${file.path}`}
+        className="git-row"
+        style={depth > 0 ? { paddingLeft: 12 + depth * 12 } : undefined}
+        onMouseEnter={(event) => showFileTip(event, file.abs)}
+        onMouseLeave={hideFileTip}
+        onClick={() => onDiff(file, scope, repoRoot)}
+        onContextMenu={(event) => openRowMenu(event, file)}
+      >
+        <span className={`git-badge ${badgeTone(letter)}`}>{letter}</span>
+        <span className="git-name">{name}</span>
+        {!treeView && <span className="git-dir">{dir}</span>}
+        {dirtyPaths.has(pathKey(file.abs)) && (
+          <span className="git-dirty" title={t("git.unsaved")}>
+            ●
+          </span>
+        )}
+        <span className="git-actions">
+          {scope === "index" ? (
+            <button
+              className="git-action"
+              title={t("git.unstage")}
+              onClick={(e) => {
+                e.stopPropagation();
+                void git.unstage([file]);
+              }}
+            >
+              <IconUnstage size={13} />
+            </button>
+          ) : (
+            <>
+              <button
+                className="git-action"
+                title={t("git.stage")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  void git.stage([file]);
+                }}
+              >
+                <IconStage size={13} />
+              </button>
+              <button
+                className="git-action"
+                title={t("git.discardFile")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setDiscardAsk([file]);
+                }}
+              >
+                <IconRevert size={13} />
+              </button>
+            </>
+          )}
+          <button
+            className="git-action"
+            title={t("git.open")}
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenFile(file.abs);
+            }}
+          >
+            <IconFile size={13} />
+          </button>
+        </span>
+      </div>
+    );
+  };
+
+  /** A folder row of the grouped view: a fold toggle, the folder and how much is under it. */
+  const dirRow = (node: GitTreeDir, depth: number, scope: Scope) => {
+    const collapsed = !!collapsedDirs[node.path];
+    return (
+      <div
+        key={`${scope}:dir:${node.path}`}
+        className="git-row git-dir-row"
+        style={{ paddingLeft: 12 + depth * 12 }}
+        title={node.path}
+        onClick={() => setCollapsedDirs((folded) => ({ ...folded, [node.path]: !collapsed }))}
+      >
+        <span className={`git-chev${collapsed ? " rot" : ""}`}>
+          <IconChevron size={11} />
+        </span>
+        <span className="git-folder">
+          <IconFolder size={13} />
+        </span>
+        <span className="git-name">{node.name}</span>
+        <span className="git-count">{countGitTree(node)}</span>
+      </div>
+    );
+  };
+
+  /** The rows of one list: folders first, then the files that sit beside them at this level. */
+  const treeRows = (node: GitTreeDir, depth: number, scope: Scope): ReactNode[] => {
+    const rows: ReactNode[] = [];
+    for (const dir of node.dirs) {
+      rows.push(dirRow(dir, depth, scope));
+      if (!collapsedDirs[dir.path]) rows.push(...treeRows(dir, depth + 1, scope));
+    }
+    for (const file of node.files) rows.push(fileRow(file, scope, depth));
+    return rows;
   };
 
   if (!workspaceRoot && repoRows.length === 0) {
@@ -1210,7 +1385,8 @@ export default function GitPanel({
                   <div
                     key={`u:${file.path}`}
                     className="git-row conflict"
-                    title={file.path}
+                    onMouseEnter={(event) => showFileTip(event, file.abs)}
+                    onMouseLeave={hideFileTip}
                     onClick={() => onMergeConflict(file)}
                   >
                     <span className="git-badge conflict">U</span>
@@ -1288,50 +1464,9 @@ export default function GitPanel({
                 </button>
               </div>
               {!folded.staged &&
-                stagedFiles.map((file) => {
-                  const { name, dir } = splitPath(file.path);
-                  const letter = badgeLetter(file, "index");
-                  return (
-                    <div
-                      key={`s:${file.path}`}
-                      className="git-row"
-                      title={file.path}
-                      onClick={() => onDiff(file, "index", repoRoot)}
-                      onContextMenu={(event) => openRowMenu(event, file)}
-                    >
-                      <span className={`git-badge ${badgeTone(letter)}`}>{letter}</span>
-                      <span className="git-name">{name}</span>
-                      <span className="git-dir">{dir}</span>
-                      {dirtyPaths.has(pathKey(file.abs)) && (
-                        <span className="git-dirty" title={t("git.unsaved")}>
-                          ●
-                        </span>
-                      )}
-                      <span className="git-actions">
-                        <button
-                          className="git-action"
-                          title={t("git.unstage")}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void git.unstage([file]);
-                          }}
-                        >
-                          <IconUnstage size={13} />
-                        </button>
-                        <button
-                          className="git-action"
-                          title={t("git.open")}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onOpenFile(file.abs);
-                          }}
-                        >
-                          <IconFile size={13} />
-                        </button>
-                      </span>
-                    </div>
-                  );
-                })}
+                (treeView
+                  ? treeRows(buildGitTree(stagedFiles), 0, "index")
+                  : stagedFiles.map((file) => fileRow(file, "index", 0)))}
             </section>
           )}
 
@@ -1346,6 +1481,17 @@ export default function GitPanel({
                 </span>
                 <span>{t("git.changes")}</span>
                 <span className="git-count">{changedFiles.length}</span>
+              </button>
+              {/* Both lists follow this one switch, so it lives where the longer of them is
+                  named rather than beside each heading. The icon is the view it switches to. */}
+              <button
+                className="git-section-action"
+                title={treeView ? t("git.flatList") : t("git.groupByDir")}
+                aria-label={treeView ? t("git.flatList") : t("git.groupByDir")}
+                aria-pressed={treeView}
+                onClick={() => onTreeViewChange(!treeView)}
+              >
+                {treeView ? <IconList size={13} /> : <IconOutline size={13} />}
               </button>
               {changedFiles.length > 0 && (
                 <button
@@ -1363,60 +1509,9 @@ export default function GitPanel({
               <div className="git-clean">{t("git.clean")}</div>
             )}
             {!folded.changed &&
-              changedFiles.map((file) => {
-                const { name, dir } = splitPath(file.path);
-                const letter = badgeLetter(file, "workdir");
-                return (
-                  <div
-                    key={`w:${file.path}`}
-                    className="git-row"
-                    title={file.path}
-                    onClick={() => onDiff(file, "workdir", repoRoot)}
-                    onContextMenu={(event) => openRowMenu(event, file)}
-                  >
-                    <span className={`git-badge ${badgeTone(letter)}`}>{letter}</span>
-                    <span className="git-name">{name}</span>
-                    <span className="git-dir">{dir}</span>
-                    {dirtyPaths.has(pathKey(file.abs)) && (
-                      <span className="git-dirty" title={t("git.unsaved")}>
-                        ●
-                      </span>
-                    )}
-                    <span className="git-actions">
-                      <button
-                        className="git-action"
-                        title={t("git.stage")}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void git.stage([file]);
-                        }}
-                      >
-                        <IconStage size={13} />
-                      </button>
-                      <button
-                        className="git-action"
-                        title={t("git.discardFile")}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDiscardAsk([file]);
-                        }}
-                      >
-                        <IconRevert size={13} />
-                      </button>
-                      <button
-                        className="git-action"
-                        title={t("git.open")}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onOpenFile(file.abs);
-                        }}
-                      >
-                        <IconFile size={13} />
-                      </button>
-                    </span>
-                  </div>
-                );
-              })}
+              (treeView
+                ? treeRows(buildGitTree(changedFiles), 0, "workdir")
+                : changedFiles.map((file) => fileRow(file, "workdir", 0)))}
             {!folded.changed && changedFiles.length > 1 && (
               <div className="git-bulk">
                 <button
@@ -1767,6 +1862,17 @@ export default function GitPanel({
           onSaveHttps={git.saveHttpsCredential}
           onSaveSsh={git.saveSshCredential}
           onTrustHost={git.trustHost}
+        />
+      )}
+
+      {/* Name over the folder holding it. The path here is the answer to "where is this",
+          and the name is already the line above — repeating it in the second line only makes
+          the bubble longer than the row it describes. */}
+      {fileTip && (
+        <PathTip
+          spot={fileTip.spot}
+          name={basename(fileTip.key)}
+          detail={parentOf(fileTip.key)}
         />
       )}
     </div>

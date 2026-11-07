@@ -277,6 +277,8 @@ export interface Settings {
   versioningMaxFileSize: number;
   /** Directory levels below the group folder scanned for repositories (0..=5). */
   gitScanDepth: number;
+  /** Whether the panel's file lists group their rows by folder instead of listing paths. */
+  gitTreeView: boolean;
   /**
    * Whether a write made by the automatic save also records a version. Off by default: the timer
    * runs whether or not anybody is at the keyboard, and recording it fills the timeline with

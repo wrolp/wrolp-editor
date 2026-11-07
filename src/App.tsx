@@ -289,6 +289,7 @@ const DEFAULT_SETTINGS: Settings = {
   versioningShowLimit: 30,
   versioningMaxFileSize: 524288,
   gitScanDepth: 2,
+  gitTreeView: false,
   autoSaveVersions: false,
   askNoteOnSave: false,
   // Empty is `wrolp/backups`, one folder away from the state it protects. Twenty snapshots is a
@@ -3169,6 +3170,8 @@ const defaultModeFor = useCallback(
               onError={toast}
               onNotice={toast}
               onOpenLocalSettings={setLocalSettingsRoot}
+              treeView={settings.gitTreeView}
+              onTreeViewChange={(next) => void saveSettings({ gitTreeView: next })}
             />
           }
           onRemoveHistory={(path) =>

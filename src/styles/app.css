@@ -2458,15 +2458,40 @@ body.resizing .editor-host {
   font-size: 10px;
   color: var(--dirty);
 }
+/* A folder row in the grouped view: the fold arrow where a file's status letter sits, so a
+   file under it lines up with its siblings. The indent of the level is inline padding. */
+.git-dir-row .git-chev {
+  flex: 0 0 12px;
+  color: var(--muted);
+}
+.git-dir-row .git-folder {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+.git-dir-row .git-name {
+  color: var(--text-dim);
+}
+/* The count ends the row, the same place a file's buttons would appear. */
+.git-dir-row .git-count {
+  margin-left: auto;
+}
+/* The row's buttons are only in the way while the pointer is on the row: the width is
+   collapsed instead of merely hidden, so the name and folder run to the row's edge the rest
+   of the time. Collapsed rather than `display: none` so the buttons stay in the tab order —
+   focusing one brings the row to `:focus-within` and the strip back into view. */
 .git-actions {
   display: flex;
   gap: 1px;
   flex: 0 0 auto;
   margin-left: auto;
+  width: 0;
+  overflow: hidden;
   opacity: 0;
 }
 .git-row:hover .git-actions,
 .git-row:focus-within .git-actions {
+  width: auto;
   opacity: 1;
 }
 .git-action {
@@ -2491,6 +2516,7 @@ body.resizing .editor-host {
   flex-wrap: wrap;
 }
 .git-row.conflict .git-actions {
+  width: auto;
   flex-wrap: wrap;
   opacity: 1;
 }
