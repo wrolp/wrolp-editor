@@ -5,8 +5,10 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type MouseEvent as ReactMouseEvent,
   type Ref,
 } from "react";
+import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 // The legacy build, not the default one: pdf.js now calls `Map.prototype.getOrInsertComputed`,
 // which the webview on an older Windows may not have. The legacy build carries that polyfill
 // for both the API and the worker, and costs only a few dozen kilobytes over the default build.
@@ -15,6 +17,7 @@ import workerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 import { t, translateError } from "../lib/i18n";
 import { api } from "../lib/tauri";
 import { stepFrom, zoomText } from "../lib/zoom";
+import { useMenuPlacement } from "../hooks/useMenuPlacement";
 import {
   IconBookmark,
   IconCollapse,
@@ -349,6 +352,59 @@ function holesMask(rects: { x: number; y: number; w: number; h: number }[]): str
   return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
 }
 
+/** One run of the page's text, and the width it has on the page, in CSS pixels. */
+interface TextRun {
+  span: HTMLSpanElement;
+  width: number;
+  angle: number;
+}
+
+/**
+ * The page's text as invisible spans, from pdf.js's own text items.
+ *
+ * Nothing drawn into a canvas can be selected, so the words are put back as DOM: each item
+ * carries the matrix of its run, which the page's viewport turns into a box in CSS pixels. The
+ * spans are transparent — they exist to be dragged across, not to be read.
+ */
+function textRuns(items: readonly unknown[], viewport: pdfjs.PageViewport): TextRun[] {
+  const runs: TextRun[] = [];
+  for (const raw of items) {
+    const item = raw as { str?: unknown; transform?: unknown; width?: unknown };
+    if (typeof item.str !== "string" || !item.str) continue;
+    if (!Array.isArray(item.transform) || typeof item.width !== "number") continue;
+    const tx = pdfjs.Util.transform(viewport.transform, item.transform as number[]);
+    const height = Math.hypot(tx[2], tx[3]);
+    if (!height) continue;
+    const span = document.createElement("span");
+    span.textContent = item.str;
+    span.style.left = `${tx[4]}px`;
+    // The matrix's y is the text's baseline; the box starts one line-height above it.
+    span.style.top = `${tx[5] - height}px`;
+    span.style.fontSize = `${height}px`;
+    runs.push({ span, width: item.width * viewport.scale, angle: Math.atan2(tx[1], tx[0]) });
+  }
+  return runs;
+}
+
+/**
+ * Stretch each run onto the width it has in the document.
+ *
+ * Called once the spans are in the layer: a span's own width is only known after layout, and
+ * the stretch is what puts the run inside the box a selection will paint. Without it the
+ * browser's fallback font decides where a word ends, and dragging across a line picks up the
+ * word after it.
+ */
+function stretchRuns(runs: TextRun[]): void {
+  for (const run of runs) {
+    const natural = run.span.offsetWidth;
+    if (natural <= 0 || run.width <= 0) continue;
+    const scale = run.width / natural;
+    run.span.style.transform = run.angle
+      ? `rotate(${run.angle}rad) scaleX(${scale})`
+      : `scaleX(${scale})`;
+  }
+}
+
 /**
  * One page, drawn into a canvas.
  *
@@ -380,6 +436,8 @@ function PdfPage({
 }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  /** The page's words, laid over the canvas so they can be selected and copied. */
+  const textRef = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(index < 2);
   const [height, setHeight] = useState(0);
   /** The frame's height: the page's own once known, the shared estimate until then. */
@@ -455,6 +513,43 @@ function PdfPage({
     };
   }, [doc, index, zoom, width, visible]);
 
+  /**
+   * The selectable text, built at the same scale the page was drawn at.
+   *
+   * It follows the canvas: rebuilt when the page becomes visible and whenever the size changes,
+   * because every position in it is measured in the viewport's pixels. A page whose text cannot
+   * be read is left with its canvas — the words are still on screen, only not selectable.
+   */
+  useEffect(() => {
+    if (!visible || width <= 0) return;
+    let live = true;
+    void (async () => {
+      try {
+        const page = await doc.getPage(index + 1);
+        const base = page.getViewport({ scale: 1 });
+        // CSS pixels, the same unit the canvas is sized in — the device ratio is folded into
+        // the canvas only, and a second copy of it here would double every position.
+        const unit = zoom === null ? width / base.width : zoom / 100;
+        const viewport = page.getViewport({ scale: unit });
+        const content = await page.getTextContent();
+        const layer = textRef.current;
+        if (!live || !layer) return;
+        const runs = textRuns(content.items, viewport);
+        // A fragment rather than the spread: a dense page can hold more runs than the argument
+        // list will take.
+        const frag = document.createDocumentFragment();
+        for (const run of runs) frag.appendChild(run.span);
+        layer.replaceChildren(frag);
+        stretchRuns(runs);
+      } catch {
+        // Nothing to select on this page; the canvas already says what it says.
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [doc, index, zoom, width, visible]);
+
   // A page that has not been drawn yet still holds its place, and once it is near the viewport
   // its exact height replaces the shared estimate: the list's scrollbar, and a jump from a
   // bookmark, both need the frame to be where the page will be. Pages far from the viewport
@@ -519,6 +614,7 @@ function PdfPage({
       data-page={index + 1}
     >
       <canvas ref={canvasRef} className="pdf-canvas" />
+      <div className="pdf-text" ref={textRef} />
     </div>
   );
 }
@@ -714,6 +810,16 @@ export default function PdfViewer({
   /** The branches put away by the reader, by path; empty means the whole tree is open. */
   const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set());
   const [atEnd, setAtEnd] = useState(false);
+  /**
+   * The reader's own right-click menu: where it sits, and the words that were selected when
+   * it opened. The selection is copied into the state rather than read when Copy is clicked,
+   * because pressing a menu row clears the selection it was about to act on.
+   */
+  const [menu, setMenu] = useState<{ x: number; y: number; selection: string } | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuAt = useMenuPlacement(menu, menuRef);
+  /** The list of pages, so Select all can take every word of them in one range. */
+  const pagesRef = useRef<HTMLDivElement>(null);
   /** The first page whose render failed, shown instead of letting the pane sit blank. */
   const [pageError, setPageError] = useState<string | null>(null);
   /** The reader is on their own place: either landed on the stored one, or there is none to reach. */
@@ -1204,6 +1310,62 @@ export default function PdfViewer({
     ? Math.floor(pageBox.height * (zoom === null ? width / pageBox.width : zoom / 100))
     : 0;
 
+  /**
+   * Right-clicking the page offers what a read-only surface can do: copy the words that are
+   * selected, take all of them, or start the automatic scroll. Nothing that would edit the
+   * document is offered, because nothing here can.
+   */
+  const openMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
+    // The app draws every menu it shows, so the browser's own must not come up beside this one.
+    event.preventDefault();
+    const selection = window.getSelection();
+    const picked =
+      selection && !selection.isCollapsed && pagesRef.current?.contains(selection.anchorNode)
+        ? selection.toString().trim()
+        : "";
+    setMenu({ x: event.clientX, y: event.clientY, selection: picked });
+  };
+
+  const runMenu = (action: "copy" | "selectAll" | "autoScroll") => {
+    const current = menu;
+    setMenu(null);
+    if (action === "autoScroll") {
+      setAutoScroll((on) => !on);
+      return;
+    }
+    if (action === "selectAll") {
+      const pages = pagesRef.current;
+      if (!pages) return;
+      // Every drawn page's text layer in one range: the canvases between them contribute
+      // nothing, so what is copied is the words and their line breaks.
+      const range = document.createRange();
+      range.selectNodeContents(pages);
+      const selection = window.getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      return;
+    }
+    if (current?.selection) void writeText(current.selection).catch(() => {});
+  };
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("wheel", close, { passive: true });
+    window.addEventListener("blur", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("wheel", close);
+      window.removeEventListener("blur", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [menu]);
+
   return (
     <div
       className="pdf-view"
@@ -1350,13 +1512,14 @@ export default function PdfViewer({
         // deliberate double click, so a reader who taps the page to read does not lose their place.
         onDoubleClick={pauseForHand}
         onPointerDown={closeNow}
+        onContextMenu={openMenu}
       >
         {(error || pageError) && (
           <div className="pdf-error">{t("pdf.error", { detail: error ?? pageError ?? "" })}</div>
         )}
         {!error && !doc && <div className="pdf-loading">{t("app.loading")}</div>}
         {doc && width > 0 && (
-          <div className="pdf-pages-list">
+          <div className="pdf-pages-list" ref={pagesRef}>
             {Array.from({ length: pageCount }, (_, index) => (
               <PdfPage
                 key={index}
@@ -1372,6 +1535,34 @@ export default function PdfViewer({
           </div>
         )}
       </div>
+      {/* The reader's right-click menu. Rendered beside the pane rather than inside it: the
+          scroll container's own pointer handlers would otherwise take the press that is meant
+          for a row. */}
+      {menu && (
+        <div
+          className="ctx-menu"
+          ref={menuRef}
+          style={{ display: "block", left: menuAt.left, top: menuAt.top }}
+          // The window listener that closes the menu on a press outside would fire before the
+          // row's own click and unmount it, so the press inside stops here.
+          onMouseDown={(event) => event.stopPropagation()}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          {menu.selection && (
+            <div className="ctx-item" onClick={() => runMenu("copy")}>
+              {t("editor.copy")}
+            </div>
+          )}
+          <div className="ctx-item" onClick={() => runMenu("selectAll")}>
+            {t("editor.selectAll")}
+          </div>
+          <div className="ws-sep" />
+          <div className="ctx-item" onClick={() => runMenu("autoScroll")}>
+            {t("pdf.autoScroll")}
+            <span className="ctx-check">{autoScroll ? "✓" : ""}</span>
+          </div>
+        </div>
+      )}
       {outlineOpen && outline.length > 0 && (
         <nav
           className={`pdf-outline ${outlineSide}`}

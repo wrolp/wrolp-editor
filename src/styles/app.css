@@ -4231,6 +4231,30 @@ button.pdf-outline-twist:hover {
 .pdf-canvas {
   display: block;
 }
+/* The page's words, laid over the canvas so they can be selected: nothing drawn into a canvas
+   is selectable, so the text sits here as transparent spans stretched onto the runs it came
+   from. Above the tint layers, so a selection is not painted through them. */
+.pdf-text {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: hidden;
+  line-height: 1;
+  /* The layer is the page's text, so a drag across it is a text selection rather than the
+     pane's own gesture. */
+  user-select: text;
+}
+.pdf-text span {
+  position: absolute;
+  transform-origin: 0 0;
+  white-space: pre;
+  color: transparent;
+  cursor: text;
+}
+/* A transparent span brings no colour to a selection, so the highlight carries its own. */
+.pdf-text ::selection {
+  background: rgba(76, 141, 255, 0.35);
+}
 .pdf-error,
 .pdf-loading {
   padding: 24px;
