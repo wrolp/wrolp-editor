@@ -41,6 +41,8 @@ Built on Tauri v2 + React + TypeScript, with Monaco Editor as the editing surfac
 | Encrypted files | A self-describing AES-256-GCM container keyed from a password. Save as encrypted, new encrypted file, change password, remove encryption; an idle lock drops the keys; remembering a password in the Windows credential store is opt-in; drafts are sealed with the same key |
 | Window | Size, position and the maximized flag come back on the next start. A window left on a monitor that is no longer connected is pulled back onto a screen you still have, and says so |
 
+![A Markdown file rendered beside its source, with the table of contents on the right](branding/shots/markdown-preview.png)
+
 ## Keyboard shortcuts
 
 | Key | Action |
@@ -55,6 +57,8 @@ Scrolling the mouse wheel over the tab strip scrolls it sideways.
 
 ## Reading PDFs
 
+![A PDF open on night paper, with the page box in the status bar](branding/shots/pdf-reader.png)
+
 A `.pdf` tab is drawn by pdf.js in place of the editor. The pages form one continuous column, the page box in the status bar jumps to a page by number, and where you stopped is written down per file — page and position in it — so a document reopens where it was left.
 
 **Size.** *Fit* (the default) keeps a page as wide as the pane and the box reports what that comes to; the arrows step 50, 75, 100, 150, 200 and 300 %, and a percentage can be typed (25–400). Fitting is measured on the page's own width, so a scan of an unusual size still fills the pane the same way.
@@ -66,6 +70,8 @@ A `.pdf` tab is drawn by pdf.js in place of the editor. The pages form one conti
 **Automatic scroll.** The tool sets the pages moving and the slower / faster buttons change the pace (10–240 px/s). A wheel or a double click stops it — a single click only folds the tools away, so tapping the page to read does not lose the place.
 
 ## Picture gallery
+
+![The gallery browsing a folder of pictures, thumbnails below](branding/shots/picture-gallery.png)
 
 Right-click a folder in the Explorer — or the blank space under the tree — and choose **Browse pictures**. The folder opens in its own tab with four ways to look at the same naturally ordered list:
 
@@ -246,6 +252,8 @@ boolean, because a value in a JavaScript heap is a value in a devtools console.
 
 ## Tab groups
 
+![The main window: tab strip, Explorer tree with git markers and the status bar](branding/shots/tab-groups.png)
+
 A group is a **named set of open tabs** plus the **folder the Explorer shows** while it is on
 screen. The chip in the title bar shows the current name and switches between groups inside the
 same window; the tree switches with it. A group may still hold files from several folders — the
@@ -342,6 +350,8 @@ A read-only side-by-side diff of any two contents, in a tab of its own (titled `
 
 ## Version history
 
+![The Versions sidebar view listing the saves of the active file](branding/shots/versions.png)
+
 Off by default. Settings → Versions turns it on, and from then on every save you ask for — `Ctrl+S`,
 or the tab menu's *Create version* — records what the file said. The word "version" is deliberate:
 this is not a repository you branch or push, and nothing about it reaches the folder you are editing.
@@ -415,11 +425,15 @@ this is not a repository you branch or push, and nothing about it reaches the fo
 
 ## Source control
 
+![The Source Control panel: changes, commit box and history](branding/shots/source-panel.png)
+
 The fourth sidebar view is the set of real git repositories behind the group's folder: the one
 the folder sits in (possibly above it), the ones found in its subdirectories, and any added by
 hand. A compact list at the top switches between them; the panel below is the single-repository
 panel described here. This is the opposite of [Version history](#version-history), which is a
 private store per file and never touches the folders you edit.
+
+![The working tree of a changed file diffed against its index](branding/shots/source-diff.png)
 
 - **Repositories.** Settings → Git → *Subdirectory depth* bounds the scan (0–5, default 2). The
   scan does not enter a repository it has found, skips `node_modules`, `target`, `dist`, bare
@@ -500,6 +514,8 @@ private store per file and never touches the folders you edit.
 An encrypted file is a **self-describing container**, not a "txt that happens to be encrypted":
 it is recognised by its magic bytes, never by its extension.
 
+![The dialog that sets the password of a new encrypted file](branding/shots/encrypt-dialog.png)
+
 > **Lose the password, lose the file.** There is no master password, no recovery code and no
 > back door. The key is derived from the password plus a per-file random salt with Argon2id, and
 > nothing that could lead back to the password is stored anywhere.
@@ -570,6 +586,8 @@ out of their own file.
   of the dirty flag; a reload from disk cannot wipe it either.
 - On session restore, encrypted tabs queue for their passwords and one dialog asks them in turn. A
   wrong password is retried in place rather than dropping the question.
+
+![The unlock dialog shown for an encrypted tab on session restore](branding/shots/unlock-dialog.png)
 
 ### Remembering passwords (opt-in, off by default)
 
