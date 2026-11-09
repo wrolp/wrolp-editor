@@ -182,6 +182,19 @@ body {
   align-items: stretch;
   border-bottom: 1px solid var(--border);
   position: relative;
+  /* Native drag region: unlike data-tauri-drag-region (which only fires when the
+     mousedown target is the element carrying the bare attribute), app-region
+     inherits to descendants, so the whole bar stays draggable. */
+  -webkit-app-region: drag;
+  app-region: drag;
+}
+
+/* Elements marked data-tauri-drag-region="false" are interactive (tabs, the
+   preview-mode segment): exclude them from the native drag region too. Form
+   controls (buttons, inputs) opt out automatically. */
+[data-tauri-drag-region="false"] {
+  -webkit-app-region: no-drag;
+  app-region: no-drag;
 }
 
 .title-toggle {
