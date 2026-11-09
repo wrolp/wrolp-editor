@@ -43,7 +43,9 @@ interface Options {
 /** What the credential dialog is being opened for. */
 export type GitAuthAsk =
   | { kind: "https" | "ssh"; host: string; failed: boolean }
-  | { kind: "host"; host: string; fingerprint: string; changed: boolean };
+  | { kind: "host"; host: string; fingerprint: string; changed: boolean }
+  /** An HTTPS certificate the system refused; the user may accept it for this host. */
+  | { kind: "cert"; host: string; fingerprint: string; changed: boolean };
 
 export interface GitController {
   status: GitStatusView | null;
@@ -103,6 +105,7 @@ export interface GitController {
     remember: boolean
   ) => Promise<boolean>;
   trustHost: (host: string, fingerprint: string) => Promise<boolean>;
+  trustCert: (host: string, fingerprint: string) => Promise<boolean>;
   loadAuth: () => Promise<void>;
   saveIdentity: (name: string, email: string) => Promise<boolean>;
   dismissIdentityAsk: () => void;
@@ -609,6 +612,18 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
         return true;
       }
     }
+    if (raw.startsWith("git_cert_untrusted:") || raw.startsWith("git_cert_changed:")) {
+      const [host, fingerprint] = raw.slice(raw.indexOf(":") + 1).split("|");
+      if (host && fingerprint) {
+        setAuthAsk({
+          kind: "cert",
+          host,
+          fingerprint,
+          changed: raw.startsWith("git_cert_changed:"),
+        });
+        return true;
+      }
+    }
     if (raw.startsWith("git_no_identity")) {
       setIdentityAsk(true);
       return true;
@@ -752,6 +767,22 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
     [loadAuth]
   );
 
+  const trustCert = useCallback(
+    async (host: string, fingerprint: string) => {
+      try {
+        await api.gitTrustCert(host, fingerprint);
+        await loadAuth();
+        setAuthAsk(null);
+        retryRef.current?.();
+        return true;
+      } catch (e) {
+        onErrorRef.current(errorMessage(e));
+        return false;
+      }
+    },
+    [loadAuth]
+  );
+
   const saveIdentity = useCallback(
     async (name: string, email: string) => {
       try {
@@ -839,6 +870,7 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
     saveHttpsCredential,
     saveSshCredential,
     trustHost,
+    trustCert,
     loadAuth,
     saveIdentity,
     dismissIdentityAsk,

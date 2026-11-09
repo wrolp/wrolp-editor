@@ -176,6 +176,8 @@ pub fn run() {
       git::auth::git_clear_identity,
       git::auth::git_trust_host,
       git::auth::git_forget_host,
+      git::auth::git_trust_cert,
+      git::auth::git_forget_cert,
       git::remote::git_remotes,
       git::remote::git_clone,
       git::remote::git_remote_save,

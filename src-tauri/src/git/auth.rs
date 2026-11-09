@@ -37,6 +37,10 @@ pub struct AuthStore {
   pub ssh: BTreeMap<String, SshCredential>,
   /// Trusted SSH host-key fingerprints by host, in SHA-256 hex.
   pub known_hosts: BTreeMap<String, String>,
+  /// HTTPS certificates the user chose to accept after the system refused them, by host. The
+  /// value is the SHA-256 of the certificate DER that was on screen when the choice was made,
+  /// so a server that changes its certificate has to ask again.
+  pub https_certs: BTreeMap<String, String>,
   /// The system credential store, absent when this platform has none. Not serialized: the
   /// file holds no secret, only the pointer-shaped facts about which hosts have one.
   #[serde(skip)]
@@ -50,6 +54,7 @@ impl fmt::Debug for AuthStore {
       .field("https", &self.https)
       .field("ssh", &self.ssh)
       .field("known_hosts", &self.known_hosts)
+      .field("https_certs", &self.https_certs)
       .finish_non_exhaustive()
   }
 }
@@ -263,6 +268,8 @@ pub struct AuthView {
   pub identity: Option<Identity>,
   pub credentials: Vec<CredentialView>,
   pub known_hosts: Vec<KnownHostView>,
+  /// HTTPS certificates accepted in spite of the system refusing them, so they can be revoked.
+  pub certs: Vec<KnownHostView>,
 }
 
 #[tauri::command(async)]
@@ -298,10 +305,19 @@ pub fn git_auth_view(app: AppHandle) -> Result<AuthView, String> {
       fingerprint: fingerprint.clone(),
     })
     .collect();
+  let certs = store
+    .https_certs
+    .iter()
+    .map(|(host, fingerprint)| KnownHostView {
+      host: host.clone(),
+      fingerprint: fingerprint.clone(),
+    })
+    .collect();
   Ok(AuthView {
     identity: store.identity,
     credentials,
     known_hosts,
+    certs,
   })
 }
 
@@ -414,6 +430,29 @@ pub fn git_forget_host(app: AppHandle, host: String) -> Result<(), String> {
   let host = clean_host(&host)?;
   let mut store = AuthStore::load(&app)?;
   store.known_hosts.remove(&host);
+  store.save(&app)
+}
+
+/// Accept one HTTPS certificate the system refused, for this host, until it is forgotten or the
+/// server presents a different one. The fingerprint is what makes the choice narrow: trusting a
+/// host is not trusting whatever it offers next.
+#[tauri::command(async)]
+pub fn git_trust_cert(app: AppHandle, host: String, fingerprint: String) -> Result<(), String> {
+  let host = clean_host(&host)?;
+  let fingerprint = fingerprint.trim().to_ascii_lowercase();
+  if fingerprint.is_empty() {
+    return Err("git_auth_incomplete".into());
+  }
+  let mut store = AuthStore::load(&app)?;
+  store.https_certs.insert(host, fingerprint);
+  store.save(&app)
+}
+
+#[tauri::command(async)]
+pub fn git_forget_cert(app: AppHandle, host: String) -> Result<(), String> {
+  let host = clean_host(&host)?;
+  let mut store = AuthStore::load(&app)?;
+  store.https_certs.remove(&host);
   store.save(&app)
 }
 

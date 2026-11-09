@@ -1862,6 +1862,7 @@ export default function GitPanel({
           onSaveHttps={git.saveHttpsCredential}
           onSaveSsh={git.saveSshCredential}
           onTrustHost={git.trustHost}
+          onTrustCert={git.trustCert}
         />
       )}
 

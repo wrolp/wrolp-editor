@@ -6,6 +6,12 @@ import { t, translateError } from "./i18n";
 
 export interface OpenedFile {
   path: string;
+  /**
+   * The file's own name, spelled the way the filesystem holds it. `path` is the case-folded
+   * identity on Windows, so it is the wrong string to put on a tab: a file opened from the
+   * Explorer would read `readme.md` there while the row that opened it says `README.md`.
+   */
+  name: string;
   content: string;
   mtime: number;
   /** Encoding the bytes actually turned out to be. */
@@ -29,6 +35,8 @@ export interface OpenedFile {
 
 export interface SavedFile {
   path: string;
+  /** The name the write landed under, in the case the filesystem kept. */
+  name: string;
   mtime: number;
   /** Encoding actually written, after resolving aliases. */
   encoding: string;
@@ -659,6 +667,8 @@ export interface GitAuthView {
   identity: GitIdentity | null;
   credentials: GitCredentialView[];
   knownHosts: GitKnownHostView[];
+  /** HTTPS certificates accepted in spite of the system refusing them, by host. */
+  certs: GitKnownHostView[];
 }
 
 /** One restored tab: either a file (path + cursor) or scratch text (untitled + content). */
@@ -771,6 +781,11 @@ export interface FileSettings {
    * Unlike `lineEnding` the fallback is the setting, so the panel shows what following means.
    */
   versioning: string | null;
+  /**
+   * The language this file is highlighted as, or null to detect it from the name and the first
+   * line. There is no global default here: what a file is depends on the file.
+   */
+  language: string | null;
 }
 
 export const EMPTY_FILE_SETTINGS: FileSettings = {
@@ -784,6 +799,7 @@ export const EMPTY_FILE_SETTINGS: FileSettings = {
   encoding: null,
   lineEnding: null,
   versioning: null,
+  language: null,
 };
 
 export interface FileSettingsView {
@@ -1188,6 +1204,10 @@ export const api = {
   gitTrustHost: (host: string, fingerprint: string) =>
     invoke<void>("git_trust_host", { host, fingerprint }),
   gitForgetHost: (host: string) => invoke<void>("git_forget_host", { host }),
+  /** Accept one HTTPS certificate the system refused, until it is forgotten or it changes. */
+  gitTrustCert: (host: string, fingerprint: string) =>
+    invoke<void>("git_trust_cert", { host, fingerprint }),
+  gitForgetCert: (host: string) => invoke<void>("git_forget_cert", { host }),
   getGroups: () => invoke<GroupStore>("get_groups"),
   saveGroups: (store: GroupStore) => invoke<GroupStore>("save_groups", { store }),
   /** Where this PDF was last left; null when it has never been read on this machine. */

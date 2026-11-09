@@ -15,6 +15,7 @@ use git2::{
   RemoteCallbacks, Repository, ResetType,
 };
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::fs;
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
@@ -379,7 +380,14 @@ pub(crate) fn clone_core(
       .unwrap_or(0)
   ));
   let hostkey: HostKeyNote = Arc::new(Mutex::new(None));
-  let callbacks = callbacks(auth, Arc::clone(&cancel), sink.clone(), Arc::clone(&hostkey));
+  let cert: CertNote = Arc::new(Mutex::new(None));
+  let callbacks = callbacks(
+    auth,
+    Arc::clone(&cancel),
+    sink.clone(),
+    Arc::clone(&hostkey),
+    Arc::clone(&cert),
+  );
   let mut fetch = FetchOptions::new();
   fetch.remote_callbacks(callbacks);
   let mut builder = RepoBuilder::new();
@@ -401,7 +409,9 @@ pub(crate) fn clone_core(
       Ok(target.to_string_lossy().to_string())
     }
     Err(error) => {
-      let message = hostkey_note(&hostkey).unwrap_or_else(|| remote_fail("clone", error, &cancel));
+      let message = cert_note(&cert, &error)
+        .or_else(|| hostkey_note(&hostkey))
+        .unwrap_or_else(|| remote_fail("clone", error, &cancel));
       // A folder with half a clone in it is worse than none: it makes the retry fail for a
       // reason that has nothing to do with the server. The temp directory is ours alone, so
       // removing it cannot touch a folder that was already there.
@@ -599,11 +609,13 @@ pub(crate) fn push_core(
 
   let rejected: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
   let hostkey: HostKeyNote = Arc::new(Mutex::new(None));
+  let cert: CertNote = Arc::new(Mutex::new(None));
   let mut callbacks = callbacks(
     auth,
     Arc::clone(&cancel),
     sink.clone(),
     Arc::clone(&hostkey),
+    Arc::clone(&cert),
   );
   {
     let rejected = Arc::clone(&rejected);
@@ -632,7 +644,11 @@ pub(crate) fn push_core(
   // A host key the panel should ask about wins over what the transport wrote in its place;
   // `remote_fail` still handles everything else, including authentication.
   if let Err(e) = remote.push(&[refspec.as_str()], Some(&mut options)) {
-    return Err(hostkey_note(&hostkey).unwrap_or_else(|| remote_fail("push", e, &cancel)));
+    return Err(
+      cert_note(&cert, &e)
+        .or_else(|| hostkey_note(&hostkey))
+        .unwrap_or_else(|| remote_fail("push", e, &cancel)),
+    );
   }
   // A cancel that landed as the last object went out is still a cancel: the caller asked to stop,
   // and reporting success would leave the panel claiming an upload the user already gave up on.
@@ -673,16 +689,22 @@ fn fetch_into(
   let mut remote = repo.find_remote(name).map_err(|e| fail("remote", e))?;
   preflight(remote.url().unwrap_or_default(), &cancel)?;
   let hostkey: HostKeyNote = Arc::new(Mutex::new(None));
+  let cert: CertNote = Arc::new(Mutex::new(None));
   let mut options = FetchOptions::new();
   options.remote_callbacks(callbacks(
     auth,
     Arc::clone(&cancel),
     sink,
     Arc::clone(&hostkey),
+    Arc::clone(&cert),
   ));
   // Same as push: the refusal recorded by the callback outranks libgit2's replacement string.
   if let Err(e) = remote.fetch::<&str>(&[], Some(&mut options), None) {
-    return Err(hostkey_note(&hostkey).unwrap_or_else(|| remote_fail("fetch", e, &cancel)));
+    return Err(
+      cert_note(&cert, &e)
+        .or_else(|| hostkey_note(&hostkey))
+        .unwrap_or_else(|| remote_fail("fetch", e, &cancel)),
+    );
   }
   Ok(())
 }
@@ -751,11 +773,54 @@ fn refuse(slot: &HostKeyNote, message: String) -> Result<CertificateCheckStatus,
   Err(git2::Error::from_str(&message))
 }
 
+/// An HTTPS certificate the system refused, kept for the caller.
+///
+/// The certificate callback cannot refuse an X509 certificate directly: it is shown one for
+/// every HTTPS connection, including the ones the system is perfectly happy with, and the
+/// question "did the system accept this?" is not passed through by git2. So the callback records
+/// what it saw, lets the system decide, and the operation turns a certificate failure into a
+/// prompt using this note.
+#[derive(Clone)]
+struct CertRefusal {
+  host: String,
+  fingerprint: String,
+  /// The host already had an accepted certificate with a different fingerprint.
+  changed: bool,
+}
+
+type CertNote = Arc<Mutex<Option<CertRefusal>>>;
+
+/// The structured refusal for a certificate failure, if this operation saw a certificate.
+fn cert_note(slot: &CertNote, error: &git2::Error) -> Option<String> {
+  // Only a certificate failure is about the certificate. A valid one is seen on a connection
+  // that can fail later for an unrelated reason, and prompting then would be wrong.
+  if error.code() != ErrorCode::Certificate {
+    return None;
+  }
+  let refusal = slot.lock().ok()?.clone()?;
+  let code = if refusal.changed {
+    "git_cert_changed"
+  } else {
+    "git_cert_untrusted"
+  };
+  Some(format!("{code}:{}|{}", refusal.host, refusal.fingerprint))
+}
+
+/// SHA-256 of a certificate's DER, in lowercase hex — the value shown to the user and stored
+/// when they accept it.
+fn cert_fingerprint(der: &[u8]) -> String {
+  Sha256::digest(der)
+    .iter()
+    .map(|byte| format!("{byte:02x}"))
+    .collect()
+}
+
 fn callbacks(
   auth: &AuthStore,
   cancel: Arc<AtomicBool>,
   sink: Sink,
   hostkey_slot: HostKeyNote,
+  cert_slot: CertNote,
 ) -> RemoteCallbacks<'static> {
   let mut callbacks = RemoteCallbacks::new();
   let auth = auth.clone();
@@ -808,9 +873,28 @@ fn callbacks(
   {
     let auth = auth.clone();
     let cancel = Arc::clone(&cancel);
+    let cert_slot = Arc::clone(&cert_slot);
     callbacks.certificate_check(move |cert: &Cert<'_>, host| {
       if cancel.load(Ordering::Relaxed) {
         return Err(git2::Error::from_str("git_canceled"));
+      }
+      if let Some(x509) = cert.as_x509() {
+        let fingerprint = cert_fingerprint(x509.data());
+        let key = host.to_ascii_lowercase();
+        let accepted = auth.https_certs.get(&key);
+        if accepted.is_some_and(|known| known.eq_ignore_ascii_case(&fingerprint)) {
+          return Ok(CertificateCheckStatus::CertificateOk);
+        }
+        if let Ok(mut note) = cert_slot.lock() {
+          *note = Some(CertRefusal {
+            host: key,
+            fingerprint,
+            changed: accepted.is_some(),
+          });
+        }
+        // The system decides for every certificate the user has not accepted yet: a valid one
+        // passes silently, and an invalid one fails here with the note left for the caller.
+        return Ok(CertificateCheckStatus::CertificatePassthrough);
       }
       let Some(hostkey) = cert.as_hostkey() else {
         return Ok(CertificateCheckStatus::CertificatePassthrough);
@@ -1461,6 +1545,7 @@ pub(crate) fn write_resolution(
     .unwrap_or(0);
   Ok(SavedFile {
     path: crate::draft::normalize_path(&abs.to_string_lossy()),
+    name: crate::draft::display_name(&abs.to_string_lossy()),
     mtime,
     encoding: encoding::resolve_for_write(&encoding_name)?.name().to_string(),
     bytes: bytes.len() as u64,
@@ -1653,6 +1738,47 @@ pub(crate) fn merge_abort(root: &str, locks: &GitLocks) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  /// An HTTPS certificate the system refused is reported in the same structured shape as an SSH
+  /// host key, so the panel has one dialog to open — but only when the failure really was the
+  /// certificate. A valid certificate seen on a connection that failed later must not prompt.
+  #[test]
+  fn a_refused_certificate_is_kept_for_the_caller() {
+    let slot: CertNote = Arc::new(Mutex::new(Some(CertRefusal {
+      host: "example.com".into(),
+      fingerprint: "abcd".into(),
+      changed: false,
+    })));
+    let refused = git2::Error::new(
+      ErrorCode::Certificate,
+      git2::ErrorClass::Http,
+      "user cancelled certificate check",
+    );
+    assert_eq!(
+      cert_note(&slot, &refused).as_deref(),
+      Some("git_cert_untrusted:example.com|abcd")
+    );
+    let other = git2::Error::new(ErrorCode::GenericError, git2::ErrorClass::Http, "404");
+    assert_eq!(cert_note(&slot, &other), None);
+
+    let changed: CertNote = Arc::new(Mutex::new(Some(CertRefusal {
+      host: "example.com".into(),
+      fingerprint: "abcd".into(),
+      changed: true,
+    })));
+    assert_eq!(
+      cert_note(&changed, &refused).as_deref(),
+      Some("git_cert_changed:example.com|abcd")
+    );
+  }
+
+  #[test]
+  fn a_fingerprint_is_sha256_of_the_der() {
+    assert_eq!(
+      cert_fingerprint(b"hello"),
+      "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    );
+  }
 
   /// The slot exists because libgit2 overwrites the callback's error text with its own
   /// "invalid or unknown remote ssh hostkey"; what the callback recorded has to survive for the

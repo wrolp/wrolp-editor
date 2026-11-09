@@ -17,6 +17,8 @@ interface Props {
     remember: boolean
   ) => Promise<boolean>;
   onTrustHost: (host: string, fingerprint: string) => Promise<boolean>;
+  /** Accept an HTTPS certificate the system refused, for this host. */
+  onTrustCert: (host: string, fingerprint: string) => Promise<boolean>;
 }
 
 /**
@@ -31,6 +33,7 @@ export default function GitAuthDialog({
   onSaveHttps,
   onSaveSsh,
   onTrustHost,
+  onTrustCert,
 }: Props) {
   const [name, setName] = useState(username ?? "");
   const [secret, setSecret] = useState("");
@@ -52,6 +55,8 @@ export default function GitAuthDialog({
     try {
       if (ask.kind === "host") {
         await onTrustHost(ask.host, ask.fingerprint);
+      } else if (ask.kind === "cert") {
+        await onTrustCert(ask.host, ask.fingerprint);
       } else if (ask.kind === "ssh") {
         await onSaveSsh(ask.host, keyPath.trim(), passphrase || null, remember);
       } else {
@@ -65,12 +70,14 @@ export default function GitAuthDialog({
   const title =
     ask.kind === "host"
       ? t("git.authHostTitle")
-      : ask.kind === "ssh"
-        ? t("git.authSshTitle", { host: ask.host })
-        : t("git.authHttpsTitle", { host: ask.host });
+      : ask.kind === "cert"
+        ? t("git.authCertTitle", { host: ask.host })
+        : ask.kind === "ssh"
+          ? t("git.authSshTitle", { host: ask.host })
+          : t("git.authHttpsTitle", { host: ask.host });
 
   const canSubmit =
-    ask.kind === "host"
+    ask.kind === "host" || ask.kind === "cert"
       ? true
       : ask.kind === "ssh"
         ? keyPath.trim().length > 0
@@ -184,9 +191,30 @@ export default function GitAuthDialog({
           </>
         )}
 
+        {ask.kind === "cert" && (
+          <>
+            <p className="git-auth-hint">
+              {ask.changed ? t("git.authCertChanged") : t("git.authCertUnknown")}
+            </p>
+            <div className="git-auth-field">
+              <span>{t("git.authHost")}</span>
+              <code className="git-fingerprint">{ask.host}</code>
+            </div>
+            <div className="git-auth-field">
+              <span>{t("git.authFingerprint")}</span>
+              <code className="git-fingerprint">{ask.fingerprint}</code>
+            </div>
+            <p className="git-auth-hint">{t("git.authCertWarning")}</p>
+          </>
+        )}
+
         <div className="modal-actions">
           <button className="btn primary" disabled={!canSubmit || busy} onClick={() => void submit()}>
-            {ask.kind === "host" ? t("git.authTrust") : t("git.authSave")}
+            {ask.kind === "host"
+              ? t("git.authTrust")
+              : ask.kind === "cert"
+                ? t("git.authCertTrust")
+                : t("git.authSave")}
           </button>
           <button className="btn" onClick={onClose} disabled={busy}>
             {t("git.cancel")}

@@ -390,6 +390,15 @@ export default function SettingsPanel({
     }
   };
 
+  const forgetGitCert = async (host: string) => {
+    try {
+      await api.gitForgetCert(host);
+      loadGitAuth();
+    } catch (e) {
+      onToast(errorMessage(e));
+    }
+  };
+
   const backupNow = () => {
     if (backupBusy) return;
     setBackupBusy(true);
@@ -982,6 +991,24 @@ export default function SettingsPanel({
                       {host.host} · {host.fingerprint.slice(0, 16)}…
                     </span>
                     <button className="btn" onClick={() => void forgetGitHost(host.host)}>
+                      {t("git.settingsForget")}
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="setting-group">
+              <h3>{t("git.settingsCerts")}</h3>
+              <p className="muted">{t("git.settingsCertsDesc")}</p>
+              {(gitAuth?.certs?.length ?? 0) === 0 ? (
+                <p className="muted">{t("git.settingsNoCerts")}</p>
+              ) : (
+                gitAuth!.certs?.map((cert) => (
+                  <div key={cert.host} className="git-setting-row">
+                    <span className="git-setting-name" title={cert.fingerprint}>
+                      {cert.host} · {cert.fingerprint.slice(0, 16)}…
+                    </span>
+                    <button className="btn" onClick={() => void forgetGitCert(cert.host)}>
                       {t("git.settingsForget")}
                     </button>
                   </div>

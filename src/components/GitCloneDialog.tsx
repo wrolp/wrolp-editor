@@ -63,6 +63,17 @@ function authPrompt(raw: string, url: string): GitAuthAsk | null {
       };
     }
   }
+  if (raw.startsWith("git_cert_untrusted:") || raw.startsWith("git_cert_changed:")) {
+    const [host, fingerprint] = raw.slice(raw.indexOf(":") + 1).split("|");
+    if (host && fingerprint) {
+      return {
+        kind: "cert",
+        host,
+        fingerprint,
+        changed: raw.startsWith("git_cert_changed:"),
+      };
+    }
+  }
   return null;
 }
 
@@ -274,6 +285,17 @@ export default function GitCloneDialog({ parent, onClose, onCloned, onError }: P
             onTrustHost={async (host, fingerprint) => {
               try {
                 await api.gitTrustHost(host, fingerprint);
+                setAsk(null);
+                void start();
+                return true;
+              } catch (e) {
+                onError(errorMessage(e));
+                return false;
+              }
+            }}
+            onTrustCert={async (host, fingerprint) => {
+              try {
+                await api.gitTrustCert(host, fingerprint);
                 setAsk(null);
                 void start();
                 return true;
