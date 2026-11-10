@@ -389,6 +389,8 @@ pub fn keep_file(
   commands::push_history_entry(&app, &path)?;
   Ok(SavedFile {
     path,
+    // The parked copy's own name: `free_name` may have numbered it.
+    name: name_at(&target),
     mtime,
     encoding: crate::encoding::resolve_for_write(&chosen)?
       .name()

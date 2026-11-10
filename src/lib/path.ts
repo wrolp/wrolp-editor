@@ -5,6 +5,13 @@ const EXT_LANG: Record<string, string> = {
   md: "markdown",
   markdown: "markdown",
   json: "json",
+  // A notebook has no cell view here, but it is a JSON document, so its source is highlighted
+  // by the JSON tokenizer rather than shown as one flat colour.
+  ipynb: "json",
+  // JSON Lines is one JSON value per line, not one JSON document. It gets its own language id
+  // so that the editor does not try to validate the whole file as a single document.
+  jsonl: "jsonl",
+  ndjson: "jsonl",
   js: "javascript",
   mjs: "javascript",
   cjs: "javascript",
@@ -54,8 +61,64 @@ export function extOf(name: string): string {
   return dot <= 0 ? "" : base.slice(dot + 1).toLowerCase();
 }
 
-export function langOf(path: string): string {
-  return EXT_LANG[extOf(path)] ?? "plaintext";
+/**
+ * Languages a `#!` line can name, keyed by the interpreter with its version suffix stripped
+ * (`python3.11` → `python`). Only interpreters this editor has a language for are listed;
+ * anything else stays plaintext, which is what it would have been without the line.
+ */
+const SHEBANG_LANG: Record<string, string> = {
+  node: "javascript",
+  nodejs: "javascript",
+  python: "python",
+  sh: "shell",
+  bash: "shell",
+  zsh: "shell",
+  ksh: "shell",
+  dash: "shell",
+  fish: "shell",
+  pwsh: "powershell",
+  powershell: "powershell",
+};
+
+/**
+ * The language a file's first line declares, or null when it declares none we know.
+ *
+ * Only the very first line counts, and only when it starts with `#!`: that is the line the OS
+ * reads when it runs the file, while a `#!` anywhere else is just a comment. `env` is resolved
+ * because it is how most shebangs are written, and its flags and `NAME=value` assignments come
+ * before the interpreter it runs (`#!/usr/bin/env -S node`).
+ */
+function shebangLang(content: string): string | null {
+  const text = content.startsWith("\uFEFF") ? content.slice(1) : content;
+  const end = text.indexOf("\n");
+  const line = end < 0 ? text : text.slice(0, end);
+  if (!line.startsWith("#!")) return null;
+  let argv = line.slice(2).trim().split(/\s+/).filter(Boolean);
+  if (basename(argv[0] ?? "").toLowerCase() === "env") {
+    argv = argv.slice(1);
+    // `-u` is the one `env` option that also takes an argument, so it skips two tokens.
+    let i = 0;
+    while (i < argv.length) {
+      const arg = argv[i];
+      if (arg === "-u" || arg === "--unset") i += 2;
+      else if (arg.startsWith("-") || arg.includes("=")) i += 1;
+      else break;
+    }
+    argv = argv.slice(i);
+  }
+  const interpreter = basename(argv[0] ?? "").toLowerCase().replace(/[\d.]+$/, "");
+  return SHEBANG_LANG[interpreter] ?? null;
+}
+
+/**
+ * The Monaco language for `path`, by extension. An extension-less file has nothing in its
+ * name to go on, so the text decides when the caller has read it: a `#!` line is the only
+ * other evidence the file offers.
+ */
+export function langOf(path: string, content?: string): string {
+  const ext = extOf(path);
+  if (ext) return EXT_LANG[ext] ?? "plaintext";
+  return (content === undefined ? null : shebangLang(content)) ?? "plaintext";
 }
 
 /** New, never-saved files have no real path; they are marked with this prefix. */
@@ -228,6 +291,8 @@ const EXT_GLYPH: Record<string, string> = {
   json: "json",
   jsonc: "json",
   json5: "json",
+  jsonl: "json",
+  ndjson: "json",
   webmanifest: "json",
   yaml: "yaml",
   yml: "yaml",

@@ -619,7 +619,18 @@ export function useEditorTabs({
         const overrides = await api.fileSettingsView(disk.path);
         own = overrides.overrides;
         setTabs((prev) =>
-          prev.map((t) => (t.id === tabId ? { ...t, fileSettings: overrides.overrides } : t))
+          prev.map((t) =>
+            t.id === tabId
+              ? {
+                  ...t,
+                  fileSettings: overrides.overrides,
+                  // A chosen language outranks what the name and the first line say. Read from
+                  // the text that just arrived, so a file opened behind a password and only
+                  // decrypted now is typed by what it actually contains.
+                  language: overrides.overrides.language ?? langOf(disk.path, disk.content),
+                }
+              : t
+          )
         );
       } catch {
         // A missing override file is a normal first run; keep the global defaults.
@@ -634,7 +645,7 @@ export function useEditorTabs({
         const req: PendingRestore = {
           tabId,
           path: disk.path,
-          name: basename(disk.path),
+          name: disk.name,
           draft: draftInfo,
         };
         if (draftRestoreRef.current === "ask") {
@@ -723,13 +734,19 @@ export function useEditorTabs({
       let target: Tab;
       if (opened) {
         target = opened;
-        // Only the two lock flags follow the disk here. An open of a file that is already
-        // open does not touch its text — that would throw away the edits in it — and the
-        // flags are what every later save, reload and comparison asks before it acts.
-        if (opened.encrypted !== disk.encrypted || opened.locked !== disk.locked) {
+        // The lock flags and the file's own spelling follow the disk here. An open of a file
+        // that is already open does not touch its text — that would throw away the edits in
+        // it — but a name that changed case on disk is only learned from a read like this one.
+        if (
+          opened.encrypted !== disk.encrypted ||
+          opened.locked !== disk.locked ||
+          opened.name !== disk.name
+        ) {
           setTabs((prev) =>
             prev.map((t) =>
-              t.id === opened.id ? { ...t, encrypted: disk.encrypted, locked: disk.locked } : t
+              t.id === opened.id
+                ? { ...t, encrypted: disk.encrypted, locked: disk.locked, name: disk.name }
+                : t
             )
           );
         }
@@ -738,8 +755,11 @@ export function useEditorTabs({
         target = {
           id: nextId(),
           path: disk.path,
-          name: basename(disk.path),
-          language: langOf(disk.path),
+          // The backend's spelling of the name, not one cut out of the identity path: the
+          // path is case-folded on Windows, so a tab named from it would read `readme.md`
+          // over a file the Explorer lists as `README.md`.
+          name: disk.name,
+          language: langOf(disk.path, disk.content),
           original: disk.content,
           mtime: disk.mtime,
           dirty: false,
@@ -778,7 +798,18 @@ export function useEditorTabs({
       try {
         const saved = await api.saveFileSettings(path, next);
         setTabs((prev) =>
-          prev.map((t) => (t.path === path ? { ...t, fileSettings: saved } : t))
+          prev.map((t) =>
+            t.path === path
+              ? {
+                  ...t,
+                  fileSettings: saved,
+                  // Clearing the override — the dialog's reset, or a language given back to
+                  // detection — has to put the detected language on screen, or the tab would
+                  // keep the type it no longer has an override for.
+                  language: saved.language ?? langOf(t.path, t.original),
+                }
+              : t
+          )
         );
         // The override is about the buffer on screen, not only the next save: without this the
         // tab would go on typing the break it started with until it is closed and opened again.
@@ -788,6 +819,35 @@ export function useEditorTabs({
       }
     },
     [applyLineEnding, toast]
+  );
+
+  /**
+   * Highlight one tab as another language, and remember the choice for its file.
+   *
+   * `null` means "detect", which is also what a file nobody has chosen for does. The answer is
+   * kept beside the file's other overrides, so it survives the tab closing; a buffer with no
+   * file behind it changes for the rest of the session only, there being no path to key it by.
+   */
+  const setLanguage = useCallback(
+    async (id: number, language: string | null) => {
+      const tab = tabsRef.current.find((t) => t.id === id);
+      if (!tab) return;
+      const patch = (prev: Tab): Tab =>
+        prev.id === id ? { ...prev, language: language ?? langOf(prev.path, prev.original) } : prev;
+      const next = tabsRef.current.map(patch);
+      tabsRef.current = next;
+      setTabs(next);
+      const last = lastFileTabRef.current;
+      if (last && last.id === id) lastFileTabRef.current = patch(last);
+      if (!isFileTab(tab) || isUntitled(tab.path)) return;
+      try {
+        const saved = await api.saveFileSettings(tab.path, { ...tab.fileSettings, language });
+        setTabs((prev) => prev.map((t) => (t.id === id ? { ...t, fileSettings: saved } : t)));
+      } catch (e) {
+        toast(errorMessage(e));
+      }
+    },
+    [toast]
   );
 
   const openUntitled = useCallback(async () => {
@@ -1015,9 +1075,9 @@ export function useEditorTabs({
         if (disk.locked) throw "encrypted_locked";
         return {
           path: disk.path,
-          name: basename(disk.path),
+          name: disk.name,
           content: disk.content,
-          language: langOf(disk.path),
+          language: langOf(disk.path, disk.content),
           kind: "disk",
         };
       };
@@ -1130,7 +1190,14 @@ export function useEditorTabs({
       const next = moved.get(pathKey(tab.path));
       return !next || !isFileTab(tab)
         ? tab
-        : { ...tab, path: next, name: basename(next), language: langOf(next) };
+        : {
+            ...tab,
+            path: next,
+            name: basename(next),
+            // A rename keeps the type the user picked: the overrides were re-keyed with the
+            // file, so the language chosen for it goes on applying at the new path.
+            language: tab.fileSettings.language ?? langOf(next, tab.original),
+          };
     };
     setTabs((prev) => prev.map(rekeyed));
     setRestoreQueue((q) =>
@@ -1204,8 +1271,8 @@ export function useEditorTabs({
               return {
                 id: nextId(),
                 path: disk.path,
-                name: basename(disk.path),
-                language: langOf(disk.path),
+                name: disk.name,
+                language: langOf(disk.path, disk.content),
                 original: disk.content,
                 mtime: disk.mtime,
                 dirty: false,
@@ -1321,7 +1388,10 @@ export function useEditorTabs({
       // quiet load is not a second implementation of that answer.
       setTabs((prev) => prev.map((t) => {
         const ov = overrideMap.get(t.id);
-        return ov ? { ...t, fileSettings: ov } : t;
+        // A saved language choice is applied here rather than only to the object it travels
+        // in: the tab was built with the language its name and first line suggest, and the
+        // override is what says otherwise.
+        return ov ? { ...t, fileSettings: ov, language: ov.language ?? t.language } : t;
       }));
       if (queued.length > 0) {
         if (draftRestoreRef.current === "ask") setRestoreQueue((q) => [...q, ...queued]);
@@ -1487,7 +1557,7 @@ export function useEditorTabs({
         id: nextId(),
         path: `merge://${pathKey(data.path)}`,
         name: `${basename(data.path)} · ${t("merge.tab")}`,
-        language: langOf(data.path),
+        language: langOf(data.path, data.merged),
         original: "",
         dirty: false,
         merge: data,
@@ -1873,8 +1943,10 @@ export function useEditorTabs({
               ? {
                   ...t,
                   path: saved.path,
-                  name: basename(saved.path),
-                  language: langOf(saved.path),
+                  // The name the write landed under, not the case-folded identity: a file
+                  // saved as `Report.md` keeps that spelling on its new tab.
+                  name: saved.name,
+                  language: langOf(saved.path, content),
                   original: content,
                   mtime: saved.mtime,
                   dirty: !unchanged,
@@ -1892,7 +1964,7 @@ export function useEditorTabs({
         if (!tab.encrypted) {
           await versionsRef.current?.recordSave(saved.path, content, null, false, opts?.note);
         }
-        if (!opts?.quiet) toast(t("menu.saved", { name: basename(saved.path) }));
+        if (!opts?.quiet) toast(t("menu.saved", { name: saved.name }));
         return true;
       }
 
@@ -2296,8 +2368,8 @@ export function useEditorTabs({
           : {
               ...prev,
               path: saved.path,
-              name: basename(saved.path),
-              language: langOf(saved.path),
+              name: saved.name,
+              language: langOf(saved.path, content),
               original: content,
               // Cleared rather than carried over: a restored tab keeps its text here, and the
               // editor reads this field first when it builds the model for the new path, so
@@ -2320,7 +2392,7 @@ export function useEditorTabs({
       // of a document this tab no longer shows.
       setTimeout(() => oldModel?.dispose(), 0);
       onFileOpened?.(parentOf(saved.path));
-      toast(t("enc.encrypted", { name: basename(saved.path) }));
+      toast(t("enc.encrypted", { name: saved.name }));
     },
     [draft, editorRef, onFileOpened, toast]
   );
@@ -2694,7 +2766,7 @@ export function useEditorTabs({
       // now, and a draft left behind would offer the same edits back a second time.
       draft.forget(oldPath);
       await api.clearDraft(oldPath).catch(() => {});
-      toast(t("gone.kept", { name: basename(saved.path) }));
+      toast(t("gone.kept", { name: saved.name }));
       return true;
     },
     [draft, liveContent, rekeyTabs, toast]
@@ -2749,7 +2821,7 @@ export function useEditorTabs({
         return;
       }
       const name = basename(tab.path);
-      const language = langOf(disk.path);
+      const language = langOf(disk.path, disk.content);
       setConflict({
         tabId: id,
         pair: {
@@ -2881,6 +2953,7 @@ export function useEditorTabs({
       onEditorChange,
       onCursorChange,
       setFileSettings,
+      setLanguage,
       resolveRestore,
       /** Put a version's text into the editor, unsaved. */
       restoreVersion,
@@ -2939,6 +3012,7 @@ export function useEditorTabs({
       onEditorChange,
       onCursorChange,
       setFileSettings,
+      setLanguage,
       resolveRestore,
       restoreVersion,
       resolveAllRestores,

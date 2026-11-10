@@ -180,6 +180,21 @@ pub(crate) fn normalize_path_preserved(raw: &str) -> String {
   normalize_to(raw, false, false)
 }
 
+/// The last component of `raw` in the spelling the filesystem reports, for a label a person
+/// reads: a tab's name, a row in a list.
+///
+/// [`normalize_path`] is a file's *identity* and is lowercased on Windows, which is the right
+/// form for a key and the wrong one for a name: a tab fed that spelling reads `readme.md` over
+/// a file called `README.md`, disagreeing with the Explorer row it was opened from. An empty
+/// answer means the path has no name to show — a root, or nothing at all.
+pub(crate) fn display_name(raw: &str) -> String {
+  let preserved = normalize_path_preserved(raw);
+  Path::new(&preserved)
+    .file_name()
+    .map(|name| name.to_string_lossy().into_owned())
+    .unwrap_or_default()
+}
+
 fn normalize_to(raw: &str, lowercase: bool, keep_verbatim: bool) -> String {
   let trimmed = raw.trim().trim_matches('"').trim_matches('\'');
   if trimmed.is_empty() {
@@ -593,6 +608,25 @@ mod tests {
   #[test]
   fn empty_path_yields_empty_key() {
     assert_eq!(path_key("   "), "");
+  }
+
+  /// A label keeps the case the filesystem holds. The identity spelling is lowercase on
+  /// Windows, and a tab named from it would disagree with the Explorer row it was opened from.
+  #[test]
+  fn a_display_name_keeps_the_case_the_filesystem_holds() {
+    let dir = std::env::temp_dir().join(format!("wrolp-name-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("temp dir");
+    let file = dir.join("ReadMe.MD");
+    std::fs::write(&file, b"x").expect("write");
+    // Asked for in the identity's spelling, which is lowercase on Windows: the answer is still
+    // the name the directory holds.
+    let asked = normalize_path(&file.to_string_lossy());
+    assert_eq!(display_name(&asked), "ReadMe.MD");
+    assert_eq!(display_name(&file.to_string_lossy()), "ReadMe.MD");
+    // Nothing to name.
+    assert_eq!(display_name(""), "");
+    let _ = std::fs::remove_dir_all(&dir);
   }
 
   /// A folder of bare digests is a folder of anonymous files. The name of the document whose

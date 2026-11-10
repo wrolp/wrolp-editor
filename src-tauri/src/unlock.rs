@@ -410,6 +410,7 @@ pub fn change_password(
     .unwrap_or(0);
   Ok(commands::SavedFile {
     path: source.path,
+    name: source.name,
     mtime,
     encoding: "UTF-8".into(),
     bytes,
@@ -468,6 +469,7 @@ pub fn remove_encryption(
     .unwrap_or(0);
   Ok(commands::SavedFile {
     path: source.path,
+    name: source.name,
     mtime,
     encoding: "UTF-8".into(),
     bytes,
@@ -552,6 +554,7 @@ pub fn save_file_as_encrypted(
   commands::push_history_entry(&app, &normalized)?;
   Ok(commands::SavedFile {
     path: normalized,
+    name: draft::display_name(&path),
     mtime,
     encoding: "UTF-8".into(),
     bytes,

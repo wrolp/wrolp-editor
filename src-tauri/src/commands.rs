@@ -81,6 +81,10 @@ pub struct PendingFiles(pub Mutex<Vec<String>>);
 pub struct OpenedFile {
   /// Normalized absolute path.
   pub path: String,
+  /// The file's own name in the spelling the filesystem reports. `path` is the lowercased
+  /// identity on Windows, which is right for keys and wrong for a label — a tab built from it
+  /// would disagree with the Explorer row the file was opened from.
+  pub name: String,
   pub content: String,
   /// Modification time on disk, epoch milliseconds.
   pub mtime: u64,
@@ -107,6 +111,9 @@ pub struct OpenedFile {
 #[serde(rename_all = "camelCase")]
 pub struct SavedFile {
   pub path: String,
+  /// The name the write landed under, spelled as the filesystem reports it. Saves that rename
+  /// — an untitled buffer given a path — are where a tab learns a name worth showing.
+  pub name: String,
   pub mtime: u64,
   /// Encoding actually written, after resolving aliases like "utf8".
   pub encoding: String,
@@ -750,6 +757,8 @@ pub(crate) fn mtime_ms(meta: &std::fs::Metadata) -> u64 {
 /// counts as openable.
 pub(crate) struct SourceFile {
   pub path: String,
+  /// The name the filesystem holds, for a label rather than for a key.
+  pub name: String,
   pub meta: std::fs::Metadata,
   pub bytes: Vec<u8>,
 }
@@ -763,6 +772,12 @@ pub(crate) fn read_source(raw: &str) -> Result<SourceFile, String> {
     return Err("path_empty".into());
   }
   let file = PathBuf::from(draft::io_path(raw));
+  // Taken from the resolved path rather than from `raw`, so the name is the one on disk even
+  // when the caller spelled the path differently.
+  let name = file
+    .file_name()
+    .map(|n| n.to_string_lossy().into_owned())
+    .unwrap_or_default();
   let meta = std::fs::metadata(&file).map_err(|e| format!("file_access:{e}"))?;
   if !meta.is_file() {
     return Err("file_not_file".into());
@@ -771,7 +786,12 @@ pub(crate) fn read_source(raw: &str) -> Result<SourceFile, String> {
     return Err(format!("file_too_large:{}", meta.len() / (1024 * 1024)));
   }
   let bytes = std::fs::read(&file).map_err(|e| format!("file_read:{e}"))?;
-  Ok(SourceFile { path, meta, bytes })
+  Ok(SourceFile {
+    path,
+    name,
+    meta,
+    bytes,
+  })
 }
 
 /// The leading bytes of a file — enough to recognize a container — without reading the rest.
@@ -825,6 +845,7 @@ pub(crate) fn draft_key_for(
 pub(crate) fn decrypted_file(source: SourceFile, content: String) -> OpenedFile {
   OpenedFile {
     path: source.path,
+    name: source.name,
     content,
     mtime: mtime_ms(&source.meta),
     // The plaintext of a container is UTF-8 by definition. There is no encoding field in
@@ -845,6 +866,7 @@ pub(crate) fn decrypted_file(source: SourceFile, content: String) -> OpenedFile 
 pub(crate) fn locked_file(source: SourceFile) -> OpenedFile {
   OpenedFile {
     path: source.path,
+    name: source.name,
     content: String::new(),
     mtime: mtime_ms(&source.meta),
     encoding: String::new(),
@@ -969,6 +991,7 @@ pub fn open_file(
   }
   Ok(OpenedFile {
     path: normalized,
+    name: source.name,
     content: decoded.as_ref().map(|d| d.text.clone()).unwrap_or_default(),
     mtime,
     encoding: decoded
@@ -1208,6 +1231,9 @@ pub fn save_file(
   push_history_entry(&app, &normalized)?;
   Ok(SavedFile {
     path: normalized,
+    // Taken from the path the caller gave, which is the spelling it picked in the save
+    // dialog. `normalized` is lowercased on Windows and would name the tab wrong.
+    name: draft::display_name(&path),
     mtime,
     encoding: crate::encoding::resolve_for_write(&target)?
       .name()
@@ -1248,6 +1274,8 @@ fn save_container(
   push_history_entry(app, normalized)?;
   Ok(SavedFile {
     path: normalized.to_string(),
+    // The key is lowercased; the name is read back off the file that was just written.
+    name: draft::display_name(normalized),
     mtime,
     encoding: "UTF-8".into(),
     bytes: written.len() as u64,
@@ -1683,10 +1711,16 @@ pub fn get_history(app: AppHandle) -> Result<Vec<HistoryEntry>, String> {
 pub(crate) fn push_history_entry(app: &AppHandle, path: &str) -> Result<(), String> {
   let mut history = read_json::<Vec<HistoryEntry>>(app, "history.json")?.unwrap_or_default();
   history.retain(|h| h.path != path);
-  let name = Path::new(path)
-    .file_name()
-    .map(|n| n.to_string_lossy().to_string())
-    .unwrap_or_else(|| path.to_string());
+  // The name a person reads keeps the case the file has, while the stored path stays the
+  // lowercased identity every store keys by — the same split the open response makes for the
+  // tab, so the recent list and the tab agree. A path with no name of its own (a root) is
+  // still listed under its path.
+  let display = draft::display_name(path);
+  let name = if display.is_empty() {
+    path.to_string()
+  } else {
+    display
+  };
   history.insert(
     0,
     HistoryEntry {

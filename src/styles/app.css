@@ -1139,6 +1139,29 @@ textarea.ver-note-body {
 .ctx-item:hover .ctx-value {
   color: var(--on-accent);
 }
+/* The language page of the editor's menu. Every language the bundle can highlight is far more
+   rows than the four actions it shares a menu with, so the page gets a height of its own: the
+   menu scrolls inside it instead of running the window from top to bottom. */
+.ctx-menu.ctx-language {
+  max-height: min(420px, calc(100vh - 16px));
+  min-width: 240px;
+}
+/* The filter over that list. It sits inside the menu on the menu's own surface: a second
+   background tone there would read as a field that had wandered in from a dialog. */
+.ctx-search {
+  margin: 2px 4px 6px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 13px;
+}
+.ctx-search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
 
 /* ---------- Main area: sidebar + editor ---------- */
 .main {

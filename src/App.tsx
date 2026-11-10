@@ -417,11 +417,7 @@ const FLYOUT_WIDTH = 270;
  * The per-file settings the tab menu writes, in the order the dialog lists them. The label is
  * an i18n key, so the table is fixed and each read takes the language the window is in.
  */
-const FILE_SETTING_ROWS: {
-  key: keyof FileSettings;
-  label: string;
-  icon: ComponentType<{ size?: number }>;
-}[] = [
+const FILE_SETTING_ROWS = [
   { key: "renderWhitespace", label: "settings.renderWhitespace", icon: IconWhitespace },
   { key: "wordWrap", label: "settings.wordWrap", icon: IconWordWrap },
   { key: "stickyScroll", label: "settings.stickyScroll", icon: IconStickyScroll },
@@ -432,7 +428,14 @@ const FILE_SETTING_ROWS: {
   { key: "encoding", label: "settings.encoding", icon: IconFile },
   { key: "lineEnding", label: "settings.lineEnding", icon: IconLineEnding },
   { key: "versioning", label: "fileSettingsMenu.versioning", icon: IconVersions },
-];
+  // `satisfies` rather than an annotation: the literal keys are what let the value table below
+  // be checked against exactly the rows this menu lists, instead of against every field of
+  // `FileSettings` — the language, for one, is chosen in the editor's own right-click menu.
+] satisfies {
+  key: keyof FileSettings;
+  label: string;
+  icon: ComponentType<{ size?: number }>;
+}[];
 
 export default function App() {
   const [toastState, setToastState] = useState({ message: "", visible: false });
@@ -2584,7 +2587,7 @@ export default function App() {
           return;
         }
         const name = basename(file.abs);
-        const language = langOf(file.abs);
+        const language = langOf(file.abs, diff.right.text || diff.left.text);
         const [leftLabel, rightLabel] =
           scope === "index"
             ? [t("git.sideHead"), t("git.sideIndex")]
@@ -2679,7 +2682,7 @@ export default function App() {
           return;
         }
         const name = basename(file.abs);
-        const language = langOf(file.abs);
+        const language = langOf(file.abs, diff.right.text || diff.left.text);
         await tabs.openSnapshotCompare(
           {
             path: diff.left.path,
@@ -2717,7 +2720,7 @@ export default function App() {
       const pair = settingsEncodings?.find(([option]) => option === value);
       return pair ? t(`settings.enc.${pair[1]}`) : value;
     };
-    const values: Record<keyof FileSettings, string> = {
+    const values: Record<(typeof FILE_SETTING_ROWS)[number]["key"], string> = {
       renderWhitespace: t(
         `settings.whitespace.${own.renderWhitespace ?? settings.renderWhitespace}`
       ),
@@ -3260,6 +3263,11 @@ const defaultModeFor = useCallback(
                 onScrollRatio={setScrollRatio}
                 onReady={(handle) => {
                   editorRef.current = handle;
+                }}
+                onLanguage={(language) => {
+                  // Keyed by id rather than taken from the active tab: the editor stays mounted
+                  // on the last file tab while Settings or a comparison is on screen.
+                  if (tabs.fileTab) void tabs.setLanguage(tabs.fileTab.id, language);
                 }}
               />
               {lockedTab && (

@@ -31,6 +31,29 @@ interface Props {
   /** Scroll position as 0..1, so a side-by-side preview can track it. */
   onScrollRatio: (ratio: number) => void;
   onReady: (handle: EditorHandle | null) => void;
+  /** Highlight this tab as another language; null goes back to detecting it. */
+  onLanguage: (language: string | null) => void;
+}
+
+/**
+ * Every language Monaco can highlight, as `[id, label]`, sorted by the label a reader looks
+ * for. Built on first use rather than at import: the registry is complete by then, and a
+ * picker nobody opens costs nothing.
+ */
+let languageChoices: [string, string][] | null = null;
+function languages(): [string, string][] {
+  if (!languageChoices) {
+    languageChoices = monaco.languages
+      .getLanguages()
+      .map((entry): [string, string] => [entry.id, entry.aliases?.[0] ?? entry.id])
+      .sort((a, b) => a[1].localeCompare(b[1]));
+  }
+  return languageChoices;
+}
+
+/** The label Monaco uses for a language id, or the id itself when it has none. */
+function languageName(id: string): string {
+  return languages().find(([candidate]) => candidate === id)?.[1] ?? id;
 }
 
 export default function Editor({
@@ -50,6 +73,7 @@ export default function Editor({
   onStats,
   onScrollRatio,
   onReady,
+  onLanguage,
 }: Props) {
   const cursorRef = useRef(onCursor);
   cursorRef.current = onCursor;
@@ -62,6 +86,10 @@ export default function Editor({
   const instanceRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   /** The app's own right-click menu; Monaco's is turned off in the options below. */
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  /** Which page the menu shows: the clipboard actions, or the language list. */
+  const [menuPage, setMenuPage] = useState<"main" | "language">("main");
+  /** What narrows the language list; cleared every time the menu opens. */
+  const [languageQuery, setLanguageQuery] = useState("");
   const menuRef = useRef<HTMLDivElement>(null);
   const menuAt = useMenuPlacement(menu, menuRef);
   /** The tab as of this render, read by the callbacks that outlive the render that made them. */
@@ -307,6 +335,15 @@ export default function Editor({
     instance.trigger("editorMenu", "editor.action.selectAll", null);
   };
 
+  /** Apply a language — null meaning "detect" — and hand the keyboard back to the buffer. */
+  const pickLanguage = (language: string | null) => {
+    setMenu(null);
+    setMenuPage("main");
+    setLanguageQuery("");
+    onLanguage(language);
+    instanceRef.current?.focus();
+  };
+
   const openMenu = (event: ReactMouseEvent<HTMLDivElement>) => {
     // A right-click on the open menu is its own business; reopening it there would move it.
     if ((event.target as HTMLElement).closest(".editor-menu")) return;
@@ -324,6 +361,10 @@ export default function Editor({
         instance.setPosition(position);
       }
     }
+    // Every open starts on the actions: the language list is a page of its own, and coming
+    // back to a menu already holding ninety rows would bury the four that were wanted.
+    setMenuPage("main");
+    setLanguageQuery("");
     setMenu({ x: event.clientX, y: event.clientY });
   };
 
@@ -333,17 +374,33 @@ export default function Editor({
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") close();
     };
+    // A wheel over the menu belongs to the menu: the language list is long enough to scroll,
+    // and closing it on the first notch would make the list unusable.
+    const onWheel = (event: WheelEvent) => {
+      if (menuRef.current?.contains(event.target as Node)) return;
+      close();
+    };
     window.addEventListener("mousedown", close);
-    window.addEventListener("wheel", close, { passive: true });
+    window.addEventListener("wheel", onWheel, { passive: true });
     window.addEventListener("blur", close);
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("mousedown", close);
-      window.removeEventListener("wheel", close);
+      window.removeEventListener("wheel", onWheel);
       window.removeEventListener("blur", close);
       window.removeEventListener("keydown", onKey);
     };
   }, [menu]);
+
+  // Walked only while the page is up: the list is what the query is for, and a closed menu has
+  // no reason to touch the registry.
+  const query = languageQuery.trim().toLowerCase();
+  const languageRows =
+    menuPage === "language"
+      ? languages().filter(
+          ([id, label]) => !query || label.toLowerCase().includes(query) || id.includes(query)
+        )
+      : [];
 
   return (
     <div className="editor-frame" onContextMenuCapture={openMenu}>
@@ -388,29 +445,67 @@ export default function Editor({
 
       {menu && (
         <div
-          className="ctx-menu editor-menu"
+          className={`ctx-menu editor-menu${menuPage === "language" ? " ctx-language" : ""}`}
           ref={menuRef}
           style={{ display: "block", left: menuAt.left, top: menuAt.top }}
           onMouseDown={(event) => event.stopPropagation()}
           onContextMenu={(event) => event.stopPropagation()}
         >
-          {!tab.locked && (
-            <div className="ctx-item" onClick={() => runMenu("cut")}>
-              {t("editor.cut")}
-            </div>
+          {menuPage === "language" ? (
+            <>
+              <div className="ctx-item" onClick={() => setMenuPage("main")}>
+                <span className="ctx-icon">←</span>
+                {t("grp.back")}
+              </div>
+              <div className="ws-sep" />
+              <input
+                className="ctx-search"
+                value={languageQuery}
+                onChange={(event) => setLanguageQuery(event.target.value)}
+                placeholder={t("editor.languageSearch")}
+                autoFocus
+                spellCheck={false}
+              />
+              {/* Detection is an answer of its own, not the absence of one: choosing it is how
+                  a hand-picked language is given back. */}
+              <div className="ctx-item" onClick={() => pickLanguage(null)}>
+                {t("editor.languageAuto")}
+              </div>
+              <div className="ws-sep" />
+              {languageRows.map(([id, label]) => (
+                <div key={id} className="ctx-item" onClick={() => pickLanguage(id)}>
+                  {label}
+                  <span className="ctx-check">{tab.language === id ? "✓" : ""}</span>
+                </div>
+              ))}
+            </>
+          ) : (
+            <>
+              {!tab.locked && (
+                <div className="ctx-item" onClick={() => runMenu("cut")}>
+                  {t("editor.cut")}
+                </div>
+              )}
+              <div className="ctx-item" onClick={() => runMenu("copy")}>
+                {t("editor.copy")}
+              </div>
+              {!tab.locked && (
+                <div className="ctx-item" onClick={() => runMenu("paste")}>
+                  {t("editor.paste")}
+                </div>
+              )}
+              {!tab.locked && <div className="ws-sep" />}
+              <div className="ctx-item" onClick={() => runMenu("selectAll")}>
+                {t("editor.selectAll")}
+              </div>
+              <div className="ws-sep" />
+              <div className="ctx-item" onClick={() => setMenuPage("language")}>
+                {t("editor.language")}
+                <span className="ctx-value">{languageName(tab.language)}</span>
+                <span className="ctx-sub">›</span>
+              </div>
+            </>
           )}
-          <div className="ctx-item" onClick={() => runMenu("copy")}>
-            {t("editor.copy")}
-          </div>
-          {!tab.locked && (
-            <div className="ctx-item" onClick={() => runMenu("paste")}>
-              {t("editor.paste")}
-            </div>
-          )}
-          {!tab.locked && <div className="ws-sep" />}
-          <div className="ctx-item" onClick={() => runMenu("selectAll")}>
-            {t("editor.selectAll")}
-          </div>
         </div>
       )}
     </div>

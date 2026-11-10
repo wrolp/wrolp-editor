@@ -55,6 +55,22 @@ pub struct FileSettings {
   /// a store of its own so a rename re-keys it with everything else about the file.
   #[serde(skip_serializing_if = "Option::is_none")]
   pub versioning: Option<String>,
+  /// The Monaco language this file is highlighted as. `None` means "detect", which is the
+  /// normal case: the extension and the first line are right far more often than a hand-picked
+  /// mode, and a file must not look hand-configured when nobody configured it.
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub language: Option<String>,
+}
+
+/// A Monaco language id: lowercase letters, digits and the separators its own ids use
+/// (`objective-c`, `m3`, `freemarker2`). Bounded and lowercased-safe so a hand-edited store
+/// cannot put a sentence where the status bar reads a type.
+fn is_language_id(value: &str) -> bool {
+  !value.is_empty()
+    && value.len() <= 32
+    && value
+      .bytes()
+      .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'-' | b'.' | b'_'))
 }
 
 impl FileSettings {
@@ -70,6 +86,7 @@ impl FileSettings {
       && self.encoding.is_none()
       && self.line_ending.is_none()
       && self.versioning.is_none()
+      && self.language.is_none()
   }
 
   /// Drop values the editor would not accept. A stale or hand-edited file must not be
@@ -90,6 +107,7 @@ impl FileSettings {
       encoding: self.encoding.filter(|v| encoding::is_known(v)),
       line_ending: self.line_ending.filter(|v| encoding::is_line_ending(v)),
       versioning: self.versioning.filter(|v| VERSIONING.contains(&v.as_str())),
+      language: self.language.filter(|v| is_language_id(v)),
     }
   }
 }
@@ -264,6 +282,9 @@ pub fn file_settings_view(app: AppHandle, path: String) -> Result<FileSettingsVi
     } else {
       "off".to_string()
     }),
+    // There is no global language: what a file is depends on the file, so the absence of an
+    // override is the whole of the default.
+    language: None,
   };
   Ok(FileSettingsView {
     overrides: load_store(&app)?.get(&path),
@@ -357,6 +378,13 @@ mod tests {
           ..Default::default()
         },
       ),
+      (
+        "language",
+        FileSettings {
+          language: Some("python".into()),
+          ..Default::default()
+        },
+      ),
     ] {
       assert!(!settings.is_empty(), "{field} missing from is_empty");
       let s = store(&[("c:\\a.txt", settings)]).filled();
@@ -410,6 +438,7 @@ mod tests {
         encoding: Some("klingon".into()),
         line_ending: Some("martian".into()),
         versioning: Some("sometimes".into()),
+        language: Some("Not A Language".into()),
       },
     )])
     .filled();
@@ -418,6 +447,7 @@ mod tests {
     assert_eq!(got.encoding, None);
     assert_eq!(got.line_ending, None);
     assert_eq!(got.versioning, None);
+    assert_eq!(got.language, None);
     assert_eq!(got.word_wrap, Some(true));
     assert_eq!(got.sticky_scroll, Some(false));
     assert_eq!(got.minimap, Some(true));
@@ -483,6 +513,32 @@ mod tests {
       s.items.get("c:\\maybe.txt").is_none(),
       "entry dropped as empty"
     );
+  }
+
+  #[test]
+  fn a_language_override_keeps_only_a_language_id() {
+    let s = store(&[
+      (
+        "C:\\a.txt",
+        FileSettings {
+          language: Some("objective-c".into()),
+          ..Default::default()
+        },
+      ),
+      (
+        "C:\\b.txt",
+        FileSettings {
+          language: Some("JavaScript".into()),
+          ..Default::default()
+        },
+      ),
+    ])
+    .filled();
+    // Monaco's own ids carry hyphens, so the separator is part of what a valid id looks like.
+    assert_eq!(s.get("C:\\a.txt").language.as_deref(), Some("objective-c"));
+    // An id is lowercase by construction; anything else is a value this store did not write and
+    // follows detection rather than guessing which language was meant.
+    assert_eq!(s.get("C:\\b.txt").language, None);
   }
 
   #[test]

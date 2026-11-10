@@ -292,7 +292,7 @@ function CommitFileDiff({
   const pair = useMemo<ComparePair | null>(() => {
     if (typeof diff === "string") return null;
     const name = basename(file.path);
-    const language = langOf(file.path);
+    const language = langOf(file.path, source.right || source.left);
     return {
       left: {
         path: diff.left.path,
