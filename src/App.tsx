@@ -269,6 +269,7 @@ const DEFAULT_SETTINGS: Settings = {
   // document at a time, and the column should be somewhere it has been put on purpose.
   pdfOutlineSide: "right",
   pdfOutlineOpen: false,
+  pdfOutlineWidth: 220,
   // A slideshow's pace and whether it starts over: five seconds is long enough to look and
   // short enough to feel like a show, and looping is what a slideshow is expected to do.
   galleryInterval: 5,
@@ -3314,6 +3315,8 @@ const defaultModeFor = useCallback(
                   onSavePaper={(value) => void saveSettings({ pdfPaper: value })}
                   outlineSide={settings.pdfOutlineSide === "left" ? "left" : "right"}
                   outlineOpenByDefault={settings.pdfOutlineOpen}
+                  outlineWidth={settings.pdfOutlineWidth}
+                  onSaveOutlineWidth={(width) => void saveSettings({ pdfOutlineWidth: width })}
                   onPageChange={onPdfPage}
                 />
               </Suspense>

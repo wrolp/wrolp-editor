@@ -4071,9 +4071,11 @@ body.resizing .editor-host {
   background: var(--sunken);
 }
 /* The bookmark column. It takes no width until the tab asks for it, and the pages keep their
-   slot either way: `order` moves the column, the DOM does not. */
+   slot either way: `order` moves the column, the DOM does not. Its width is the inline
+   `flex-basis` the reader's drag sets; 220px is the default it starts from. */
 .pdf-outline {
-  flex: 0 0 220px;
+  position: relative;
+  flex: 0 0 auto;
   min-height: 0;
   overflow-y: auto;
   /* Room for the tab in the corner above it. */
@@ -4091,6 +4093,34 @@ body.resizing .editor-host {
 }
 .pdf-outline.right {
   border-left: 1px solid var(--border);
+}
+/* The strip that resizes the column: on the edge facing the pages, five pixels wide, with the
+   same accent line the sidebar's divider shows while it is being held. */
+.pdf-outline-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 5px;
+  z-index: 5;
+  cursor: ew-resize;
+}
+.pdf-outline-resizer.left {
+  right: -3px;
+}
+.pdf-outline-resizer.right {
+  left: -3px;
+}
+.pdf-outline-resizer::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to bottom, transparent, var(--accent-soft) 50%, transparent);
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+.pdf-outline-resizer:hover::after,
+body.resizing .pdf-outline-resizer::after {
+  opacity: 1;
 }
 /* On the left the tab sits over the column's own heading, which steps aside for it. */
 .pdf-outline.left > .pdf-outline-head {

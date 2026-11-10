@@ -6,6 +6,7 @@ import {
   useState,
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
   type Ref,
 } from "react";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
@@ -43,6 +44,10 @@ interface Props {
   outlineOpenByDefault: boolean;
   /** Where the reader stands, so the status bar can show it and seek with the same number. */
   onPageChange?: (page: number, total: number) => void;
+  /** How wide the bookmark column starts, from `settings.pdfOutlineWidth`. */
+  outlineWidth: number;
+  /** The final width when the drag ends, written back to the settings. */
+  onSaveOutlineWidth: (width: number) => void;
   /** The status bar's page box finds its way back here through this handle. */
   ref?: Ref<PdfViewerHandle>;
 }
@@ -64,6 +69,10 @@ const SPEED_STEP = 1;
 const SPEED_DEFAULT = 40;
 /** How long the tools stay after the pointer leaves them, before they slide away. */
 const TOOLS_CLOSE_DELAY = 2500;
+/** The range the bookmark column's width is held to, and what a double click puts it back to. */
+const OUTLINE_MIN = 140;
+const OUTLINE_MAX = 560;
+const OUTLINE_DEFAULT = 220;
 
 /** Night is a mode rather than a colour: the page is inverted, not tinted. */
 const NIGHT_PAPER = "night";
@@ -780,6 +789,8 @@ export default function PdfViewer({
   outlineSide,
   outlineOpenByDefault,
   onPageChange,
+  outlineWidth: outlineWidthProp,
+  onSaveOutlineWidth,
   ref,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -807,6 +818,13 @@ export default function PdfViewer({
   const [outline, setOutline] = useState<Bookmark[]>([]);
   /** The bookmark column takes no width until the tab asks for it, unless the setting says so. */
   const [outlineOpen, setOutlineOpen] = useState(outlineOpenByDefault);
+  /** The column's width. Dragged live into the DOM; state only changes at the end of a drag. */
+  const [outlineWidth, setOutlineWidth] = useState(outlineWidthProp);
+  useEffect(() => setOutlineWidth(outlineWidthProp), [outlineWidthProp]);
+  /** The column itself, so a drag can move it without re-rendering every page on the way. */
+  const outlineRef = useRef<HTMLElement | null>(null);
+  const [outlineDragging, setOutlineDragging] = useState(false);
+  const outlineDrag = useRef<{ startX: number; startWidth: number; width: number } | null>(null);
   /** The branches put away by the reader, by path; empty means the whole tree is open. */
   const [folded, setFolded] = useState<ReadonlySet<string>>(() => new Set());
   const [atEnd, setAtEnd] = useState(false);
@@ -1299,6 +1317,57 @@ export default function PdfViewer({
   }, [stayOpen]);
   useEffect(() => () => stayOpen(), [stayOpen]);
 
+  /**
+   * The bookmark column's divider. A left column grows by dragging its right edge rightward, a
+   * right one by dragging its left edge leftward, so the edge facing the pages is the one moved.
+   * The width is written to the column during the move — a drag reports many positions a
+   * second, and re-rendering every page of the document for each is not worth a divider move —
+   * and only committed to state and the settings when the pointer is lifted.
+   */
+  const startOutlineResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    outlineDrag.current = { startX: event.clientX, startWidth: outlineWidth, width: outlineWidth };
+    setOutlineDragging(true);
+    document.body.classList.add("resizing");
+    // Capture keeps the gesture on the 5px handle; it can throw for an inactive pointer id, so
+    // the listeners below live on window and work either way.
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      /* best effort */
+    }
+  };
+
+  useEffect(() => {
+    if (!outlineDragging) return;
+    const sign = outlineSide === "left" ? 1 : -1;
+    const move = (event: PointerEvent) => {
+      const state = outlineDrag.current;
+      if (!state || !outlineRef.current) return;
+      state.width = Math.round(
+        Math.min(OUTLINE_MAX, Math.max(OUTLINE_MIN, state.startWidth + (event.clientX - state.startX) * sign))
+      );
+      outlineRef.current.style.flexBasis = `${state.width}px`;
+    };
+    const finish = () => {
+      const state = outlineDrag.current;
+      if (state) {
+        setOutlineWidth(state.width);
+        onSaveOutlineWidth(state.width);
+      }
+      outlineDrag.current = null;
+      document.body.classList.remove("resizing");
+      setOutlineDragging(false);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+    };
+  }, [outlineDragging, outlineSide, onSaveOutlineWidth]);
+
   // Night inverts the page rather than tinting it, and the inversion is a stylesheet layer with
   // the pictures cut out of it, so the sheet colour becomes the stylesheet's business alone.
   const night = paper === NIGHT_PAPER;
@@ -1566,11 +1635,23 @@ export default function PdfViewer({
       {outlineOpen && outline.length > 0 && (
         <nav
           className={`pdf-outline ${outlineSide}`}
+          ref={outlineRef}
           aria-label={t("pdf.outline")}
           // Order rather than two render sites: the pages keep their DOM slot, so opening or
           // closing the column never re-mounts the document.
-          style={{ order: outlineSide === "left" ? -1 : 0 }}
+          style={{ order: outlineSide === "left" ? -1 : 0, flexBasis: outlineWidth }}
         >
+          {/* The divider on the edge facing the pages; drag it to change the column, or double
+              click it to put the width back. */}
+          <div
+            className={`pdf-outline-resizer ${outlineSide}`}
+            title={t("pdf.outlineResizeHint")}
+            onPointerDown={startOutlineResize}
+            onDoubleClick={() => {
+              setOutlineWidth(OUTLINE_DEFAULT);
+              onSaveOutlineWidth(OUTLINE_DEFAULT);
+            }}
+          />
           <div className="pdf-outline-head">
             <span>{t("pdf.outline")}</span>
             {/* One button does both jobs: shown as collapse when everything is open, expand when

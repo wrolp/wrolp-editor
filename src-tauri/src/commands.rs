@@ -287,6 +287,10 @@ pub struct Settings {
   /// markdown outline: the column takes width, and the tab is always there to ask with. Only
   /// ever read when a document is opened, so switching it does not move the column on screen.
   pub pdf_outline_open: bool,
+  /// Width of the PDF's bookmark column, in CSS pixels. Remembered like the sidebar's own
+  /// width, because a reader who has drawn the column out to fit long headings does not want
+  /// to redraw it on every document.
+  pub pdf_outline_width: f64,
   /// Colour scheme: system | dark | light. `system` follows the OS preference at runtime,
   /// so a machine that switches at dusk does not need the app restarted.
   pub theme: String,
@@ -380,6 +384,7 @@ impl Default for Settings {
       pdf_paper: PDF_PAPER_WHITE.into(),
       pdf_outline_side: "right".into(),
       pdf_outline_open: false,
+      pdf_outline_width: 220.0,
       theme: "system".into(),
       encrypt_idle_minutes: ENCRYPT_IDLE_DEFAULT_MINUTES,
       versioning_enabled: false,
@@ -623,6 +628,12 @@ impl Settings {
         "right".into()
       },
       pdf_outline_open: self.pdf_outline_open,
+      // A hand-edited or stale value is held to the same range the drag handle offers.
+      pdf_outline_width: if self.pdf_outline_width <= 0.0 {
+        220.0
+      } else {
+        self.pdf_outline_width.clamp(140.0, 560.0)
+      },
       // Same reasoning as the layout above: an unknown theme would leave the frontend with
       // no palette to apply, and an app with no palette is worse than one that ignores it.
       theme: if THEMES.contains(&self.theme.as_str()) {

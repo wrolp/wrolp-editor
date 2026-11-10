@@ -263,6 +263,8 @@ export interface Settings {
    * behind the tab. Off by default, for the same reason as `tocOpen`.
    */
   pdfOutlineOpen: boolean;
+  /** Width of the PDF's bookmark column, in CSS pixels (140 to 560, default 220). */
+  pdfOutlineWidth: number;
   /** Seconds a gallery slideshow keeps one picture on screen, 1 to 60. */
   galleryInterval: number;
   /** After the last picture, the slideshow starts over instead of stopping. */
