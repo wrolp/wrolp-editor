@@ -5844,6 +5844,10 @@ button.pdf-outline-twist:hover {
 .md-toc,
 .md-preview,
 .md-body pre,
+/* The PDF reader's two scrolling panes — the pages and the bookmark column — are read the
+   same way a markdown preview is, so they get the same bar rather than the platform's. */
+.pdf-scroll,
+.pdf-outline,
 .commit-list {
   scrollbar-width: thin;
   scrollbar-color: var(--scroll-thumb) transparent;
@@ -5859,6 +5863,8 @@ button.pdf-outline-twist:hover {
 .md-toc::-webkit-scrollbar,
 .md-preview::-webkit-scrollbar,
 .md-body pre::-webkit-scrollbar,
+.pdf-scroll::-webkit-scrollbar,
+.pdf-outline::-webkit-scrollbar,
 .commit-list::-webkit-scrollbar {
   width: var(--scroll-size);
   height: var(--scroll-size);
@@ -5875,6 +5881,11 @@ button.pdf-outline-twist:hover {
 .md-preview::-webkit-scrollbar-track,
 .md-body pre::-webkit-scrollbar-track,
 .md-body pre::-webkit-scrollbar-corner,
+.pdf-scroll::-webkit-scrollbar-track,
+.pdf-outline::-webkit-scrollbar-track,
+/* The pages scroll both ways once a wide page is zoomed in, so the corner where the two bars
+   meet is a visible square unless it is told to be transparent too. */
+.pdf-scroll::-webkit-scrollbar-corner,
 .commit-list::-webkit-scrollbar-track {
   background: transparent;
 }
@@ -5889,6 +5900,8 @@ button.pdf-outline-twist:hover {
 .md-toc::-webkit-scrollbar-thumb,
 .md-preview::-webkit-scrollbar-thumb,
 .md-body pre::-webkit-scrollbar-thumb,
+.pdf-scroll::-webkit-scrollbar-thumb,
+.pdf-outline::-webkit-scrollbar-thumb,
 .commit-list::-webkit-scrollbar-thumb {
   background: var(--scroll-thumb);
   border: 2px solid transparent;
@@ -5908,6 +5921,8 @@ button.pdf-outline-twist:hover {
 .md-toc:hover::-webkit-scrollbar-thumb,
 .md-preview:hover::-webkit-scrollbar-thumb,
 .md-body pre:hover::-webkit-scrollbar-thumb,
+.pdf-scroll:hover::-webkit-scrollbar-thumb,
+.pdf-outline:hover::-webkit-scrollbar-thumb,
 .commit-list:hover::-webkit-scrollbar-thumb {
   background-color: var(--scroll-thumb-hover);
 }
