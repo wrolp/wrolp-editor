@@ -1,3 +1,4 @@
+mod ai;
 mod backup;
 mod commands;
 mod context_menu;
@@ -60,6 +61,7 @@ pub fn run() {
     .manage(unlock::UnlockStore::default())
     .manage(git::GitLocks::default())
     .manage(git::GitOps::default())
+    .manage(ai::AiState::default())
     .setup(|app| {
       // "Open with WROLP" hands the file path over as argv[1..].
       for path in commands::paths_from_args(std::env::args()) {
@@ -196,7 +198,12 @@ pub fn run() {
       git::local::git_assume_unchanged,
       git::local::git_local_view,
       git::local::git_local_state,
-      git::local::git_exclude_open
+      git::local::git_exclude_open,
+      ai::ai_key_status,
+      ai::ai_set_key,
+      ai::ai_clear_key,
+      ai::ai_cancel,
+      ai::ai_commit_message
     ]);
 
   #[cfg(windows)]

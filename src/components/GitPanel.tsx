@@ -100,6 +100,8 @@ interface Props {
   treeView: boolean;
   /** Switch that grouping on or off. Remembered in the settings, like the other view switches. */
   onTreeViewChange: (next: boolean) => void;
+  /** Whether the AI is switched on in Settings; the commit-message generator hides until then. */
+  aiEnabled: boolean;
   /**
    * Where a name too long for its row loses characters, the same value the tree and the tab
    * strip use. The defaults agree — the middle — so a path keeps both its head and its
@@ -250,6 +252,7 @@ export default function GitPanel({
   onOpenCommitTab,
   treeView,
   onTreeViewChange,
+  aiEnabled,
   nameEllipsis,
 }: Props) {
   const [message, setMessage] = useState("");
@@ -634,6 +637,69 @@ export default function GitPanel({
       setAmend(false);
       setAmendBase("");
     }
+  };
+
+  /**
+   * The commit-message generator: streams the model's answer into the box, which the reader
+   * still reviews before committing. The op id discards a stale stream, and the 50 ms flush
+   * keeps a fast delta stream from re-rendering on every token.
+   */
+  const [genBusy, setGenBusy] = useState(false);
+  const genOp = useRef<string | null>(null);
+  const genFull = useRef("");
+  const genTimer = useRef<number | null>(null);
+
+  const generateMessage = () => {
+    const root = repoRoot;
+    if (!root || genBusy) return;
+    const opId = crypto.randomUUID();
+    genOp.current = opId;
+    genFull.current = "";
+    setGenBusy(true);
+
+    const finish = () => {
+      if (genTimer.current !== null) {
+        window.clearTimeout(genTimer.current);
+        genTimer.current = null;
+      }
+    };
+
+    void api
+      .aiCommitMessage(root, opId, (event) => {
+        if (genOp.current !== opId) return;
+        if (event.type === "delta") {
+          genFull.current += event.text;
+          if (genTimer.current === null) {
+            genTimer.current = window.setTimeout(() => {
+              genTimer.current = null;
+              setMessage(genFull.current);
+            }, 50);
+          }
+        } else if (event.type === "done") {
+          finish();
+          setMessage(event.text);
+          genOp.current = null;
+          setGenBusy(false);
+        } else {
+          finish();
+          // Keep whatever already landed; the reader can throw it away.
+          genOp.current = null;
+          setGenBusy(false);
+          onError(errorMessage(`${event.code}${event.detail ? `:${event.detail}` : ""}`));
+        }
+      })
+      .catch((e) => {
+        if (genOp.current !== opId) return;
+        finish();
+        genOp.current = null;
+        setGenBusy(false);
+        onError(errorMessage(e));
+      });
+  };
+
+  const stopGenerate = () => {
+    // The Done event that follows clears the busy state; the half-written text stays.
+    if (genOp.current) void api.aiCancel(genOp.current);
   };
 
   const runDiscard = async () => {
@@ -1561,6 +1627,18 @@ export default function GitPanel({
                   ? t("git.mergeReady", { n: conflictedFiles.length })
                   : t("git.stagedCount", { n: stagedFiles.length })}
               </span>
+              {/* A merge commit is not a description of staged text, so the generator steps
+                  aside for it; and it needs something staged to describe. */}
+              {aiEnabled && !merging && stagedFiles.length > 0 && (
+                <button
+                  className="git-gen-btn"
+                  title={genBusy ? t("git.genStop") : t("git.genMessage")}
+                  disabled={busy}
+                  onClick={genBusy ? stopGenerate : generateMessage}
+                >
+                  {genBusy ? t("git.genStop") : t("git.genMessage")}
+                </button>
+              )}
               <label className="git-amend" title={t("git.amendHint")}>
                 <input
                   type="checkbox"

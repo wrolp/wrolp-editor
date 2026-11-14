@@ -322,6 +322,14 @@ export interface Settings {
   backupRetain: number;
   /** Check the release endpoint after startup and every six hours; installing stays manual. */
   autoCheckUpdates: boolean;
+  /** Whether the AI features are switched on at all. */
+  aiEnabled: boolean;
+  /** OpenAI-compatible endpoint; `https://`, or `http://` only for loopback. */
+  aiBaseUrl: string;
+  /** Model name, exactly as the provider expects it. */
+  aiModel: string;
+  /** How long one AI request may run, in milliseconds. */
+  aiTimeoutMs: number;
 }
 
 /**
@@ -587,6 +595,12 @@ export interface GitRepoSummary {
 
 /** What a diff is comparing: index → working tree, HEAD → index, or a commit's parent → it. */
 export type GitScope = "workdir" | "index" | "commit";
+
+/** One event while a commit message is being written by the AI. */
+export type AiCommitEvent =
+  | { type: "delta"; text: string }
+  | { type: "done"; text: string }
+  | { type: "error"; code: string; detail: string };
 
 /** One step of a network operation, streamed while it runs. */
 export interface GitProgress {
@@ -1178,6 +1192,17 @@ export const api = {
     return invoke<string>("git_clone", { url, parent, name, opId, onProgress: channel });
   },
   gitCancel: (opId: string) => invoke<void>("git_cancel", { opId }),
+  /** Whether a key is stored in the credential manager; the key itself never reaches the page. */
+  aiKeyStatus: () => invoke<boolean>("ai_key_status"),
+  aiSetKey: (key: string) => invoke<void>("ai_set_key", { key }),
+  aiClearKey: () => invoke<void>("ai_clear_key"),
+  /** Stream a commit message for what is staged. Cancellable via `aiCancel`. */
+  aiCommitMessage: (root: string, opId: string, onEvent: (event: AiCommitEvent) => void) => {
+    const channel = new Channel<AiCommitEvent>();
+    channel.onmessage = onEvent;
+    return invoke<void>("ai_commit_message", { root, opId, onEvent: channel });
+  },
+  aiCancel: (opId: string) => invoke<void>("ai_cancel", { opId }),
   gitConflictSides: (root: string, path: string) =>
     invoke<GitConflictSides>("git_conflict_sides", { root, path }),
   /** `choice` is `ours`, `theirs` or `markers`. */

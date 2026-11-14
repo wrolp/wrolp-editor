@@ -300,6 +300,12 @@ const DEFAULT_SETTINGS: Settings = {
   // Checking costs one request and tells the user a new version exists; installing still waits
   // for a click. Off is there for anyone who would rather not talk to the release endpoint.
   autoCheckUpdates: true,
+  // AI stays off until a provider, a model and (for a remote host) a key have been set; until
+  // then the Source panel offers no AI entry.
+  aiEnabled: false,
+  aiBaseUrl: "https://api.openai.com/v1",
+  aiModel: "gpt-4o-mini",
+  aiTimeoutMs: 90000,
 }
 
 /**
@@ -3197,6 +3203,7 @@ const defaultModeFor = useCallback(
               onOpenLocalSettings={setLocalSettingsRoot}
               treeView={settings.gitTreeView}
               onTreeViewChange={(next) => void saveSettings({ gitTreeView: next })}
+              aiEnabled={settings.aiEnabled}
               // The same value the tree and the tab strip read; neither ever reaches a third
               // mode, so the panel falls back to the middle too.
               nameEllipsis={settings.explorerNameEllipsis === "end" ? "end" : "middle"}

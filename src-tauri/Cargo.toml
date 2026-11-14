@@ -38,6 +38,10 @@ arboard = "3.6"
 # served by libgit2's WinHTTP backend (system TLS, proxy and certificate store), so it pulls in no
 # OpenSSL; `ssh` does add libssh2, which is the one dependency that has to be watched at build time.
 git2 = { version = "0.21.0", default-features = false, features = ["vendored-libgit2", "https", "ssh"] }
+# The AI request channel. rustls keeps the build free of OpenSSL on Windows; `stream` is the
+# SSE path, `json` the request body.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
+futures-util = "0.3"
 
 [target.'cfg(windows)'.dependencies]
 tauri-plugin-single-instance = "2"

@@ -334,6 +334,16 @@ pub struct Settings {
   /// Ask the release endpoint whether a newer version exists after startup and every six hours.
   /// On by default; only the check is automatic, installing stays a click.
   pub auto_check_updates: bool,
+  /// Whether the AI features are switched on at all. Off by default, so an install that never
+  /// touches them shows no half-configured controls.
+  pub ai_enabled: bool,
+  /// The OpenAI-compatible endpoint, `https://` for anything on the internet and `http://` only
+  /// for loopback (Ollama and friends, which need no key).
+  pub ai_base_url: String,
+  /// The model name, exactly as the provider expects it.
+  pub ai_model: String,
+  /// How long one AI request may run, in milliseconds.
+  pub ai_timeout_ms: u32,
 }
 
 /// Used when settings.json is absent or a key is missing, so a first run must not
@@ -401,8 +411,19 @@ impl Default for Settings {
       backup_dir: String::new(),
       backup_retain: crate::backup::DEFAULT_RETAIN,
       auto_check_updates: true,
+      ai_enabled: false,
+      ai_base_url: "https://api.openai.com/v1".into(),
+      ai_model: "gpt-4o-mini".into(),
+      ai_timeout_ms: 90_000,
     }
   }
+}
+
+/// True for a loopback host, which is the only thing the AI settings accept over plain http.
+fn is_loopback(url: &str) -> bool {
+  url.starts_with("http://localhost")
+    || url.starts_with("http://127.")
+    || url.starts_with("http://[::1]")
 }
 
 const SIDEBAR_MIN_WIDTH: f64 = 180.0;
@@ -673,6 +694,31 @@ impl Settings {
         self.backup_retain.min(crate::backup::MAX_RETAIN)
       },
       auto_check_updates: self.auto_check_updates,
+      ai_enabled: self.ai_enabled,
+      // Only https:// is accepted for a remote host — a key travels on the same wire the code
+      // does — and http:// only for loopback. Anything else reads as the default.
+      ai_base_url: {
+        let url = self.ai_base_url.trim();
+        if url.is_empty() {
+          "https://api.openai.com/v1".into()
+        } else if url.starts_with("https://") || (url.starts_with("http://") && is_loopback(url)) {
+          url.to_string()
+        } else {
+          "https://api.openai.com/v1".into()
+        }
+      },
+      // A hand-edited empty string reads as the default rather than as a provider error.
+      ai_model: if self.ai_model.trim().is_empty() {
+        "gpt-4o-mini".into()
+      } else {
+        self.ai_model.trim().to_string()
+      },
+      // 0 is "use the default", the same reading the other timers in this table have.
+      ai_timeout_ms: if self.ai_timeout_ms == 0 {
+        90_000
+      } else {
+        self.ai_timeout_ms.clamp(10_000, 180_000)
+      },
     }
   }
 }

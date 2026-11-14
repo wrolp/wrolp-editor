@@ -21,7 +21,15 @@ import {
   type StoreDirs,
 } from "../lib/tauri";
 
-type Category = "context" | "general" | "versions" | "git" | "backups" | "encryption" | "about";
+type Category =
+  | "context"
+  | "general"
+  | "versions"
+  | "git"
+  | "backups"
+  | "encryption"
+  | "ai"
+  | "about";
 
 interface Props {
   settings: Settings;
@@ -44,6 +52,7 @@ const NAV: { cat: Category; key: string }[] = [
   { cat: "git", key: "settings.catGit" },
   { cat: "backups", key: "settings.catBackups" },
   { cat: "encryption", key: "enc.category" },
+  { cat: "ai", key: "settings.catAi" },
   { cat: "about", key: "settings.catAbout" },
 ];
 
@@ -159,6 +168,10 @@ export default function SettingsPanel({
   const [backupBusy, setBackupBusy] = useState(false);
   const [gitAuth, setGitAuth] = useState<GitAuthView | null>(null);
   const [gitName, setGitName] = useState("");
+  /** Whether the credential store holds an AI key; null means the store would not answer. */
+  const [aiKey, setAiKey] = useState<boolean | null>(null);
+  /** The key being typed, kept out of state beyond this box and cleared once saved. */
+  const [aiKeyDraft, setAiKeyDraft] = useState("");
   const [gitEmail, setGitEmail] = useState("");
   const [gitBusy, setGitBusy] = useState(false);
   /** The snapshot a second, explicit click would restore. */
@@ -298,7 +311,30 @@ export default function SettingsPanel({
   };
   useEffect(() => {
     readRemembered();
+    api
+      .aiKeyStatus()
+      .then(setAiKey)
+      .catch(() => setAiKey(null));
   }, []);
+
+  const saveAiKey = () => {
+    const value = aiKeyDraft.trim();
+    if (!value) return;
+    api
+      .aiSetKey(value)
+      .then(() => {
+        setAiKey(true);
+        setAiKeyDraft("");
+      })
+      .catch((e) => onToast(errorMessage(e)));
+  };
+
+  const clearAiKey = () => {
+    api
+      .aiClearKey()
+      .then(() => setAiKey(false))
+      .catch((e) => onToast(errorMessage(e)));
+  };
 
   /** Read the snapshot list. A folder change calls this again once the setting is written. */
   const refreshBackups = useCallback(() => {
@@ -1178,6 +1214,73 @@ export default function SettingsPanel({
                     : t("enc.rememberedCount", { n: String(remembered) })}
               </p>
               {rememberedError && <p className="setting-warn">{rememberedError}</p>}
+            </div>
+          </div>
+        )}
+
+        {category === "ai" && (
+          <div className="settings-cat">
+            <h2>{t("settings.catAi")}</h2>
+            <div className="setting-group">
+              <SettingCheck
+                label={t("settings.aiEnabled")}
+                checked={settings.aiEnabled}
+                onChange={(v) => onSaveSettings({ aiEnabled: v })}
+              />
+              <p className="muted">{t("settings.aiEnabledDesc")}</p>
+              <SettingField label={t("settings.aiBaseUrl")}>
+                <input
+                  className="settings-text"
+                  type="text"
+                  value={settings.aiBaseUrl}
+                  onChange={(e) => onSaveSettings({ aiBaseUrl: e.target.value })}
+                />
+              </SettingField>
+              <p className="muted">{t("settings.aiBaseUrlDesc")}</p>
+              <SettingField label={t("settings.aiModel")}>
+                <input
+                  className="settings-text"
+                  type="text"
+                  value={settings.aiModel}
+                  onChange={(e) => onSaveSettings({ aiModel: e.target.value })}
+                />
+              </SettingField>
+              <SettingField label={t("settings.aiTimeout")}>
+                <input
+                  type="number"
+                  min={10000}
+                  max={180000}
+                  step={1000}
+                  value={settings.aiTimeoutMs}
+                  onChange={(e) => {
+                    const ms = Number(e.target.value);
+                    if (!Number.isNaN(ms)) onSaveSettings({ aiTimeoutMs: ms });
+                  }}
+                />
+              </SettingField>
+              {/* The key never comes back to the page: this only learns whether one is stored. */}
+              <SettingField label={t("settings.aiKey")}>
+                <input
+                  className="settings-text"
+                  type="password"
+                  value={aiKeyDraft}
+                  placeholder={t("settings.aiKeyPlaceholder")}
+                  onChange={(e) => setAiKeyDraft(e.target.value)}
+                />
+                <button className="btn small" onClick={saveAiKey} disabled={!aiKeyDraft.trim()}>
+                  {t("settings.aiKeySave")}
+                </button>
+                <button className="btn small" onClick={clearAiKey} disabled={aiKey !== true}>
+                  {t("settings.aiKeyClear")}
+                </button>
+              </SettingField>
+              <p className="muted">
+                {aiKey === null
+                  ? t("settings.aiKeyUnknown")
+                  : aiKey
+                    ? t("settings.aiKeySet")
+                    : t("settings.aiKeyNone")}
+              </p>
             </div>
           </div>
         )}

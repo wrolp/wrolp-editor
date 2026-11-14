@@ -274,3 +274,24 @@ fn old_rel(old_path: Option<&str>) -> Option<PathBuf> {
   }
   Some(path)
 }
+
+/// What is staged as one unified patch (HEAD → index), for the AI commit-message prompt.
+///
+/// The panel itself never shows a patch — it opens the two texts in a diff editor — so this is
+/// the only place a patch is produced, and only for the prompt. The caller bounds the budget.
+pub(crate) fn staged_patch(root: &str) -> Result<String, String> {
+  let opened = discover(root)?;
+  let tree = head_tree(&opened.repo);
+  let mut diff = opened
+    .repo
+    .diff_tree_to_index(tree.as_ref(), None, None)
+    .map_err(|e| fail("diff", e))?;
+  let mut out = Vec::new();
+  diff
+    .print(git2::DiffFormat::Patch, |_delta, _hunk, line| {
+      out.extend_from_slice(line.content());
+      true
+    })
+    .map_err(|e| fail("diff", e))?;
+  String::from_utf8(out).map_err(|e| format!("git_diff:{e}"))
+}
