@@ -199,9 +199,10 @@ pub fn run() {
       git::local::git_local_view,
       git::local::git_local_state,
       git::local::git_exclude_open,
-      ai::ai_key_status,
+      ai::ai_key,
       ai::ai_set_key,
       ai::ai_clear_key,
+      ai::ai_models,
       ai::ai_cancel,
       ai::ai_commit_message
     ]);

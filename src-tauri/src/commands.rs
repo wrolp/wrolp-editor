@@ -344,6 +344,11 @@ pub struct Settings {
   pub ai_model: String,
   /// How long one AI request may run, in milliseconds.
   pub ai_timeout_ms: u32,
+  /// The API key for `ai_base_url`, as Windows DPAPI ciphertext in base64. It lives here rather
+  /// than in the credential store because the settings page shows it back, and a value only this
+  /// Windows account can decrypt is still safe to carry into a configuration backup. Written by
+  /// `ai_set_key` and `ai_clear_key` alone; a general settings save keeps whatever is on disk.
+  pub ai_key: String,
 }
 
 /// Used when settings.json is absent or a key is missing, so a first run must not
@@ -415,6 +420,7 @@ impl Default for Settings {
       ai_base_url: "https://api.openai.com/v1".into(),
       ai_model: "gpt-4o-mini".into(),
       ai_timeout_ms: 90_000,
+      ai_key: String::new(),
     }
   }
 }
@@ -719,6 +725,9 @@ impl Settings {
       } else {
         self.ai_timeout_ms.clamp(10_000, 180_000)
       },
+      // Ciphertext, passed through untouched: the key commands own its shape, and reading it
+      // here is what keeps a load from dropping it.
+      ai_key: self.ai_key.clone(),
     }
   }
 }
@@ -2010,7 +2019,10 @@ pub fn get_settings(app: AppHandle) -> Result<Settings, String> {
 }
 
 #[tauri::command]
-pub fn save_settings(app: AppHandle, settings: Settings) -> Result<Settings, String> {
+pub fn save_settings(app: AppHandle, mut settings: Settings) -> Result<Settings, String> {
+  // The AI key has commands of its own, and the page has no copy of it to send back: keeping
+  // the stored blob is what stops a font-size change from erasing the key.
+  settings.ai_key = settings_of(&app).ai_key;
   let settings = settings.filled();
   write_json(&app, "settings.json", &settings)?;
   Ok(settings)
@@ -2201,6 +2213,24 @@ mod tests {
       .collect();
     std::fs::remove_dir_all(&dir).ok();
     assert_eq!(names, vec!["9folder/", "2.txt", "10.txt", "notes.txt"]);
+  }
+
+  /// The encrypted AI key has to survive the file it is kept in. A load that dropped it would
+  /// silently look like "no key", and a partial settings file — the usual case after an upgrade
+  /// — must come back as "none" rather than as some other default.
+  #[test]
+  fn the_ai_key_survives_a_settings_round_trip() {
+    let stored = Settings {
+      ai_key: "ciphertext".into(),
+      ..Default::default()
+    }
+    .filled();
+    assert_eq!(stored.ai_key, "ciphertext");
+    let text = serde_json::to_string(&stored).expect("serialize settings");
+    let back: Settings = serde_json::from_str(&text).expect("parse settings");
+    assert_eq!(back.filled().ai_key, "ciphertext");
+    let partial: Settings = serde_json::from_str("{\"fontSize\":16.0}").expect("partial settings");
+    assert_eq!(partial.filled().ai_key, "");
   }
 
   /// A folder read as missing is greyed out rather than dropped, so the same folder reached

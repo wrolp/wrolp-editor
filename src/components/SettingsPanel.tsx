@@ -168,10 +168,16 @@ export default function SettingsPanel({
   const [backupBusy, setBackupBusy] = useState(false);
   const [gitAuth, setGitAuth] = useState<GitAuthView | null>(null);
   const [gitName, setGitName] = useState("");
-  /** Whether the credential store holds an AI key; null means the store would not answer. */
-  const [aiKey, setAiKey] = useState<boolean | null>(null);
-  /** The key being typed, kept out of state beyond this box and cleared once saved. */
+  /** The stored key, read back for display; "" when none is stored or it cannot be read. */
+  const [aiKey, setAiKey] = useState("");
+  /** The key in the box: the stored one on open, what the reader is typing after that. */
   const [aiKeyDraft, setAiKeyDraft] = useState("");
+  const [aiKeyReveal, setAiKeyReveal] = useState(false);
+  /** Model ids the endpoint answered with, for the field's list. */
+  const [aiModels, setAiModels] = useState<string[]>([]);
+  const [aiModelsBusy, setAiModelsBusy] = useState(false);
+  /** Whether the model field is showing the fetched list rather than a free-text box. */
+  const [aiModelList, setAiModelList] = useState(false);
   const [gitEmail, setGitEmail] = useState("");
   const [gitBusy, setGitBusy] = useState(false);
   /** The snapshot a second, explicit click would restore. */
@@ -312,9 +318,14 @@ export default function SettingsPanel({
   useEffect(() => {
     readRemembered();
     api
-      .aiKeyStatus()
-      .then(setAiKey)
-      .catch(() => setAiKey(null));
+      .aiKey()
+      .then((key) => {
+        setAiKey(key);
+        setAiKeyDraft(key);
+      })
+      // A key this account cannot decrypt reads the same as none: the box is empty and the
+      // reader types one. Saying nothing here is better than a hint they cannot act on.
+      .catch(() => setAiKey(""));
   }, []);
 
   const saveAiKey = () => {
@@ -323,8 +334,8 @@ export default function SettingsPanel({
     api
       .aiSetKey(value)
       .then(() => {
-        setAiKey(true);
-        setAiKeyDraft("");
+        setAiKey(value);
+        setAiKeyDraft(value);
       })
       .catch((e) => onToast(errorMessage(e)));
   };
@@ -332,8 +343,27 @@ export default function SettingsPanel({
   const clearAiKey = () => {
     api
       .aiClearKey()
-      .then(() => setAiKey(false))
+      .then(() => {
+        setAiKey("");
+        setAiKeyDraft("");
+      })
       .catch((e) => onToast(errorMessage(e)));
+  };
+
+  /** Ask the endpoint what it offers; the answer only fills suggestions for the model field. */
+  const fetchAiModels = () => {
+    if (aiModelsBusy) return;
+    setAiModelsBusy(true);
+    api
+      .aiModels()
+      .then((list) => {
+        setAiModels(list);
+        // A fetched list is what was asked for: show it as the picker rather than leaving it
+        // behind a datalist the reader has to discover.
+        if (list.length > 0) setAiModelList(true);
+      })
+      .catch((e) => onToast(errorMessage(e)))
+      .finally(() => setAiModelsBusy(false));
   };
 
   /** Read the snapshot list. A folder change calls this again once the setting is written. */
@@ -1230,7 +1260,7 @@ export default function SettingsPanel({
               <p className="muted">{t("settings.aiEnabledDesc")}</p>
               <SettingField label={t("settings.aiBaseUrl")}>
                 <input
-                  className="settings-text"
+                  className="settings-text wide"
                   type="text"
                   value={settings.aiBaseUrl}
                   onChange={(e) => onSaveSettings({ aiBaseUrl: e.target.value })}
@@ -1238,13 +1268,46 @@ export default function SettingsPanel({
               </SettingField>
               <p className="muted">{t("settings.aiBaseUrlDesc")}</p>
               <SettingField label={t("settings.aiModel")}>
-                <input
-                  className="settings-text"
-                  type="text"
-                  value={settings.aiModel}
-                  onChange={(e) => onSaveSettings({ aiModel: e.target.value })}
-                />
+                {aiModelList && aiModels.length > 0 ? (
+                  <select
+                    className="select"
+                    value={settings.aiModel}
+                    onChange={(e) => onSaveSettings({ aiModel: e.target.value })}
+                  >
+                    {/* A model saved earlier may be missing from what the endpoint lists now.
+                        Keeping it as an option is what stops the select from showing another
+                        model's name over the stored value. */}
+                    {!aiModels.includes(settings.aiModel) && (
+                      <option value={settings.aiModel}>{settings.aiModel}</option>
+                    )}
+                    {aiModels.map((id) => (
+                      <option key={id} value={id}>
+                        {id}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    className="settings-text"
+                    type="text"
+                    value={settings.aiModel}
+                    onChange={(e) => onSaveSettings({ aiModel: e.target.value })}
+                  />
+                )}
+                {aiModels.length > 0 && (
+                  <button className="btn small" onClick={() => setAiModelList((on) => !on)}>
+                    {aiModelList ? t("settings.aiModelManual") : t("settings.aiModelPick")}
+                  </button>
+                )}
+                <button className="btn small" onClick={fetchAiModels} disabled={aiModelsBusy}>
+                  {aiModelsBusy ? t("settings.aiModelsBusy") : t("settings.aiModelsFetch")}
+                </button>
               </SettingField>
+              <p className="muted">
+                {aiModels.length > 0
+                  ? t("settings.aiModelsLoaded", { n: aiModels.length })
+                  : t("settings.aiModelsDesc")}
+              </p>
               <SettingField label={t("settings.aiTimeout")}>
                 <input
                   type="number"
@@ -1258,29 +1321,25 @@ export default function SettingsPanel({
                   }}
                 />
               </SettingField>
-              {/* The key never comes back to the page: this only learns whether one is stored. */}
               <SettingField label={t("settings.aiKey")}>
                 <input
-                  className="settings-text"
-                  type="password"
+                  className="settings-text wide"
+                  type={aiKeyReveal ? "text" : "password"}
                   value={aiKeyDraft}
                   placeholder={t("settings.aiKeyPlaceholder")}
                   onChange={(e) => setAiKeyDraft(e.target.value)}
                 />
+                <button className="btn small" onClick={() => setAiKeyReveal((on) => !on)}>
+                  {aiKeyReveal ? t("settings.aiKeyHide") : t("settings.aiKeyShow")}
+                </button>
                 <button className="btn small" onClick={saveAiKey} disabled={!aiKeyDraft.trim()}>
                   {t("settings.aiKeySave")}
                 </button>
-                <button className="btn small" onClick={clearAiKey} disabled={aiKey !== true}>
+                <button className="btn small" onClick={clearAiKey} disabled={!aiKey && !aiKeyDraft}>
                   {t("settings.aiKeyClear")}
                 </button>
               </SettingField>
-              <p className="muted">
-                {aiKey === null
-                  ? t("settings.aiKeyUnknown")
-                  : aiKey
-                    ? t("settings.aiKeySet")
-                    : t("settings.aiKeyNone")}
-              </p>
+              <p className="muted">{aiKey ? t("settings.aiKeySet") : t("settings.aiKeyNone")}</p>
             </div>
           </div>
         )}

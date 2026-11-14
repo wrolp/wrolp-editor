@@ -5061,6 +5061,15 @@ button.pdf-outline-twist:hover {
   outline: none;
   border-color: var(--accent);
 }
+/* Endpoint URLs and API keys are long strings; the default box shows a dozen characters and
+   hides the rest behind a scroll. These take the room the row has, up to a readable width,
+   and still shrink when the window is narrow. */
+.settings-text.wide {
+  flex: 0 1 520px;
+  width: auto;
+  min-width: 180px;
+  max-width: 520px;
+}
 .setting-row input[type="checkbox"] {
   width: 16px;
   height: 16px;

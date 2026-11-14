@@ -1192,10 +1192,12 @@ export const api = {
     return invoke<string>("git_clone", { url, parent, name, opId, onProgress: channel });
   },
   gitCancel: (opId: string) => invoke<void>("git_cancel", { opId }),
-  /** Whether a key is stored in the credential manager; the key itself never reaches the page. */
-  aiKeyStatus: () => invoke<boolean>("ai_key_status"),
+  /** The stored key, decrypted for display; "" when none is stored (or it cannot be read). */
+  aiKey: () => invoke<string>("ai_key"),
   aiSetKey: (key: string) => invoke<void>("ai_set_key", { key }),
   aiClearKey: () => invoke<void>("ai_clear_key"),
+  /** Model ids the endpoint lists at `GET /models`, sorted. */
+  aiModels: () => invoke<string[]>("ai_models"),
   /** Stream a commit message for what is staged. Cancellable via `aiCancel`. */
   aiCommitMessage: (root: string, opId: string, onEvent: (event: AiCommitEvent) => void) => {
     const channel = new Channel<AiCommitEvent>();
