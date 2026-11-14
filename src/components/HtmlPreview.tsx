@@ -79,24 +79,36 @@ const HARDENING = `<script>(function(){
 })();</script>`;
 
 /**
+ * How long after this page reports a position of its own the echo of it is ignored. Long
+ * enough to cover the report → React state → message round trip, short enough that a
+ * deliberate scroll of the editor is not swallowed.
+ */
+const ECHO_MS = 300;
+
+/**
  * The scroll bridge. It exists because the frame is sandboxed *without* `allow-same-origin`,
  * so the parent cannot read `contentDocument` and the two panes cannot track each other the
  * way the markdown preview does directly.
  *
- * `following` suppresses the scroll events our own scrolling causes, released on the next
- * frame — the same guard the markdown preview uses, for the same reason: without it the
- * page's scroll would be echoed back and the two would nudge each other forever.
+ * The bridge stays quiet for a moment after it is told where to go, the same guard the
+ * markdown preview uses and for the same reason: without it the page's own scroll would be
+ * echoed back and the two would nudge each other forever.
  */
 function bridge(token: string): string {
   return `<script>(function(){
   var TOKEN = ${JSON.stringify(token)};
-  var following = false;
+  // A position we were told to take is not one the reader chose. Reporting it back would
+  // drive the editor from our own write, and that echo would return as another write — the
+  // page then fights the wheel. A window rather than one animation frame: the scroll event
+  // this assignment produces can be dispatched after the frame callback that would have
+  // cleared a flag.
+  var silentUntil = 0;
   function max() {
     var d = document.scrollingElement || document.documentElement;
     return Math.max(0, d.scrollHeight - d.clientHeight);
   }
   function report() {
-    if (following) return;
+    if (Date.now() < silentUntil) return;
     var m = max();
     parent.postMessage({ t: "wrolp:ratio", ratio: m > 0 ? document.scrollingElement.scrollTop / m : 0, token: TOKEN }, "*");
   }
@@ -106,9 +118,8 @@ function bridge(token: string): string {
     if (!d) return;
     if (d.t === "wrolp:scroll") {
       var m = max();
-      following = true;
+      silentUntil = Date.now() + 120;
       (document.scrollingElement || document.documentElement).scrollTop = m * d.ratio;
-      requestAnimationFrame(function(){ following = false; });
     } else if (d.t === "wrolp:tail") {
       var el = document.getElementById("wrolp-tail");
       if (!el) { el = document.createElement("div"); el.id = "wrolp-tail"; document.body.appendChild(el); }
@@ -178,8 +189,17 @@ export default function HtmlPreview({ text, path, scrollRatio, beyondEnd, onScro
   const readyRef = useRef(false);
   const readyFor = useRef(-1);
   const skipRatios = useRef(0);
-  /** A `following` for this side: the editor moved, the page has not reported back yet. */
-  const echo = useRef(false);
+  /**
+   * When this page last reported a position of its own.
+   *
+   * A push that follows a report is the echo of a scroll the page made itself. The report
+   * travels through React and comes back as a `wrolp:scroll` message, and by the time that
+   * message lands the wheel has usually moved again — writing the older position back drags
+   * the page backwards a few pixels on every tick, which reads as the page shaking under the
+   * hand. A time window is what covers the round trip; a one-frame flag does not, because the
+   * scroll event that a programmatic write produces can be dispatched after that frame.
+   */
+  const lastReport = useRef(0);
 
   const source = useMemo(() => buildSource(text, path, token), [text, path, token]);
 
@@ -215,7 +235,7 @@ export default function HtmlPreview({ text, path, scrollRatio, beyondEnd, onScro
         setReady(true);
         return;
       }
-      if (data.t !== "wrolp:ratio" || echo.current) return;
+      if (data.t !== "wrolp:ratio") return;
       // A report from a document that has been replaced, or from one that never announced
       // itself, describes a page that is no longer on screen.
       if (!readyRef.current || readyFor.current !== generation.current) return;
@@ -223,13 +243,14 @@ export default function HtmlPreview({ text, path, scrollRatio, beyondEnd, onScro
         skipRatios.current -= 1;
         return;
       }
+      lastReport.current = performance.now();
       onScrollRatio(data.ratio);
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [token, onScrollRatio]);
 
-  /** Push the editor's position into the page. `echo` keeps the two from chasing. */
+  /** Push the editor's position into the page; the caller decides when that is right. */
   const post = useCallback(
     (message: HostMessage) => frameRef.current?.contentWindow?.postMessage(message, "*"),
     []
@@ -242,11 +263,11 @@ export default function HtmlPreview({ text, path, scrollRatio, beyondEnd, onScro
    */
   useEffect(() => {
     if (!ready) return;
-    echo.current = true;
+    // A page that just reported its own position is already there: sending it back is what
+    // makes the two panes chase each other. Only a move that came from somewhere else —
+    // the editor — is worth pushing.
+    if (performance.now() - lastReport.current < ECHO_MS) return;
     post({ t: "wrolp:scroll", ratio: scrollRatio });
-    requestAnimationFrame(() => {
-      echo.current = false;
-    });
   }, [ready, scrollRatio, post]);
 
   /**

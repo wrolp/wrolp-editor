@@ -508,6 +508,13 @@ export default function App() {
   /** Files whose "open as text" hint the reader closed; the next file still gets told. */
   const [hintClosed, setHintClosed] = useState<ReadonlySet<string>>(() => new Set());
   const [scrollRatio, setScrollRatio] = useState(0);
+  /**
+   * The ratio the preview's scroll just put on the editor. The editor's own report of that
+   * move is not news: forwarding it moves the shared ratio to a number the preview then
+   * scrolls itself to — a different place from the one the reader is at — and doing that on
+   * every wheel tick is what made the HTML pane shake under the wheel.
+   */
+  const editorEcho = useRef<number | null>(null);
   const [stats, setStats] = useState<EditStats>({
     selectionChars: 0,
     selectionLines: 0,
@@ -2966,7 +2973,21 @@ const defaultModeFor = useCallback(
     const editor = editorRef.current?.editor;
     if (!editor) return;
     const max = editor.getScrollHeight() - editor.getLayoutInfo().height;
-    if (max > 0) editor.setScrollTop(max * ratio);
+    if (max > 0) {
+      editorEcho.current = ratio;
+      editor.setScrollTop(max * ratio);
+    }
+  }, []);
+
+  /**
+   * The editor reports its own position. A report that is the echo of a move the preview
+   * asked for is dropped: the two panes must not relay one scroll back and forth.
+   */
+  const onEditorScrollRatio = useCallback((ratio: number) => {
+    const pending = editorEcho.current;
+    editorEcho.current = null;
+    if (pending !== null && Math.abs(ratio - pending) < 0.01) return;
+    setScrollRatio(ratio);
   }, []);
 
   // A fresh document starts at the top rather than inheriting the last scroll position.
@@ -3261,7 +3282,7 @@ const defaultModeFor = useCallback(
                   tabs.onCursorChange(offset);
                 }}
                 onStats={setStats}
-                onScrollRatio={setScrollRatio}
+                onScrollRatio={onEditorScrollRatio}
                 onReady={(handle) => {
                   editorRef.current = handle;
                 }}
