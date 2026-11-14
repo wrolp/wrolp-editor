@@ -5113,6 +5113,53 @@ select {
   background-color: var(--surface-3);
   color: var(--text);
 }
+/* The popup SelectOverlay draws in place of the OS-drawn list. WebView2 renders the native
+   <select> list with its own light-grey highlight that ignores the dark theme; this menu is our
+   DOM, so every colour is a theme token. Portaled to body, above modals and tooltips. */
+.select-menu {
+  position: fixed;
+  z-index: 300;
+  box-sizing: border-box;
+  padding: 4px;
+  overflow-y: auto;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  color: var(--text);
+  font-size: 13px;
+}
+.select-group {
+  padding: 7px 9px 3px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.select-option {
+  padding: 6px 9px;
+  border-radius: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.select-option.active {
+  background: var(--surface-hover);
+}
+.select-option.selected {
+  color: var(--accent-soft);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+.select-option.active.selected {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.select-option.disabled {
+  opacity: 0.45;
+  cursor: default;
+}
 .settings-cat p.muted,
 .modal p.muted {
   color: var(--muted);

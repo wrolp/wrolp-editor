@@ -1,5 +1,6 @@
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import { SelectOverlay } from "./components/SelectOverlay";
 import "./styles/app.css";
 
 /**
@@ -20,4 +21,10 @@ window.addEventListener("contextmenu", (event) => {
 
 // StrictMode is not used: Monaco and the window event listeners have imperative
 // lifecycles, and the double mount would open files twice.
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(<App />);
+ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+  <>
+    <App />
+    {/* Draws the themed list a <select> expands into, in place of the OS widget. */}
+    <SelectOverlay />
+  </>
+);
