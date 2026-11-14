@@ -2149,8 +2149,9 @@ body.resizing .editor-host {
 .git-remote {
   margin-top: 4px;
   width: 100%;
-  padding: 2px 4px;
-  background: var(--sunken);
+  /* Right padding is the chevron's room, as on `.select`. */
+  padding: 2px 22px 2px 4px;
+  background-color: var(--sunken);
   border: 1px solid var(--border);
   border-radius: 5px;
   color: var(--text-dim);
@@ -2688,8 +2689,8 @@ body.resizing .editor-host {
 }
 /* The rows-per-load select: the buttons' height and corner, narrow because it holds a count. */
 .git-page-select {
-  padding: 2px 4px;
-  background: var(--sunken);
+  padding: 2px 22px 2px 4px;
+  background-color: var(--sunken);
   border: 1px solid var(--border);
   border-radius: 5px;
   color: var(--text-dim);
@@ -4617,7 +4618,8 @@ button.pdf-outline-twist:hover {
 .gal-check .gal-select {
   height: 22px;
   min-width: 76px;
-  padding: 0 4px;
+  /* Right padding is the chevron's room: a 22px row leaves the glyph 11px high. */
+  padding: 0 20px 0 4px;
   border-radius: 5px;
   font-size: 11px;
 }
@@ -5072,24 +5074,43 @@ button.pdf-outline-twist:hover {
 .setting-row input.num-wide[type="number"] {
   width: 132px;
 }
+/* Two things the OS draws on a <select> cannot be reached while its appearance is native: the
+   arrow, which sits flush against the border with no way to give it a margin, and the popup's
+   highlight, which SelectOverlay now replaces. The arrow is a chevron of our own, placed with
+   real padding. Every class that paints a select must use `background-color` (never the
+   `background` shorthand, which would wipe the image) and leave room on the right, or the
+   value prints under the chevron. */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%239ca3af' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 7px center;
+  background-size: 12px 12px;
+  cursor: pointer;
+}
+:root[data-theme="light"] select {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23616161' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
 .select {
   min-width: 120px;
-  padding: 5px 8px;
+  /* Right padding is the chevron's room: 12px of glyph plus 7px of edge. */
+  padding: 5px 26px 5px 8px;
   border-radius: 6px;
   border: 1px solid var(--border);
-  background: var(--surface-3);
+  background-color: var(--surface-3);
   color: var(--text);
   font-size: 13px;
 }
 .select:hover {
-  background: var(--surface-2-hover);
+  background-color: var(--surface-2-hover);
 }
 .select:focus {
   outline: none;
   border-color: var(--accent-soft);
 }
 .select option {
-  background: var(--surface-3);
+  background-color: var(--surface-3);
   color: var(--text);
 }
 .settings-cat p.muted,
@@ -5648,7 +5669,9 @@ button.pdf-outline-twist:hover {
   padding: 5px 8px;
   border-radius: 6px;
   border: 1px solid var(--border);
-  background: var(--bg);
+  /* Longhand, not `background`: the rule is shared with the sort <select>, whose chevron is a
+     background image a shorthand would wipe. */
+  background-color: var(--bg);
   color: var(--text);
   font-family: inherit;
   font-size: 13px;
@@ -5717,7 +5740,8 @@ button.pdf-outline-twist:hover {
   color: var(--muted);
 }
 .batch-input.batch-sort {
-  padding: 4px 6px;
+  /* Right padding is the chevron's room, as on `.select`. */
+  padding: 4px 24px 4px 6px;
   font-size: 12px;
 }
 .batch-dir {
