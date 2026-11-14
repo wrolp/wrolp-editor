@@ -3197,6 +3197,9 @@ const defaultModeFor = useCallback(
               onOpenLocalSettings={setLocalSettingsRoot}
               treeView={settings.gitTreeView}
               onTreeViewChange={(next) => void saveSettings({ gitTreeView: next })}
+              // The same value the tree and the tab strip read; neither ever reaches a third
+              // mode, so the panel falls back to the middle too.
+              nameEllipsis={settings.explorerNameEllipsis === "end" ? "end" : "middle"}
             />
           }
           onRemoveHistory={(path) =>

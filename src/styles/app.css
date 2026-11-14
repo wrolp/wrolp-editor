@@ -2479,6 +2479,26 @@ body.resizing .editor-host {
   white-space: nowrap;
   color: var(--text);
 }
+/* A middle cut has to keep the width the whole name would take, for the reason
+   `.tab-name.pinned` records: replacing the text in place narrows the box, and the next
+   measurement cuts a little more until nothing is left. The hidden copy holds that width in
+   flow and the cut text is drawn over it. */
+.git-name.pinned {
+  position: relative;
+  display: block;
+  /* The hidden copy is meant to overflow this box, and `text-overflow` would draw a second
+     ellipsis at the edge on top of the middle one the label already shows. */
+  text-overflow: clip;
+}
+.git-name.pinned .name-ghost {
+  visibility: hidden;
+}
+.git-name.pinned .name-cut {
+  position: absolute;
+  left: 0;
+  top: 0;
+  white-space: nowrap;
+}
 .git-dir {
   flex: 1 1 auto;
   min-width: 0;
@@ -2487,8 +2507,25 @@ body.resizing .editor-host {
   white-space: nowrap;
   color: var(--text-faint);
   font-size: 11px;
-  direction: rtl;
-  text-align: left;
+}
+/* The same width-preserving cut as the name beside it. The folder is a flex item whose width
+   follows its own text once the row is overfull, so without the hidden copy the first cut
+   would narrow the box and the next measurement would cut again, down to nothing. */
+.git-dir.pinned {
+  position: relative;
+  display: block;
+  /* The hidden copy is meant to overflow this box, and `text-overflow` would draw a second
+     ellipsis at the edge on top of the middle one. */
+  text-overflow: clip;
+}
+.git-dir.pinned .name-ghost {
+  visibility: hidden;
+}
+.git-dir.pinned .name-cut {
+  position: absolute;
+  left: 0;
+  top: 0;
+  white-space: nowrap;
 }
 .git-dirty {
   flex: 0 0 auto;

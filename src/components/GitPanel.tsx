@@ -22,6 +22,8 @@ import { api, errorMessage, parentOf } from "../lib/tauri";
 import { badgeTone } from "../lib/gitStatus";
 import { basename } from "../lib/path";
 import { useMenuPlacement } from "../hooks/useMenuPlacement";
+import type { NameEllipsis } from "../lib/nameEllipsis";
+import NameText from "./NameText";
 import PathTip, { useHoverTip } from "./PathTip";
 import { LOG_PAGE_CHOICES, type GitController } from "../hooks/useGit";
 import type { GitRepoRow } from "../hooks/useGitRepos";
@@ -98,6 +100,12 @@ interface Props {
   treeView: boolean;
   /** Switch that grouping on or off. Remembered in the settings, like the other view switches. */
   onTreeViewChange: (next: boolean) => void;
+  /**
+   * Where a name too long for its row loses characters, the same value the tree and the tab
+   * strip use. The defaults agree — the middle — so a path keeps both its head and its
+   * extension without anybody choosing it.
+   */
+  nameEllipsis: NameEllipsis;
 }
 
 type Scope = "workdir" | "index";
@@ -242,6 +250,7 @@ export default function GitPanel({
   onOpenCommitTab,
   treeView,
   onTreeViewChange,
+  nameEllipsis,
 }: Props) {
   const [message, setMessage] = useState("");
   /**
@@ -827,8 +836,8 @@ export default function GitPanel({
                   <span className={`git-badge ${badgeTone(file.status)}`}>
                     {file.status}
                   </span>
-                  <span className="git-name">{name}</span>
-                  <span className="git-dir">{dir}</span>
+                  <NameText name={name} mode={nameEllipsis} className="git-name" pinned />
+                  <NameText name={dir} mode={nameEllipsis} className="git-dir" pinned />
                 </div>
               );
             })
@@ -858,8 +867,8 @@ export default function GitPanel({
         onContextMenu={(event) => openRowMenu(event, file)}
       >
         <span className={`git-badge ${badgeTone(letter)}`}>{letter}</span>
-        <span className="git-name">{name}</span>
-        {!treeView && <span className="git-dir">{dir}</span>}
+        <NameText name={name} mode={nameEllipsis} className="git-name" pinned />
+        {!treeView && <NameText name={dir} mode={nameEllipsis} className="git-dir" pinned />}
         {dirtyPaths.has(pathKey(file.abs)) && (
           <span className="git-dirty" title={t("git.unsaved")}>
             ●
@@ -933,7 +942,7 @@ export default function GitPanel({
         <span className="git-folder">
           <IconFolder size={13} />
         </span>
-        <span className="git-name">{node.name}</span>
+        <NameText name={node.name} mode={nameEllipsis} className="git-name" pinned />
         <span className="git-count">{countGitTree(node)}</span>
       </div>
     );
@@ -1390,8 +1399,8 @@ export default function GitPanel({
                     onClick={() => onMergeConflict(file)}
                   >
                     <span className="git-badge conflict">U</span>
-                    <span className="git-name">{name}</span>
-                    <span className="git-dir">{dir}</span>
+                    <NameText name={name} mode={nameEllipsis} className="git-name" pinned />
+                    <NameText name={dir} mode={nameEllipsis} className="git-dir" pinned />
                     <span className="git-actions">
                       <button
                         className="git-action-text"
