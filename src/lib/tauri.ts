@@ -324,12 +324,25 @@ export interface Settings {
   autoCheckUpdates: boolean;
   /** Whether the AI features are switched on at all. */
   aiEnabled: boolean;
-  /** OpenAI-compatible endpoint; `https://`, or `http://` only for loopback. */
-  aiBaseUrl: string;
-  /** Model name, exactly as the provider expects it. */
-  aiModel: string;
+  /** The configured services, at least one; `aiActive` names the one the commit generator uses. */
+  aiEndpoints: AiEndpoint[];
+  aiActive: string;
   /** How long one AI request may run, in milliseconds. */
   aiTimeoutMs: number;
+}
+
+/**
+ * One OpenAI-compatible service in the AI settings.
+ *
+ * The key is deliberately absent: it stays in the settings file as ciphertext, is read back for
+ * display through `aiKey(endpointId)`, and written through `aiSetKey`.
+ */
+export interface AiEndpoint {
+  id: string;
+  name: string;
+  baseUrl: string;
+  /** Model name, exactly as the provider expects it. */
+  model: string;
 }
 
 /**
@@ -1192,12 +1205,13 @@ export const api = {
     return invoke<string>("git_clone", { url, parent, name, opId, onProgress: channel });
   },
   gitCancel: (opId: string) => invoke<void>("git_cancel", { opId }),
-  /** The stored key, decrypted for display; "" when none is stored (or it cannot be read). */
-  aiKey: () => invoke<string>("ai_key"),
-  aiSetKey: (key: string) => invoke<void>("ai_set_key", { key }),
-  aiClearKey: () => invoke<void>("ai_clear_key"),
+  /** The stored key of one endpoint, decrypted for display; "" when none is stored. */
+  aiKey: (endpointId: string) => invoke<string>("ai_key", { endpointId }),
+  aiSetKey: (endpointId: string, key: string) =>
+    invoke<void>("ai_set_key", { endpointId, key }),
+  aiClearKey: (endpointId: string) => invoke<void>("ai_clear_key", { endpointId }),
   /** Model ids the endpoint lists at `GET /models`, sorted. */
-  aiModels: () => invoke<string[]>("ai_models"),
+  aiModels: (endpointId: string) => invoke<string[]>("ai_models", { endpointId }),
   /** Stream a commit message for what is staged. Cancellable via `aiCancel`. */
   aiCommitMessage: (root: string, opId: string, onEvent: (event: AiCommitEvent) => void) => {
     const channel = new Channel<AiCommitEvent>();

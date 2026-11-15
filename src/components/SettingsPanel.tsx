@@ -16,6 +16,7 @@ import {
   type BackupInfo,
   type BackupList,
   type GitAuthView,
+  type AiEndpoint,
   type MenuTarget,
   type Settings,
   type StoreDirs,
@@ -68,6 +69,15 @@ function sizeLabel(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/** What an endpoint is called in the picker: its label, else the host of its URL. */
+function endpointLabel(endpoint: AiEndpoint): string {
+  if (endpoint.name.trim()) return endpoint.name.trim();
+  const url = endpoint.baseUrl.trim();
+  const scheme = url.indexOf("://");
+  const host = scheme >= 0 ? url.slice(scheme + 3).split("/")[0] : url;
+  return host || endpoint.id;
 }
 
 /**
@@ -317,8 +327,20 @@ export default function SettingsPanel({
   };
   useEffect(() => {
     readRemembered();
+  }, []);
+
+  // Each endpoint has a key of its own, so switching endpoints has to swap the box's contents
+  // and forget the list fetched for the previous one.
+  const activeEndpointId = settings.aiActive;
+  useEffect(() => {
+    if (!activeEndpointId) return;
+    setAiKey("");
+    setAiKeyDraft("");
+    setAiKeyReveal(false);
+    setAiModels([]);
+    setAiModelList(false);
     api
-      .aiKey()
+      .aiKey(activeEndpointId)
       .then((key) => {
         setAiKey(key);
         setAiKeyDraft(key);
@@ -326,13 +348,48 @@ export default function SettingsPanel({
       // A key this account cannot decrypt reads the same as none: the box is empty and the
       // reader types one. Saying nothing here is better than a hint they cannot act on.
       .catch(() => setAiKey(""));
-  }, []);
+  }, [activeEndpointId]);
+
+  /** The endpoint the page is editing: the active one, or the first when the id is stale. */
+  const endpoint =
+    settings.aiEndpoints.find((candidate) => candidate.id === settings.aiActive) ??
+    settings.aiEndpoints[0] ??
+    null;
+
+  /** Write one field of the endpoint being edited. */
+  const updateEndpoint = (patch: Partial<AiEndpoint>) => {
+    if (!endpoint) return;
+    onSaveSettings({
+      aiEndpoints: settings.aiEndpoints.map((candidate) =>
+        candidate.id === endpoint.id ? { ...candidate, ...patch } : candidate
+      ),
+    });
+  };
+
+  /** Add an endpoint beside the ones already there and switch to it. */
+  const addAiEndpoint = () => {
+    const id = crypto.randomUUID();
+    onSaveSettings({
+      aiEndpoints: [
+        ...settings.aiEndpoints,
+        { id, name: "", baseUrl: "https://api.openai.com/v1", model: "gpt-4o-mini" },
+      ],
+      aiActive: id,
+    });
+  };
+
+  /** Remove the one being edited. The last endpoint stays: the page always needs a target. */
+  const removeAiEndpoint = () => {
+    if (!endpoint || settings.aiEndpoints.length <= 1) return;
+    const remaining = settings.aiEndpoints.filter((candidate) => candidate.id !== endpoint.id);
+    onSaveSettings({ aiEndpoints: remaining, aiActive: remaining[0].id });
+  };
 
   const saveAiKey = () => {
     const value = aiKeyDraft.trim();
-    if (!value) return;
+    if (!value || !endpoint) return;
     api
-      .aiSetKey(value)
+      .aiSetKey(endpoint.id, value)
       .then(() => {
         setAiKey(value);
         setAiKeyDraft(value);
@@ -341,8 +398,9 @@ export default function SettingsPanel({
   };
 
   const clearAiKey = () => {
+    if (!endpoint) return;
     api
-      .aiClearKey()
+      .aiClearKey(endpoint.id)
       .then(() => {
         setAiKey("");
         setAiKeyDraft("");
@@ -350,12 +408,12 @@ export default function SettingsPanel({
       .catch((e) => onToast(errorMessage(e)));
   };
 
-  /** Ask the endpoint what it offers; the answer only fills suggestions for the model field. */
+  /** Ask the edited endpoint what it offers, for the model field's list. */
   const fetchAiModels = () => {
-    if (aiModelsBusy) return;
+    if (aiModelsBusy || !endpoint) return;
     setAiModelsBusy(true);
     api
-      .aiModels()
+      .aiModels(endpoint.id)
       .then((list) => {
         setAiModels(list);
         // A fetched list is what was asked for: show it as the picker rather than leaving it
@@ -1258,12 +1316,45 @@ export default function SettingsPanel({
                 onChange={(v) => onSaveSettings({ aiEnabled: v })}
               />
               <p className="muted">{t("settings.aiEnabledDesc")}</p>
+              <SettingField label={t("settings.aiEndpoint")}>
+                <select
+                  className="select"
+                  value={endpoint?.id ?? ""}
+                  onChange={(e) => onSaveSettings({ aiActive: e.target.value })}
+                >
+                  {settings.aiEndpoints.map((candidate) => (
+                    <option key={candidate.id} value={candidate.id}>
+                      {endpointLabel(candidate)}
+                    </option>
+                  ))}
+                </select>
+                <button className="btn small" onClick={addAiEndpoint}>
+                  {t("settings.aiEndpointAdd")}
+                </button>
+                <button
+                  className="btn small"
+                  onClick={removeAiEndpoint}
+                  disabled={settings.aiEndpoints.length <= 1}
+                >
+                  {t("settings.aiEndpointRemove")}
+                </button>
+              </SettingField>
+              <p className="muted">{t("settings.aiEndpointDesc")}</p>
+              <SettingField label={t("settings.aiEndpointName")}>
+                <input
+                  className="settings-text"
+                  type="text"
+                  value={endpoint?.name ?? ""}
+                  placeholder={t("settings.aiEndpointNamePlaceholder")}
+                  onChange={(e) => updateEndpoint({ name: e.target.value })}
+                />
+              </SettingField>
               <SettingField label={t("settings.aiBaseUrl")}>
                 <input
                   className="settings-text wide"
                   type="text"
-                  value={settings.aiBaseUrl}
-                  onChange={(e) => onSaveSettings({ aiBaseUrl: e.target.value })}
+                  value={endpoint?.baseUrl ?? ""}
+                  onChange={(e) => updateEndpoint({ baseUrl: e.target.value })}
                 />
               </SettingField>
               <p className="muted">{t("settings.aiBaseUrlDesc")}</p>
@@ -1271,14 +1362,14 @@ export default function SettingsPanel({
                 {aiModelList && aiModels.length > 0 ? (
                   <select
                     className="select"
-                    value={settings.aiModel}
-                    onChange={(e) => onSaveSettings({ aiModel: e.target.value })}
+                    value={endpoint?.model ?? ""}
+                    onChange={(e) => updateEndpoint({ model: e.target.value })}
                   >
                     {/* A model saved earlier may be missing from what the endpoint lists now.
                         Keeping it as an option is what stops the select from showing another
                         model's name over the stored value. */}
-                    {!aiModels.includes(settings.aiModel) && (
-                      <option value={settings.aiModel}>{settings.aiModel}</option>
+                    {!aiModels.includes(endpoint?.model ?? "") && (
+                      <option value={endpoint?.model ?? ""}>{endpoint?.model ?? ""}</option>
                     )}
                     {aiModels.map((id) => (
                       <option key={id} value={id}>
@@ -1290,8 +1381,8 @@ export default function SettingsPanel({
                   <input
                     className="settings-text"
                     type="text"
-                    value={settings.aiModel}
-                    onChange={(e) => onSaveSettings({ aiModel: e.target.value })}
+                    value={endpoint?.model ?? ""}
+                    onChange={(e) => updateEndpoint({ model: e.target.value })}
                   />
                 )}
                 {aiModels.length > 0 && (

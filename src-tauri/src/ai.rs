@@ -197,22 +197,34 @@ fn forget_legacy() {
   }
 }
 
-/// The key, decrypted for a caller. `None` covers both "never saved" and "saved somewhere this
-/// account cannot read": the settings page shows the same empty field either way.
-fn stored_key(app: &AppHandle) -> Option<String> {
+/// The key of one endpoint, decrypted for a caller. `None` covers both "never saved" and "saved
+/// somewhere this account cannot read": the settings page shows the same empty field either way.
+fn stored_key(app: &AppHandle, endpoint_id: &str) -> Option<String> {
   let settings = commands::settings_of(app);
-  if !settings.ai_key.trim().is_empty() {
-    return unprotect(&settings.ai_key)
-      .ok()
-      .filter(|key| !key.is_empty());
+  let endpoint = settings
+    .ai_endpoints
+    .iter()
+    .find(|endpoint| endpoint.id == endpoint_id)?;
+  if !endpoint.key.trim().is_empty() {
+    return unprotect(&endpoint.key).ok().filter(|key| !key.is_empty());
   }
-  // An earlier build kept the key in the Windows credential store. Move it into the settings
-  // file the first time it is read, and drop the old copy only once the new one is on disk: a
-  // write that failed must not leave the key in neither place.
+  // An earlier build kept the key in the Windows credential store, for the single endpoint that
+  // build had. Only the endpoint carried over from those settings may claim it; an endpoint
+  // added afterwards has a key of its own or none. The old copy is dropped only once the new
+  // one is on disk: a write that failed must not leave the key in neither place.
+  if endpoint_id != "default" {
+    return None;
+  }
   let key = legacy_key()?;
   let mut settings = settings;
   if let Ok(blob) = protect(&key) {
-    settings.ai_key = blob;
+    if let Some(endpoint) = settings
+      .ai_endpoints
+      .iter_mut()
+      .find(|endpoint| endpoint.id == endpoint_id)
+    {
+      endpoint.key = blob;
+    }
     if crate::commands::write_json(app, "settings.json", &settings).is_ok() {
       forget_legacy();
     }
@@ -220,30 +232,40 @@ fn stored_key(app: &AppHandle) -> Option<String> {
   Some(key)
 }
 
-/// The stored key, for the settings page to show back. Empty when none is stored, or when the
-/// blob was written on another machine or account.
+/// The stored key of one endpoint, for the settings page to show back. Empty when none is
+/// stored, or when the blob was written on another machine or account.
 #[tauri::command(async)]
-pub fn ai_key(app: AppHandle) -> Result<String, String> {
-  Ok(stored_key(&app).unwrap_or_default())
+pub fn ai_key(app: AppHandle, endpoint_id: String) -> Result<String, String> {
+  Ok(stored_key(&app, &endpoint_id).unwrap_or_default())
 }
 
 #[tauri::command(async)]
-pub fn ai_set_key(app: AppHandle, key: String) -> Result<(), String> {
+pub fn ai_set_key(app: AppHandle, endpoint_id: String, key: String) -> Result<(), String> {
   let key = key.trim();
   if key.is_empty() {
     return Err("ai_key_empty".into());
   }
   let mut settings = commands::settings_of(&app);
-  settings.ai_key = protect(key)?;
+  let endpoint = settings
+    .ai_endpoints
+    .iter_mut()
+    .find(|endpoint| endpoint.id == endpoint_id)
+    .ok_or_else(|| "ai_endpoint_missing".to_string())?;
+  endpoint.key = protect(key)?;
   crate::commands::write_json(&app, "settings.json", &settings)?;
   forget_legacy();
   Ok(())
 }
 
 #[tauri::command(async)]
-pub fn ai_clear_key(app: AppHandle) -> Result<(), String> {
+pub fn ai_clear_key(app: AppHandle, endpoint_id: String) -> Result<(), String> {
   let mut settings = commands::settings_of(&app);
-  settings.ai_key.clear();
+  let endpoint = settings
+    .ai_endpoints
+    .iter_mut()
+    .find(|endpoint| endpoint.id == endpoint_id)
+    .ok_or_else(|| "ai_endpoint_missing".to_string())?;
+  endpoint.key.clear();
   crate::commands::write_json(&app, "settings.json", &settings)?;
   forget_legacy();
   Ok(())
@@ -272,14 +294,23 @@ pub async fn ai_commit_message(
   if !settings.ai_enabled {
     return Err("ai_disabled".into());
   }
-  let base_url = settings.ai_base_url.trim_end_matches('/').to_string();
-  let model = settings.ai_model;
+  // The endpoint the settings page marked as in use; the first one when that id no longer
+  // exists (a hand-edited file, or an endpoint removed mid-edit).
+  let endpoint = settings
+    .ai_endpoints
+    .iter()
+    .find(|endpoint| endpoint.id == settings.ai_active)
+    .or_else(|| settings.ai_endpoints.first())
+    .ok_or_else(|| "ai_endpoint_missing".to_string())?;
+  let endpoint_id = endpoint.id.clone();
+  let base_url = endpoint.base_url.trim_end_matches('/').to_string();
+  let model = endpoint.model.clone();
   let timeout_ms = settings.ai_timeout_ms;
 
   // Local loopback needs no key; a remote host does. `http://` is only ever loopback, since
   // `filled()` drops any other plain-http endpoint.
   let loopback = base_url.starts_with("http://");
-  let key = stored_key(&app);
+  let key = stored_key(&app, &endpoint_id);
   if !loopback && key.is_none() {
     return Err("ai_key_missing".into());
   }
@@ -311,14 +342,21 @@ pub async fn ai_commit_message(
 /// OpenAI-compatible service answers. Sorted and deduplicated so the list reads the same on
 /// every fetch.
 #[tauri::command]
-pub async fn ai_models(app: AppHandle) -> Result<Vec<String>, String> {
+pub async fn ai_models(app: AppHandle, endpoint_id: String) -> Result<Vec<String>, String> {
   let settings = commands::settings_of(&app);
   if !settings.ai_enabled {
     return Err("ai_disabled".into());
   }
-  let base_url = settings.ai_base_url.trim_end_matches('/').to_string();
+  // The endpoint the settings page is editing, which is not always the active one: the list is
+  // asked for while the reader is already looking at that endpoint's fields.
+  let endpoint = settings
+    .ai_endpoints
+    .iter()
+    .find(|endpoint| endpoint.id == endpoint_id)
+    .ok_or_else(|| "ai_endpoint_missing".to_string())?;
+  let base_url = endpoint.base_url.trim_end_matches('/').to_string();
   let loopback = base_url.starts_with("http://");
-  let key = stored_key(&app);
+  let key = stored_key(&app, &endpoint_id);
   if !loopback && key.is_none() {
     return Err("ai_key_missing".into());
   }
@@ -535,11 +573,16 @@ mod tests {
   fn url_rules_keep_https_and_loopback_only() {
     let base = |url: &str| {
       Settings {
-        ai_base_url: url.to_string(),
+        ai_endpoints: vec![crate::commands::AiEndpoint {
+          base_url: url.to_string(),
+          ..Default::default()
+        }],
         ..Default::default()
       }
       .filled()
-      .ai_base_url
+      .ai_endpoints[0]
+        .base_url
+        .clone()
     };
     assert_eq!(base("https://api.deepseek.com/v1"), "https://api.deepseek.com/v1");
     assert_eq!(base("http://localhost:11434/v1"), "http://localhost:11434/v1");

@@ -301,10 +301,18 @@ const DEFAULT_SETTINGS: Settings = {
   // for a click. Off is there for anyone who would rather not talk to the release endpoint.
   autoCheckUpdates: true,
   // AI stays off until a provider, a model and (for a remote host) a key have been set; until
-  // then the Source panel offers no AI entry.
+  // then the Source panel offers no AI entry. One endpoint to start with: the settings page has
+  // something to show, and another can be added beside it.
   aiEnabled: false,
-  aiBaseUrl: "https://api.openai.com/v1",
-  aiModel: "gpt-4o-mini",
+  aiEndpoints: [
+    {
+      id: "default",
+      name: "",
+      baseUrl: "https://api.openai.com/v1",
+      model: "gpt-4o-mini",
+    },
+  ],
+  aiActive: "default",
   aiTimeoutMs: 90000,
 }
 

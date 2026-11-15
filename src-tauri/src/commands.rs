@@ -337,18 +337,56 @@ pub struct Settings {
   /// Whether the AI features are switched on at all. Off by default, so an install that never
   /// touches them shows no half-configured controls.
   pub ai_enabled: bool,
-  /// The OpenAI-compatible endpoint, `https://` for anything on the internet and `http://` only
-  /// for loopback (Ollama and friends, which need no key).
+  /// The OpenAI-compatible services the AI features can talk to, at least one. A list rather
+  /// than one set of fields: a reader may keep a local Ollama, a work gateway and a cloud
+  /// account side by side, each with its own model and key, and switch without retyping any.
+  /// Field-level `default` (not the container's) so a file written before this list existed
+  /// reads as an empty list, which is what lets `filled` fold the legacy fields into it.
+  #[serde(default)]
+  pub ai_endpoints: Vec<AiEndpoint>,
+  /// The endpoint the commit-message generator uses, by id.
+  pub ai_active: String,
+  /// Legacy single-endpoint fields from before the list existed. Read once, in [`Settings::filled`],
+  /// to move an existing URL, model and key into `ai_endpoints`; cleared when that happens and
+  /// never written afterwards.
+  #[serde(default)]
   pub ai_base_url: String,
-  /// The model name, exactly as the provider expects it.
+  #[serde(default)]
   pub ai_model: String,
+  #[serde(default)]
+  pub ai_key: String,
   /// How long one AI request may run, in milliseconds.
   pub ai_timeout_ms: u32,
-  /// The API key for `ai_base_url`, as Windows DPAPI ciphertext in base64. It lives here rather
-  /// than in the credential store because the settings page shows it back, and a value only this
-  /// Windows account can decrypt is still safe to carry into a configuration backup. Written by
-  /// `ai_set_key` and `ai_clear_key` alone; a general settings save keeps whatever is on disk.
-  pub ai_key: String,
+}
+
+/// One OpenAI-compatible service in the AI settings.
+///
+/// The key is Windows DPAPI ciphertext in base64, written by `ai_set_key` alone; it lives in the
+/// settings file rather than the credential store because the settings page shows it back, and a
+/// value only this Windows account can decrypt is still safe to carry into a backup.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AiEndpoint {
+  /// Stable identity: what the key commands name and what `ai_active` points at.
+  pub id: String,
+  /// A label for the list; empty means "show the host".
+  pub name: String,
+  pub base_url: String,
+  pub model: String,
+  /// DPAPI ciphertext, or empty for an endpoint with no key (loopback needs none).
+  pub key: String,
+}
+
+impl Default for AiEndpoint {
+  fn default() -> Self {
+    Self {
+      id: "default".into(),
+      name: String::new(),
+      base_url: "https://api.openai.com/v1".into(),
+      model: "gpt-4o-mini".into(),
+      key: String::new(),
+    }
+  }
 }
 
 /// Used when settings.json is absent or a key is missing, so a first run must not
@@ -417,10 +455,13 @@ impl Default for Settings {
       backup_retain: crate::backup::DEFAULT_RETAIN,
       auto_check_updates: true,
       ai_enabled: false,
-      ai_base_url: "https://api.openai.com/v1".into(),
-      ai_model: "gpt-4o-mini".into(),
-      ai_timeout_ms: 90_000,
+      ai_endpoints: vec![AiEndpoint::default()],
+      ai_active: "default".into(),
+      // Legacy fields stay empty in a fresh install; `filled` folds them in when it finds them.
+      ai_base_url: String::new(),
+      ai_model: String::new(),
       ai_key: String::new(),
+      ai_timeout_ms: 90_000,
     }
   }
 }
@@ -500,6 +541,61 @@ fn as_hex_color(value: &str) -> Option<String> {
 
 impl Settings {
   pub(crate) fn filled(self) -> Self {
+    // One list, at least one entry: the settings page always has an endpoint to show, and a
+    // hand-edited file with an empty list must not leave the AI commands without a target.
+    let mut endpoints = self.ai_endpoints.clone();
+    if endpoints.is_empty() {
+      let legacy = AiEndpoint {
+        id: "default".into(),
+        name: String::new(),
+        base_url: self.ai_base_url.trim().to_string(),
+        model: self.ai_model.trim().to_string(),
+        key: self.ai_key.clone(),
+      };
+      let has_legacy = !legacy.base_url.is_empty()
+        || !legacy.model.is_empty()
+        || !legacy.key.trim().is_empty();
+      endpoints.push(if has_legacy { legacy } else { AiEndpoint::default() });
+    }
+    // Each endpoint gets the same rules a lone one used to have: an id that can be named, a URL
+    // a key may travel over, and a model name rather than an empty box.
+    let mut seen = std::collections::HashSet::new();
+    let endpoints: Vec<AiEndpoint> = endpoints
+      .into_iter()
+      .enumerate()
+      .map(|(index, mut endpoint)| {
+        let id = endpoint.id.trim().to_string();
+        let unique = !id.is_empty() && seen.insert(id.clone());
+        endpoint.id = if unique {
+          id
+        } else {
+          format!("endpoint-{}", index + 1)
+        };
+        endpoint.name = endpoint.name.trim().to_string();
+        let url = endpoint.base_url.trim();
+        endpoint.base_url = if !url.is_empty()
+          && (url.starts_with("https://") || (url.starts_with("http://") && is_loopback(url)))
+        {
+          url.to_string()
+        } else {
+          "https://api.openai.com/v1".into()
+        };
+        endpoint.model = if endpoint.model.trim().is_empty() {
+          "gpt-4o-mini".into()
+        } else {
+          endpoint.model.trim().to_string()
+        };
+        endpoint
+      })
+      .collect();
+    let active = if endpoints
+      .iter()
+      .any(|endpoint| endpoint.id == self.ai_active)
+    {
+      self.ai_active.clone()
+    } else {
+      endpoints[0].id.clone()
+    };
     Self {
       font_size: if self.font_size > 0.0 {
         self.font_size
@@ -701,33 +797,19 @@ impl Settings {
       },
       auto_check_updates: self.auto_check_updates,
       ai_enabled: self.ai_enabled,
-      // Only https:// is accepted for a remote host — a key travels on the same wire the code
-      // does — and http:// only for loopback. Anything else reads as the default.
-      ai_base_url: {
-        let url = self.ai_base_url.trim();
-        if url.is_empty() {
-          "https://api.openai.com/v1".into()
-        } else if url.starts_with("https://") || (url.starts_with("http://") && is_loopback(url)) {
-          url.to_string()
-        } else {
-          "https://api.openai.com/v1".into()
-        }
-      },
-      // A hand-edited empty string reads as the default rather than as a provider error.
-      ai_model: if self.ai_model.trim().is_empty() {
-        "gpt-4o-mini".into()
-      } else {
-        self.ai_model.trim().to_string()
-      },
+      ai_endpoints: endpoints,
+      ai_active: active,
+      // The legacy copies were folded into the list above. Leaving them would append the old
+      // endpoint a second time on the next load.
+      ai_base_url: String::new(),
+      ai_model: String::new(),
+      ai_key: String::new(),
       // 0 is "use the default", the same reading the other timers in this table have.
       ai_timeout_ms: if self.ai_timeout_ms == 0 {
         90_000
       } else {
         self.ai_timeout_ms.clamp(10_000, 180_000)
       },
-      // Ciphertext, passed through untouched: the key commands own its shape, and reading it
-      // here is what keeps a load from dropping it.
-      ai_key: self.ai_key.clone(),
     }
   }
 }
@@ -2020,9 +2102,18 @@ pub fn get_settings(app: AppHandle) -> Result<Settings, String> {
 
 #[tauri::command]
 pub fn save_settings(app: AppHandle, mut settings: Settings) -> Result<Settings, String> {
-  // The AI key has commands of its own, and the page has no copy of it to send back: keeping
-  // the stored blob is what stops a font-size change from erasing the key.
-  settings.ai_key = settings_of(&app).ai_key;
+  // The AI keys have commands of their own, and a settings save never carries one: every
+  // endpoint in the list keeps whatever ciphertext is already on disk, and a page holding a
+  // stale copy cannot put an old key back. An endpoint the page removed takes its key with it.
+  let stored = settings_of(&app);
+  for endpoint in &mut settings.ai_endpoints {
+    endpoint.key = stored
+      .ai_endpoints
+      .iter()
+      .find(|saved| saved.id == endpoint.id)
+      .map(|saved| saved.key.clone())
+      .unwrap_or_default();
+  }
   let settings = settings.filled();
   write_json(&app, "settings.json", &settings)?;
   Ok(settings)
@@ -2215,22 +2306,47 @@ mod tests {
     assert_eq!(names, vec!["9folder/", "2.txt", "10.txt", "notes.txt"]);
   }
 
-  /// The encrypted AI key has to survive the file it is kept in. A load that dropped it would
-  /// silently look like "no key", and a partial settings file — the usual case after an upgrade
-  /// — must come back as "none" rather than as some other default.
+  /// The encrypted AI key has to survive the file it is kept in, and a file written before the
+  /// endpoint list existed has to come back as that one endpoint rather than as a fresh default
+  /// — otherwise an upgrade silently forgets the URL, model and key it had.
   #[test]
-  fn the_ai_key_survives_a_settings_round_trip() {
+  fn the_ai_keys_survive_a_settings_round_trip() {
     let stored = Settings {
-      ai_key: "ciphertext".into(),
+      ai_endpoints: vec![AiEndpoint {
+        id: "work".into(),
+        key: "ciphertext".into(),
+        ..Default::default()
+      }],
+      ai_active: "work".into(),
       ..Default::default()
     }
     .filled();
-    assert_eq!(stored.ai_key, "ciphertext");
+    assert_eq!(stored.ai_endpoints.len(), 1);
+    assert_eq!(stored.ai_endpoints[0].key, "ciphertext");
+    assert_eq!(stored.ai_active, "work");
     let text = serde_json::to_string(&stored).expect("serialize settings");
     let back: Settings = serde_json::from_str(&text).expect("parse settings");
-    assert_eq!(back.filled().ai_key, "ciphertext");
-    let partial: Settings = serde_json::from_str("{\"fontSize\":16.0}").expect("partial settings");
-    assert_eq!(partial.filled().ai_key, "");
+    assert_eq!(back.filled().ai_endpoints[0].key, "ciphertext");
+
+    let legacy: Settings = serde_json::from_str(
+      "{\"aiBaseUrl\":\"https://api.deepseek.com/v1\",\"aiModel\":\"deepseek-chat\",\"aiKey\":\"ciphertext\"}",
+    )
+    .expect("legacy settings");
+    let filled = legacy.filled();
+    assert_eq!(filled.ai_endpoints.len(), 1);
+    assert_eq!(filled.ai_endpoints[0].base_url, "https://api.deepseek.com/v1");
+    assert_eq!(filled.ai_endpoints[0].model, "deepseek-chat");
+    assert_eq!(filled.ai_endpoints[0].key, "ciphertext");
+    assert!(filled.ai_base_url.is_empty(), "the legacy copy must not be written again");
+
+    // A file that names an endpoint no longer in the list falls back to the first one.
+    let missing = Settings {
+      ai_endpoints: vec![AiEndpoint::default()],
+      ai_active: "gone".into(),
+      ..Default::default()
+    }
+    .filled();
+    assert_eq!(missing.ai_active, "default");
   }
 
   /// A folder read as missing is greyed out rather than dropped, so the same folder reached
