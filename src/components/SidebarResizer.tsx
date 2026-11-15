@@ -63,7 +63,7 @@ export default function SidebarResizer({ value, defaultValue, onChange, onCommit
 
   return (
     <div
-      className="sidebar-resizer"
+      className={`sidebar-resizer${dragging ? " active" : ""}`}
       title={t("side.resizeHint")}
       onPointerDown={onPointerDown}
       onDoubleClick={() => onCommit(defaultValue)}

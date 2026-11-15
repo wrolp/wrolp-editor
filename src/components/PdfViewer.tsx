@@ -1644,7 +1644,7 @@ export default function PdfViewer({
           {/* The divider on the edge facing the pages; drag it to change the column, or double
               click it to put the width back. */}
           <div
-            className={`pdf-outline-resizer ${outlineSide}`}
+            className={`pdf-outline-resizer ${outlineSide}${outlineDragging ? " active" : ""}`}
             title={t("pdf.outlineResizeHint")}
             onPointerDown={startOutlineResize}
             onDoubleClick={() => {

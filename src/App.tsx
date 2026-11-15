@@ -265,6 +265,8 @@ const DEFAULT_SETTINGS: Settings = {
   // Folded to its tab until asked for: the column takes width from the page, and a document
   // opened to be read should not lose that width before the list is wanted.
   tocOpen: false,
+  // The width the divider starts at, matching the stylesheet before it could be dragged.
+  tocWidth: 216,
   // The same reasoning for a PDF's bookmarks, on a setting of its own: the reader opens one
   // document at a time, and the column should be somewhere it has been put on purpose.
   pdfOutlineSide: "right",
@@ -3478,6 +3480,8 @@ const defaultModeFor = useCallback(
               showToc={previewMode === "preview"}
               tocSide={settings.tocSide === "left" ? "left" : "right"}
               tocOpenByDefault={settings.tocOpen}
+              tocWidth={settings.tocWidth}
+              onSaveTocWidth={(width) => void saveSettings({ tocWidth: width })}
               onOpenPath={(path) => void tabs.openPath(path)}
               onError={(message) => toast(message)}
             />

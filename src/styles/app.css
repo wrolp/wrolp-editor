@@ -1195,8 +1195,10 @@ textarea.ver-note-body {
   opacity: 0;
   transition: opacity 0.12s ease;
 }
+/* The handle being dragged, not every handle in the window: `body.resizing` is shared by the
+   sidebar, the PDF bookmarks and the markdown outline, so it only carries the cursor. */
 .sidebar-resizer:hover::after,
-body.resizing .sidebar-resizer::after {
+.sidebar-resizer.active::after {
   opacity: 1;
 }
 /* Keep one cursor while dragging, whatever element ends up under the pointer. */
@@ -2877,6 +2879,17 @@ body.resizing .editor-host {
 .clone-field .settings-text {
   width: 100%;
 }
+/* The folder field and its Browse button share one row; the box takes the room the button
+   leaves rather than asking for the whole width and pushing the button out of the modal. */
+.clone-dir-row {
+  display: flex;
+  gap: 6px;
+}
+.clone-dir-row .settings-text {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+}
 .clone-target {
   margin: 0 0 12px;
   overflow: hidden;
@@ -4153,8 +4166,10 @@ body.resizing .editor-host {
   border-left: 1px solid var(--border);
 }
 /* The strip that resizes the column: on the edge facing the pages, five pixels wide, with the
-   same accent line the sidebar's divider shows while it is being held. */
-.pdf-outline-resizer {
+   same accent line the sidebar's divider shows while it is being held. The PDF bookmark column
+   and the markdown outline share it; each puts it on the edge its pages are on. */
+.pdf-outline-resizer,
+.md-toc-resizer {
   position: absolute;
   top: 0;
   bottom: 0;
@@ -4168,7 +4183,8 @@ body.resizing .editor-host {
 .pdf-outline-resizer.right {
   left: -3px;
 }
-.pdf-outline-resizer::after {
+.pdf-outline-resizer::after,
+.md-toc-resizer::after {
   content: "";
   position: absolute;
   inset: 0;
@@ -4177,7 +4193,9 @@ body.resizing .editor-host {
   transition: opacity 0.12s ease;
 }
 .pdf-outline-resizer:hover::after,
-body.resizing .pdf-outline-resizer::after {
+.pdf-outline-resizer.active::after,
+.md-toc-resizer:hover::after,
+.md-toc-resizer.active::after {
   opacity: 1;
 }
 /* On the left the tab sits over the column's own heading, which steps aside for it. */

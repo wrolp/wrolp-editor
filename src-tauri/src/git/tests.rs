@@ -1649,7 +1649,6 @@ fn a_clone_lands_in_the_named_folder_and_refuses_an_existing_one() {
     &root(&dest),
     "copy",
     &AuthStore::default(),
-    &GitLocks::default(),
     not_canceled(),
     sink,
   )
@@ -1669,12 +1668,33 @@ fn a_clone_lands_in_the_named_folder_and_refuses_an_existing_one() {
       &root(&dest),
       "copy",
       &AuthStore::default(),
-      &GitLocks::default(),
       not_canceled(),
       sink,
     )
     .unwrap_err(),
     "git_clone_exists"
+  );
+}
+
+/// The folder is named by the reader now, so a path that is not there has to say so rather
+/// than fall back to the window's own folder. Checked before the network is touched.
+#[test]
+fn a_clone_refuses_a_missing_folder() {
+  let dest = fixture("clone-missing-dest");
+  let base = root(&dest);
+  let missing = Path::new(&base).join("no-such-folder");
+  let (sink, _) = quiet();
+  assert_eq!(
+    clone_core(
+      "https://example.invalid/repo.git",
+      &missing.to_string_lossy(),
+      "copy",
+      &AuthStore::default(),
+      not_canceled(),
+      sink,
+    )
+    .unwrap_err(),
+    "git_clone_folder"
   );
 }
 

@@ -264,6 +264,10 @@ pub struct Settings {
   /// from the page, and a document opened to be read should not lose that width until the
   /// reader asks for the list. Applies when a preview mounts, not to one already on screen.
   pub toc_open: bool,
+  /// How wide the markdown outline column is, in CSS pixels. Migrated from the stylesheet's
+  /// fixed 216 when the divider was added; dragging the divider writes it back here, so the
+  /// width a reader chose outlives the document they chose it on.
+  pub toc_width: f64,
   /// Seconds each picture stays on screen in the gallery slideshow. A short list of choices in
   /// the frontend, clamped here so a hand-edited file cannot make the timer absurd.
   pub gallery_interval: u32,
@@ -431,6 +435,7 @@ impl Default for Settings {
       preview_modes: HashMap::new(),
       toc_side: "right".into(),
       toc_open: false,
+      toc_width: 216.0,
       gallery_interval: GALLERY_INTERVAL_DEFAULT_SECONDS,
       gallery_loop: true,
       image_backdrop: IMAGE_BACKDROP_CHECKER.into(),
@@ -745,6 +750,13 @@ impl Settings {
         "right".into()
       },
       toc_open: self.toc_open,
+      // The same range the divider itself enforces: narrower than this the list has no room
+      // for a title, wider it is a column of empty space with a stripe of text down one side.
+      toc_width: if self.toc_width <= 0.0 {
+        216.0
+      } else {
+        self.toc_width.clamp(140.0, 560.0)
+      },
       pdf_outline_side: if SIDES.contains(&self.pdf_outline_side.as_str()) {
         self.pdf_outline_side.clone()
       } else {
@@ -2954,6 +2966,31 @@ mod tests {
     .filled();
     assert!(opened.toc_open);
     assert!(opened.pdf_outline_open);
+  }
+
+  /// The outline width a drag wrote has to come back, and a hand-edited file cannot put the
+  /// column somewhere it would have no room for a title or the whole page.
+  #[test]
+  fn the_outline_width_is_clamped_and_kept() {
+    assert_eq!(Settings::default().toc_width, 216.0);
+    let narrow = Settings {
+      toc_width: 10.0,
+      ..Default::default()
+    }
+    .filled();
+    assert_eq!(narrow.toc_width, 140.0);
+    let wide = Settings {
+      toc_width: 9999.0,
+      ..Default::default()
+    }
+    .filled();
+    assert_eq!(wide.toc_width, 560.0);
+    let kept = Settings {
+      toc_width: 300.0,
+      ..Default::default()
+    }
+    .filled();
+    assert_eq!(kept.toc_width, 300.0);
   }
 
   #[test]

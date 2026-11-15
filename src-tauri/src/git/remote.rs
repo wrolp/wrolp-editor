@@ -21,7 +21,7 @@ use std::fs;
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::Path;
 use std::sync::mpsc;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::ipc::Channel;
@@ -298,11 +298,13 @@ pub async fn git_push(
 /// Same callbacks as fetch: the credentials and the host-key prompt apply, progress streams, and
 /// a cancel stops the transfer. A failed clone removes the half-written folder, because the next
 /// attempt would otherwise stop at "that folder already exists".
+///
+/// Unlike fetch and push it takes no per-folder lock: a clone only creates its own subfolder,
+/// and a retry has to be able to start while a cancelled attempt is still winding down.
 #[tauri::command]
 pub async fn git_clone(
   app: AppHandle,
   ops: State<'_, GitOps>,
-  locks: State<'_, GitLocks>,
   url: String,
   parent: String,
   name: String,
@@ -312,14 +314,46 @@ pub async fn git_clone(
   let auth = AuthStore::load(&app)?;
   let cancel = ops.begin(&op_id)?;
   let ops = ops.inner().clone();
-  let locks = locks.inner().clone();
   let sink = channel_sink(on_progress);
   let joined = tauri::async_runtime::spawn_blocking(move || {
-    clone_core(&url, &parent, &name, &auth, &locks, cancel, sink)
+    clone_core(&url, &parent, &name, &auth, cancel, sink)
   })
   .await;
   ops.end(&op_id);
   joined.map_err(|e| format!("git_clone:{e}"))?
+}
+
+/// Remove a folder, giving a scanner or a synced file a moment to let go.
+///
+/// A failed clone has to leave nothing behind, or the next attempt stops at "that folder
+/// already exists" for a folder nobody finished. Windows can hold a freshly written directory
+/// for a moment, so the removal is retried rather than reported as done on the first refusal.
+fn remove_tree(path: &Path) {
+  for attempt in 0..6 {
+    match fs::remove_dir_all(path) {
+      Ok(()) => return,
+      Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+      Err(_) if attempt < 5 => std::thread::sleep(Duration::from_millis(120)),
+      Err(_) => return,
+    }
+  }
+}
+
+/// Remove the temporary clone folders an earlier build left in this parent.
+///
+/// Those builds cloned into `.<name>.clone-<pid>-<nanos>` and renamed it into place; when the
+/// rename was refused the folder stayed. The prefix is this app's own spelling, so a sweep
+/// cannot take a folder the reader made.
+fn sweep_clone_leftovers(parent: &Path, name: &str) {
+  let prefix = format!(".{name}.clone-");
+  let Ok(entries) = fs::read_dir(parent) else {
+    return;
+  };
+  for entry in entries.flatten() {
+    if entry.file_name().to_string_lossy().starts_with(&prefix) && entry.path().is_dir() {
+      remove_tree(&entry.path());
+    }
+  }
 }
 
 /// A folder name a clone may create: one path segment, nothing Windows would trim or refuse.
@@ -338,7 +372,6 @@ pub(crate) fn clone_core(
   parent: &str,
   name: &str,
   auth: &AuthStore,
-  locks: &GitLocks,
   cancel: Arc<AtomicBool>,
   sink: Sink,
 ) -> Result<String, String> {
@@ -352,33 +385,43 @@ pub(crate) fn clone_core(
   let parent = crate::draft::normalize_path(parent);
   let parent_path = Path::new(&parent);
   if parent.is_empty() || !parent_path.is_dir() {
-    return Err("git_no_folder".into());
+    // Its own code rather than `git_no_folder`: the dialog lets the reader name any folder,
+    // and "no folder is open" would describe the window instead of the path they typed.
+    return Err("git_clone_folder".into());
   }
   let target = parent_path.join(name);
   if target.exists() {
     return Err("git_clone_exists".into());
   }
-  let _guard = locks.acquire(parent_path)?;
-  // The check above ran before the lock: another clone into this folder can have created the
-  // same name while this one was waiting. Re-check under the lock, then clone into a temp
-  // directory of our own, so a failed attempt can only ever remove what it created itself.
-  if target.exists() {
-    return Err("git_clone_exists".into());
-  }
+  // No per-folder lock here, unlike fetch and push: a clone only creates its own subfolder.
+  // The name is claimed atomically below instead, so two clones of the same name cannot end up
+  // in one folder. A lock would make a retry fail with "another git operation is running"
+  // while a cancelled attempt is still winding down — exactly when a retry is wanted.
+  //
+  // An earlier build cloned into a hidden temporary directory and renamed it into place. That
+  // rename is what Windows refused with "access denied" on folders that allow creating but
+  // not deleting, and its copy fallback left the temporary directory behind. Cleaning up the
+  // leftovers of those attempts is the only thing left to do with them.
+  sweep_clone_leftovers(parent_path, name);
   preflight(url, &cancel)?;
   if cancel.load(Ordering::Relaxed) {
     return Err("git_canceled".into());
   }
+  // Claim the name in one step. The loser of a race hears "already exists" rather than
+  // starting a transfer into a folder the winner is already writing.
+  match fs::create_dir(&target) {
+    Ok(()) => {}
+    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+      return Err("git_clone_exists".into());
+    }
+    Err(error) => {
+      return Err(format!(
+        "git_clone_create:{} — {error}",
+        target.display()
+      ));
+    }
+  }
 
-  let tmp = parent_path.join(format!(
-    ".{}.clone-{}-{}",
-    name,
-    std::process::id(),
-    SystemTime::now()
-      .duration_since(UNIX_EPOCH)
-      .map(|d| d.as_nanos())
-      .unwrap_or(0)
-  ));
   let hostkey: HostKeyNote = Arc::new(Mutex::new(None));
   let cert: CertNote = Arc::new(Mutex::new(None));
   let callbacks = callbacks(
@@ -393,18 +436,8 @@ pub(crate) fn clone_core(
   let mut builder = RepoBuilder::new();
   builder.fetch_options(fetch);
   sink(starting());
-  match builder.clone(url, &tmp) {
+  match builder.clone(url, &target) {
     Ok(_) => {
-      // Someone else may have created the target while the clone was running; replacing it
-      // outright is not this operation's call.
-      if target.exists() {
-        let _ = fs::remove_dir_all(&tmp);
-        return Err("git_clone_exists".into());
-      }
-      if let Err(e) = fs::rename(&tmp, &target) {
-        let _ = fs::remove_dir_all(&tmp);
-        return Err(format!("git_clone_replace:{e}"));
-      }
       sink(done());
       Ok(target.to_string_lossy().to_string())
     }
@@ -413,9 +446,9 @@ pub(crate) fn clone_core(
         .or_else(|| hostkey_note(&hostkey))
         .unwrap_or_else(|| remote_fail("clone", error, &cancel));
       // A folder with half a clone in it is worse than none: it makes the retry fail for a
-      // reason that has nothing to do with the server. The temp directory is ours alone, so
-      // removing it cannot touch a folder that was already there.
-      let _ = fs::remove_dir_all(&tmp);
+      // reason that has nothing to do with the server, and the folder was created by this
+      // attempt alone.
+      remove_tree(&target);
       Err(message)
     }
   }
@@ -1226,6 +1259,21 @@ fn remote_fail(stage: &str, error: git2::Error, cancel: &AtomicBool) -> String {
   {
     return "git_auth_failed".into();
   }
+  // A transport failure is reported by the OS, and its sentence is in the OS language — a
+  // Chinese Windows puts "操作超时" in the middle of an English dialog. These are the two
+  // sentences a reader can act on, so they get the app's own words and the system text is
+  // dropped; anything else still carries its detail, which is usually the server's answer.
+  if lower.contains("timed out") || lower.contains("timeout") || message.contains("超时") {
+    return "git_timeout".into();
+  }
+  if lower.contains("failed to receive response")
+    || lower.contains("failed to connect")
+    || lower.contains("failed to send request")
+    || lower.contains("could not resolve host")
+    || message.contains("无法连接")
+  {
+    return "git_connection".into();
+  }
   // libgit2 refuses a non-fast-forward push itself, before the per-ref callback reports the
   // server's answer. It is still a rejection, and the panel should say so rather than show a
   // transport failure for the one case users meet most.
@@ -1738,6 +1786,81 @@ pub(crate) fn merge_abort(root: &str, locks: &GitLocks) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
   use super::*;
+  use std::time::{SystemTime, UNIX_EPOCH};
+
+  /// A directory unique to this test run, so the two tests below cannot meet in the temp folder.
+  fn scratch(tag: &str) -> std::path::PathBuf {
+    let nanos = SystemTime::now()
+      .duration_since(UNIX_EPOCH)
+      .map(|d| d.as_nanos())
+      .unwrap_or(0);
+    std::env::temp_dir().join(format!("wrolp-{tag}-{}-{nanos}", std::process::id()))
+  }
+
+  /// A clone that fails leaves no folder behind, so the retry is about the server again rather
+  /// than about a folder nobody finished.
+  #[test]
+  fn a_failed_clone_leaves_no_folder_behind() {
+    let base = scratch("clone-fail");
+    fs::create_dir_all(&base).expect("parent");
+    let plain = base.join("plain.txt");
+    fs::write(&plain, b"not a repository").expect("file");
+    let sink: Sink = Arc::new(|_| {});
+    let error = clone_core(
+      &plain.to_string_lossy(),
+      &base.to_string_lossy(),
+      "copy",
+      &AuthStore::default(),
+      Arc::new(AtomicBool::new(false)),
+      sink,
+    )
+    .unwrap_err();
+    assert!(!base.join("copy").exists(), "{error}");
+    let _ = fs::remove_dir_all(&base);
+  }
+
+  /// The transport speaks the OS language; the dialog speaks the app's. A timeout and a
+  /// connection failure are the two the reader can act on, so they get our own sentence
+  /// instead of a Chinese system string inside an English dialog.
+  #[test]
+  fn a_transport_failure_is_explained_in_the_apps_language() {
+    let cancel = AtomicBool::new(false);
+    let timeout = git2::Error::new(
+      ErrorCode::GenericError,
+      git2::ErrorClass::Net,
+      "failed to receive response: 操作超时",
+    );
+    assert_eq!(remote_fail("clone", timeout, &cancel), "git_timeout");
+    let connection = git2::Error::new(
+      ErrorCode::GenericError,
+      git2::ErrorClass::Net,
+      "failed to connect: 由于目标计算机积极拒绝，无法连接。",
+    );
+    assert_eq!(remote_fail("clone", connection, &cancel), "git_connection");
+    // Anything else keeps the server's own answer as the detail.
+    let other = git2::Error::new(
+      ErrorCode::GenericError,
+      git2::ErrorClass::Http,
+      "request failed with status code: 404",
+    );
+    assert_eq!(
+      remote_fail("fetch", other, &cancel),
+      "git_fetch:request failed with status code: 404"
+    );
+  }
+
+  /// Temporary folders from the build that renamed a clone into place are swept away with the
+  /// next clone, and nothing else in the parent is touched.
+  #[test]
+  fn leftover_clone_folders_are_swept_away() {
+    let base = scratch("clone-sweep");
+    fs::create_dir_all(base.join(".copy.clone-1-2")).expect("leftover");
+    fs::create_dir_all(base.join("keep")).expect("other");
+    sweep_clone_leftovers(&base, "copy");
+    assert!(!base.join(".copy.clone-1-2").exists());
+    assert!(base.join("keep").exists());
+    let _ = fs::remove_dir_all(&base);
+  }
 
   /// An HTTPS certificate the system refused is reported in the same structured shape as an SSH
   /// host key, so the panel has one dialog to open — but only when the failure really was the

@@ -253,6 +253,8 @@ export interface Settings {
    * it folded into the tab in the corner. Off by default: the column takes width from the page.
    */
   tocOpen: boolean;
+  /** Width of the markdown outline column, in CSS pixels (140 to 560, default 216). */
+  tocWidth: number;
   /**
    * Which side a PDF's bookmark column takes: `left` | `right`. Apart from `tocSide` because the
    * two are read in different panes — a document and a drawing may want opposite edges.
@@ -1298,8 +1300,10 @@ export function pickSaveAs(defaultPath?: string): Promise<string | null> {
   return save({ filters: fileFilters(), defaultPath }).then((r) => r ?? null);
 }
 
-export function pickFolder(): Promise<string | null> {
-  return open({ directory: true }).then((r) => (typeof r === "string" ? r : null));
+export function pickFolder(defaultPath?: string): Promise<string | null> {
+  return open({ directory: true, defaultPath }).then((r) =>
+    typeof r === "string" ? r : null
+  );
 }
 
 /** Backend errors arrive as "code" or "code:detail"; other throws carry a message. */

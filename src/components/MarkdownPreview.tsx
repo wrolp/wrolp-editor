@@ -7,6 +7,7 @@ import {
   useState,
   type CSSProperties,
   type MouseEvent as ReactMouseEvent,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
 import DOMPurify from "dompurify";
 import { marked } from "marked";
@@ -35,6 +36,11 @@ import { IconCollapse, IconOutline } from "./icons";
  */
 const grantedDirs = new Set<string>();
 
+/** The outline column's width limits, in CSS pixels, and the width it starts at. */
+const TOC_MIN = 140;
+const TOC_MAX = 560;
+const TOC_DEFAULT = 216;
+
 interface Props {
   /** Current buffer text. */
   text: string;
@@ -59,6 +65,10 @@ interface Props {
    * column the reader put away stays put for as long as this preview lives.
    */
   tocOpenByDefault: boolean;
+  /** The outline column's width, from `settings.tocWidth`. */
+  tocWidth: number;
+  /** The final width when a drag ends, written back to the settings. */
+  onSaveTocWidth: (width: number) => void;
   /** Opens a file the document links to, beside itself. */
   onOpenPath: (path: string) => void;
   /** Reports a link that was followed but could not be opened. */
@@ -86,6 +96,8 @@ export default function MarkdownPreview({
   showToc,
   tocSide,
   tocOpenByDefault,
+  tocWidth: tocWidthProp,
+  onSaveTocWidth,
   onOpenPath,
   onError,
 }: Props) {
@@ -336,6 +348,13 @@ export default function MarkdownPreview({
   showTocRef.current = showToc;
   const tocOpenRef = useRef(tocOpen);
   tocOpenRef.current = tocOpen;
+  /** The column's width. Dragged live into the DOM; state only changes at the end of a drag. */
+  const [tocWidth, setTocWidth] = useState(tocWidthProp);
+  useEffect(() => setTocWidth(tocWidthProp), [tocWidthProp]);
+  const [tocDragging, setTocDragging] = useState(false);
+  const tocDrag = useRef<{ startX: number; startWidth: number; width: number } | null>(null);
+  /** The divider, so a drag can move it with the column without re-rendering. */
+  const tocResizerRef = useRef<HTMLDivElement>(null);
 
   /**
    * Which heading owns the top of the viewport.
@@ -406,6 +425,64 @@ export default function MarkdownPreview({
     setActiveIndex(index);
     scrollToHeading(pane, target);
   };
+
+  /**
+   * The outline column's divider. A left column grows by dragging its right edge rightward, a
+   * right one by dragging its left edge leftward, so the edge facing the page is the one moved.
+   * The width is written to the column during the move — a drag reports many positions a
+   * second, and re-rendering the sanitized document for each is not worth a divider move — and
+   * only committed to state and the settings when the pointer is lifted.
+   */
+  const startTocResize = (event: ReactPointerEvent<HTMLDivElement>) => {
+    tocDrag.current = { startX: event.clientX, startWidth: tocWidth, width: tocWidth };
+    setTocDragging(true);
+    document.body.classList.add("resizing");
+    // Capture keeps the gesture on the 5px handle; it can throw for an inactive pointer id, so
+    // the listeners below live on window and work either way.
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      /* best effort */
+    }
+  };
+
+  useEffect(() => {
+    if (!tocDragging) return;
+    const sign = tocSide === "left" ? 1 : -1;
+    const move = (event: PointerEvent) => {
+      const state = tocDrag.current;
+      if (!state || !tocRef.current) return;
+      state.width = Math.round(
+        Math.min(TOC_MAX, Math.max(TOC_MIN, state.startWidth + (event.clientX - state.startX) * sign))
+      );
+      tocRef.current.style.flexBasis = `${state.width}px`;
+      // The handle rides the same edge: three pixels in, so its middle sits on the border.
+      const resizer = tocResizerRef.current;
+      if (resizer) {
+        const offset = `${state.width - 3}px`;
+        if (tocSide === "left") resizer.style.left = offset;
+        else resizer.style.right = offset;
+      }
+    };
+    const finish = () => {
+      const state = tocDrag.current;
+      if (state) {
+        setTocWidth(state.width);
+        onSaveTocWidth(state.width);
+      }
+      tocDrag.current = null;
+      document.body.classList.remove("resizing");
+      setTocDragging(false);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", finish);
+    window.addEventListener("pointercancel", finish);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", finish);
+      window.removeEventListener("pointercancel", finish);
+    };
+  }, [tocDragging, tocSide, onSaveTocWidth]);
 
   /**
    * Keep the highlighted entry inside the column's own viewport. The outline is taller than
@@ -843,7 +920,7 @@ export default function MarkdownPreview({
   const showOutline = showToc && outline.length > 0;
 
   const outlineColumn = showOutline && tocOpen ? (
-    <nav className="md-toc" aria-label={t("preview.toc")} ref={tocRef}>
+    <nav className="md-toc" aria-label={t("preview.toc")} ref={tocRef} style={{ flexBasis: tocWidth }}>
       <div className="md-toc-head">
         <span className="md-toc-title">{t("preview.toc")}</span>
       </div>
@@ -885,6 +962,21 @@ export default function MarkdownPreview({
       {tocSide === "left" ? outlineColumn : null}
       {pane}
       {tocSide === "right" ? outlineColumn : null}
+      {/* The divider lives outside the scrolling column, against the wrapper: inside it, a long
+          outline would scroll the handle out of reach with the entries. */}
+      {showOutline && tocOpen && (
+        <div
+          className={`md-toc-resizer ${tocSide}${tocDragging ? " active" : ""}`}
+          ref={tocResizerRef}
+          style={tocSide === "left" ? { left: tocWidth - 3 } : { right: tocWidth - 3 }}
+          title={t("preview.tocResizeHint")}
+          onPointerDown={startTocResize}
+          onDoubleClick={() => {
+            setTocWidth(TOC_DEFAULT);
+            onSaveTocWidth(TOC_DEFAULT);
+          }}
+        />
+      )}
       {/* Last child on purpose: the pane has to keep its slot in this list, or a layout that
           gains or loses the column would re-root it (see the note above). */}
       {showOutline ? (

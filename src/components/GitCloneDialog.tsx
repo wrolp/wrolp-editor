@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { t, translateError } from "../lib/i18n";
 import { useModalDrag } from "../hooks/useModalDrag";
-import { api, errorMessage, type GitProgress } from "../lib/tauri";
+import { api, errorMessage, pickFolder, type GitProgress } from "../lib/tauri";
 import type { GitAuthAsk } from "../hooks/useGit";
 import GitAuthDialog from "./GitAuthDialog";
 import { IconClose } from "./icons";
 
 interface Props {
-  /** The folder the clone is created in — the group's own directory. */
+  /** The folder the dialog starts in — the group's own directory. The reader can change it. */
   parent: string;
   onClose: () => void;
   /** The new work tree, once the transfer finished. */
@@ -105,22 +105,53 @@ function progressLabel(progress: GitProgress): string {
 export default function GitCloneDialog({ parent, onClose, onCloned, onError }: Props) {
   const drag = useModalDrag<HTMLDivElement>();
   const [url, setUrl] = useState("");
+  /** The folder the clone is created in; starts at the group's own and may be changed. */
+  const [parentDir, setParentDir] = useState(parent);
   const [name, setName] = useState("");
   /** Typing a name stops the URL from naming the folder; clearing it hands the job back. */
   const [namedByHand, setNamedByHand] = useState(false);
   const [busy, setBusy] = useState(false);
+  /** The transfer has been asked to stop and the backend has not answered yet. */
+  const [canceling, setCanceling] = useState(false);
   const [progress, setProgress] = useState<GitProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [ask, setAsk] = useState<GitAuthAsk | null>(null);
   /** The operation in flight, so the Cancel button can reach the transfer callback. */
   const opIdRef = useRef<string | null>(null);
+  /** False once the dialog is gone, so a transfer that lands later opens nothing. */
+  const alive = useRef(true);
+  useEffect(
+    () => () => {
+      alive.current = false;
+    },
+    []
+  );
+
+  /**
+   * Close the dialog, asking a clone in flight to stop first.
+   *
+   * The window must not be held hostage by a transfer that has stopped reporting: a cancel is
+   * only noticed when libgit2 next calls back, and a socket read can leave that call waiting.
+   * Closing is the reader's answer even when the transfer is still on its way out.
+   */
+  const closeDialog = () => {
+    if (busy && opIdRef.current) void api.gitCancel(opIdRef.current);
+    onClose();
+  };
+
+  /** Ask the transfer to stop, and say so until the backend answers. */
+  const requestCancel = () => {
+    if (!opIdRef.current || canceling) return;
+    setCanceling(true);
+    void api.gitCancel(opIdRef.current);
+  };
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && !busy) {
-        event.preventDefault();
-        onClose();
-      }
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      if (busy && opIdRef.current) void api.gitCancel(opIdRef.current);
+      onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -128,7 +159,17 @@ export default function GitCloneDialog({ parent, onClose, onCloned, onError }: P
 
   const suggested = cloneNameFromUrl(url);
   const folder = namedByHand ? name : suggested;
-  const target = folder ? `${parent.replace(/[\\/]+$/, "")}/${folder}` : parent;
+  const base = parentDir.trim();
+  const target = !base ? "" : folder ? `${base.replace(/[\\/]+$/, "")}/${folder}` : base;
+
+  /** Pick the folder by hand; the URL still names the folder created inside it. */
+  const chooseParent = () => {
+    pickFolder(base || parent)
+      .then((picked) => {
+        if (picked) setParentDir(picked);
+      })
+      .catch((e) => onError(errorMessage(e)));
+  };
 
   const start = async () => {
     if (busy) return;
@@ -140,15 +181,24 @@ export default function GitCloneDialog({ parent, onClose, onCloned, onError }: P
       setError(t("git.cloneNameRequired"));
       return;
     }
+    if (!base) {
+      setError(t("git.cloneDirRequired"));
+      return;
+    }
     const opId = crypto.randomUUID();
     opIdRef.current = opId;
     setBusy(true);
+    setCanceling(false);
     setError(null);
     setProgress({ phase: "starting", received: 0, total: 0, bytes: 0, percent: 0, text: null });
     try {
-      const path = await api.gitClone(url.trim(), parent, folder.trim(), opId, setProgress);
+      const path = await api.gitClone(url.trim(), base, folder.trim(), opId, setProgress);
+      // The dialog may have been closed while the transfer was still running: it is not a
+      // tab that should open by itself afterwards.
+      if (!alive.current) return;
       onCloned(path);
     } catch (e) {
+      if (!alive.current) return;
       const raw = typeof e === "string" ? e : errorMessage(e);
       // Cancelling is the user's own answer; an error line for it would only be noise.
       if (raw === "git_canceled") return;
@@ -159,9 +209,12 @@ export default function GitCloneDialog({ parent, onClose, onCloned, onError }: P
       }
       setError(errorMessage(e));
     } finally {
-      opIdRef.current = null;
-      setBusy(false);
-      setProgress(null);
+      if (alive.current) {
+        opIdRef.current = null;
+        setBusy(false);
+        setCanceling(false);
+        setProgress(null);
+      }
     }
   };
 
@@ -173,8 +226,7 @@ export default function GitCloneDialog({ parent, onClose, onCloned, onError }: P
           <span className="modal-title-actions">
             <button
               className="btn small icon-btn"
-              onClick={onClose}
-              disabled={busy}
+              onClick={closeDialog}
               title={t("tab.close")}
               aria-label={t("tab.close")}
             >
@@ -204,6 +256,28 @@ export default function GitCloneDialog({ parent, onClose, onCloned, onError }: P
           />
         </label>
         <label className="clone-field">
+          <span>{t("git.cloneDir")}</span>
+          <div className="clone-dir-row">
+            <input
+              className="settings-text"
+              type="text"
+              spellCheck={false}
+              value={parentDir}
+              disabled={busy}
+              onChange={(e) => {
+                setParentDir(e.target.value);
+                setError(null);
+              }}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void start();
+              }}
+            />
+            <button className="btn small" onClick={chooseParent} disabled={busy}>
+              {t("git.cloneDirBrowse")}
+            </button>
+          </div>
+        </label>
+        <label className="clone-field">
           <span>{t("git.cloneName")}</span>
           <input
             className="settings-text"
@@ -221,9 +295,11 @@ export default function GitCloneDialog({ parent, onClose, onCloned, onError }: P
             }}
           />
         </label>
-        <p className="muted clone-target" title={target}>
-          {t("git.cloneTarget", { path: target })}
-        </p>
+        {target && (
+          <p className="muted clone-target" title={target}>
+            {t("git.cloneTarget", { path: target })}
+          </p>
+        )}
 
         {progress && (
           <div className="clone-progress" role="status">
@@ -233,13 +309,8 @@ export default function GitCloneDialog({ parent, onClose, onCloned, onError }: P
                 <span style={{ width: `${progress.percent}%` }} />
               </div>
               <span className="clone-progress-percent">{progress.percent}%</span>
-              <button
-                className="btn small"
-                onClick={() => {
-                  if (opIdRef.current) void api.gitCancel(opIdRef.current);
-                }}
-              >
-                {t("git.cancel")}
+              <button className="btn small" onClick={requestCancel} disabled={canceling}>
+                {canceling ? t("git.canceling") : t("git.cancel")}
               </button>
             </div>
           </div>
@@ -248,11 +319,11 @@ export default function GitCloneDialog({ parent, onClose, onCloned, onError }: P
         {error && <p className="modal-error">{translateError(error)}</p>}
 
         <div className="modal-actions">
-          <button className="btn" onClick={onClose} disabled={busy}>
+          <button className="btn" onClick={closeDialog}>
             {t("close.cancel")}
           </button>
           <button className="btn primary" onClick={() => void start()} disabled={busy || !url.trim()}>
-            {busy ? t("git.loading") : t("git.cloneStart")}
+            {busy ? t("git.cloning") : t("git.cloneStart")}
           </button>
         </div>
 
