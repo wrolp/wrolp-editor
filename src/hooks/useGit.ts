@@ -75,6 +75,8 @@ export interface GitController {
   refresh: () => Promise<void>;
   loadBranches: () => Promise<void>;
   loadLog: (more?: boolean) => Promise<void>;
+  /** Re-read the history from the newest commit, discarding the pages loaded so far. */
+  refreshLog: () => Promise<void>;
   stage: (files: GitStatusEntry[]) => Promise<boolean>;
   unstage: (files: GitStatusEntry[]) => Promise<boolean>;
   discard: (files: GitStatusEntry[]) => Promise<boolean>;
@@ -265,6 +267,19 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
       if (mine === logSeq.current) setLogLoading(false);
     }
   }, []);
+
+  /**
+   * Read the history again from the newest commit.
+   *
+   * The status poll only notices a HEAD that moved, so a fetch that brought new remote-tracking
+   * refs — or a commit made on another branch, which the graph shows — would otherwise leave the
+   * list stale. The branch rows come along because the ref chips and those rows are one picture.
+   * Starting from the top is also what the capped list offers: page size and offset begin again,
+   * and the rows already walked are dropped rather than appended to.
+   */
+  const refreshLog = useCallback(async () => {
+    await Promise.all([loadLog(), loadBranches()]);
+  }, [loadLog, loadBranches]);
 
   /**
    * Add a remote or point an existing one at a new URL. The backend answers with the whole list,
@@ -844,6 +859,7 @@ export function useGit({ rootDir, active, onError, onFilesChanged }: Options): G
     refresh,
     loadBranches,
     loadLog,
+    refreshLog,
     stage,
     unstage,
     discard,

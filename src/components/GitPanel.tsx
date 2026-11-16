@@ -1695,16 +1695,30 @@ export default function GitPanel({
           )}
 
           <section className="git-section-block git-log">
-            <button
-              className="git-section"
-              onClick={() => setLogOpen((open) => !open)}
-            >
-              <span className={`git-chev${logOpen ? "" : " rot"}`}>
-                <IconChevron size={11} />
-              </span>
-              <span>{t("git.history")}</span>
-              {git.log.length > 0 && <span className="git-count">{git.log.length}</span>}
-            </button>
+            <div className="git-section-row">
+              <button
+                className="git-section"
+                onClick={() => setLogOpen((open) => !open)}
+              >
+                <span className={`git-chev${logOpen ? "" : " rot"}`}>
+                  <IconChevron size={11} />
+                </span>
+                <span>{t("git.history")}</span>
+                {git.log.length > 0 && <span className="git-count">{git.log.length}</span>}
+              </button>
+              {/* The header is a button, so the refresh sits beside it rather than inside it.
+                  History is read apart from the status poll: this is what asks again after
+                  another program commits, fetches or rebases. */}
+              <button
+                className="git-section-action"
+                title={t("git.refreshHistory")}
+                aria-label={t("git.refreshHistory")}
+                disabled={git.logLoading}
+                onClick={() => void git.refreshLog()}
+              >
+                <IconReload size={13} />
+              </button>
+            </div>
             {logOpen && (
               <>
                 {logTotal > 0 && (
