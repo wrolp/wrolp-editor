@@ -44,7 +44,11 @@ fn name_error(e: NameError) -> String {
 /// turn a folder the tree has just lost into a brand new one, several levels up from where
 /// the user is looking.
 fn target_of(parent: &str, name: &str) -> Result<PathBuf, String> {
-  let dir = draft::normalize_path(parent);
+  // This is where the entry is actually written, so the spelling has to be the one the user
+  // typed: `normalize_path` lowercases on Windows and would put `Report.TXT` on disk as
+  // `report.txt`, which the next listing then reports back verbatim. Identity stays with
+  // `normalize_path` in the returned FsEntry; only the filesystem spelling is kept here.
+  let dir = draft::io_path(parent);
   if dir.is_empty() {
     return Err("path_empty".into());
   }
@@ -52,7 +56,7 @@ fn target_of(parent: &str, name: &str) -> Result<PathBuf, String> {
   if !dir.is_dir() {
     return Err("create_no_parent".into());
   }
-  let path = draft::normalize_path(&dir.join(name).to_string_lossy());
+  let path = draft::io_path(&dir.join(name).to_string_lossy());
   if path.is_empty() {
     return Err("path_unresolvable".into());
   }
@@ -585,6 +589,28 @@ mod tests {
       std::fs::read_to_string(&made.path).expect("read"),
       "",
       "a new file starts empty rather than holding the editor's idea of a template"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn a_created_entry_keeps_the_case_typed_on_disk() {
+    let dir = scratch("case");
+    create_file(dir.clone(), "Report.TXT".into()).expect("file");
+    create_dir(dir.clone(), "MyFolder".into()).expect("folder");
+    let mut names: Vec<String> = std::fs::read_dir(&dir)
+      .expect("read")
+      .flatten()
+      .map(|item| item.file_name().to_string_lossy().into_owned())
+      .collect();
+    names.sort();
+    assert!(
+      names.iter().any(|n| n == "Report.TXT"),
+      "the file must land on disk with the case the user typed, got {names:?}"
+    );
+    assert!(
+      names.iter().any(|n| n == "MyFolder"),
+      "the folder must land on disk with the case the user typed, got {names:?}"
     );
     let _ = std::fs::remove_dir_all(&dir);
   }
