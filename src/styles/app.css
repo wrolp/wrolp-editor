@@ -3782,8 +3782,26 @@ body.resizing .editor-host {
   font-size: 12px;
   color: var(--muted);
 }
+/* The picker is sized rather than wrapped to its content: the list is what it was opened to
+   read, and the edges below let the user say how much of it is enough. */
+.modal.cmp-pick {
+  width: 560px;
+  height: min(500px, 80vh);
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+  /* The resize edges are placed against the dialog itself; without this they would land on the
+     overlay, which fills the window. */
+  position: relative;
+}
+/* `.grp-input` grows to fill a flex row elsewhere; here it is the column's one-line filter and
+   must keep its height, or the spare space is drawn as a tall empty field. */
+.cmp-pick .grp-input {
+  flex: 0 0 auto;
+}
 .pick-list {
-  max-height: 220px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
   margin: 10px 0 0;
   border: 1px solid var(--border);
@@ -3792,7 +3810,7 @@ body.resizing .editor-host {
 }
 .pick-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   padding: 6px 8px;
   border-radius: 6px;
@@ -3802,8 +3820,27 @@ body.resizing .editor-host {
 .pick-row:hover {
   background: var(--surface-hover);
 }
+/* Optical centring against the first line of the two-line label. */
+.pick-row .file-glyph {
+  margin-top: 2px;
+}
+/* The name over the folder holding it. Both are cut in the middle by `NameText`, so a long
+   path keeps its drive and the folder it ends in instead of losing its tail. */
+.pick-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.pick-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
 .pick-name {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -3823,7 +3860,7 @@ body.resizing .editor-host {
   white-space: nowrap;
 }
 .pick-path {
-  flex: 1 1 auto;
+  display: block;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;

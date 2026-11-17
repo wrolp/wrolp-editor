@@ -16,6 +16,11 @@ interface Props {
    * over it.
    */
   pinned?: boolean;
+  /**
+   * Put the whole name in a native tooltip while it is cut. Opt-in: rows that already hang a
+   * hover bubble of their own (the Explorer, the tab strip) would otherwise show two.
+   */
+  tooltip?: boolean;
 }
 
 /**
@@ -25,7 +30,7 @@ interface Props {
  * new value the app has to render — an observer callback that set state would repaint the whole
  * row a frame later, for a name that was already on screen.
  */
-export default function NameText({ name, mode, className, pinned = false }: Props) {
+export default function NameText({ name, mode, className, pinned = false, tooltip = false }: Props) {
   const boxRef = useRef<HTMLSpanElement>(null);
   const cutRef = useRef<HTMLSpanElement>(null);
   // Only a middle cut needs the pinned layout: `end` is what `text-overflow` already does.
@@ -48,13 +53,17 @@ export default function NameText({ name, mode, className, pinned = false }: Prop
       // sized by the whole name, and taking one away there would cut a name that fits.
       const next = width > 1 ? cutMiddle(box, name, ghost ? width : width - 1) : name;
       if (target.textContent !== next) target.textContent = next;
+      // The title goes on the box rather than the cut text, so a pinned label is covered as
+      // well. It is only there while something is missing from the name on screen.
+      const hint = tooltip && next !== name ? name : "";
+      if (box.title !== hint) box.title = hint;
     };
     fit();
     if (mode !== "middle") return;
     const observer = new ResizeObserver(fit);
     observer.observe(box);
     return () => observer.disconnect();
-  }, [name, mode, ghost]);
+  }, [name, mode, ghost, tooltip]);
 
   return (
     <span

@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { t } from "../lib/i18n";
+import { parentOf } from "../lib/tauri";
 import { useModalDrag } from "../hooks/useModalDrag";
+import { useModalResize } from "../hooks/useModalResize";
 import { FileIcon } from "./FileIcon";
+import NameText from "./NameText";
 
 /** One open tab that can be the other side of a comparison. */
 interface Candidate {
@@ -48,6 +51,8 @@ export default function ComparePickerDialog({
   const [query, setQuery] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const drag = useModalDrag<HTMLDivElement>();
+  /** The list is the reason this dialog can be as tall as the window: the size is the user's. */
+  const resize = useModalResize<HTMLDivElement>(drag.ref, false);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -71,7 +76,7 @@ export default function ComparePickerDialog({
 
   return (
     <div className="modal-overlay">
-      <div className="modal" ref={drag.ref}>
+      <div className="modal cmp-pick" ref={drag.ref}>
         <h3 className="modal-title" {...drag.handleProps}>
           {t("cmp.pickTitle")}
         </h3>
@@ -98,20 +103,32 @@ export default function ComparePickerDialog({
           {shown.length === 0 ? (
             <div className="pick-empty">{t("cmp.pickNone")}</div>
           ) : (
-            shown.map((item) => (
-              <div key={item.key} className="pick-row" onClick={() => onPick(item.tabId)}>
-                <FileIcon name={item.name} />
-                <span className="pick-name">{item.name}</span>
-                {/* An untitled buffer is unsaved by its name, so it carries only that
-                    badge; a file with edits that were never saved says so instead. */}
-                {item.untitled ? (
-                  <span className="pick-badge">{t("cmp.untitled")}</span>
-                ) : item.dirty ? (
-                  <span className="pick-badge">{t("cmp.unsaved")}</span>
-                ) : null}
-                <span className="pick-path">{item.path}</span>
-              </div>
-            ))
+            shown.map((item) => {
+              // `untitled://` is an identity, not a path, so it has no folder to show.
+              const dir = item.untitled ? "" : parentOf(item.path);
+              return (
+                // The name on the first line, the folder holding it underneath: two files can
+                // share a name, and the folder is what tells them apart.
+                <div key={item.key} className="pick-row" onClick={() => onPick(item.tabId)}>
+                  <FileIcon name={item.name} />
+                  <div className="pick-text">
+                    <div className="pick-head">
+                      <NameText name={item.name} mode="middle" className="pick-name" tooltip />
+                      {/* An untitled buffer is unsaved by its name, so it carries only that
+                          badge; a file with edits that were never saved says so instead. */}
+                      {item.untitled ? (
+                        <span className="pick-badge">{t("cmp.untitled")}</span>
+                      ) : item.dirty ? (
+                        <span className="pick-badge">{t("cmp.unsaved")}</span>
+                      ) : null}
+                    </div>
+                    {dir && (
+                      <NameText name={dir} mode="middle" className="pick-path" tooltip />
+                    )}
+                  </div>
+                </div>
+              );
+            })
           )}
         </div>
 
@@ -123,6 +140,11 @@ export default function ComparePickerDialog({
             {t("fileSettings.cancel")}
           </button>
         </div>
+        {/* The size is the user's: the list is what they came to read, and how much of it is
+            useful depends on what is open and on the window behind. */}
+        <div className="resize-edge right" {...resize.handleProps("x")} />
+        <div className="resize-edge bottom" {...resize.handleProps("y")} />
+        <div className="resize-edge corner" {...resize.handleProps("xy")} />
       </div>
     </div>
   );
