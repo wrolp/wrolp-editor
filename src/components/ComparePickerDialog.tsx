@@ -52,7 +52,7 @@ export default function ComparePickerDialog({
   const inputRef = useRef<HTMLInputElement>(null);
   const drag = useModalDrag<HTMLDivElement>();
   /** The list is the reason this dialog can be as tall as the window: the size is the user's. */
-  const resize = useModalResize<HTMLDivElement>(drag.ref, false);
+  const resize = useModalResize<HTMLDivElement>(drag.ref, false, { minWidth: 250 });
 
   useEffect(() => {
     inputRef.current?.focus();

@@ -6,6 +6,12 @@ export type ResizeDir = "x" | "y" | "xy";
 /** Smaller than this and the comparison says nothing: two columns of text plus their gutters. */
 const MIN_WIDTH = 520;
 const MIN_HEIGHT = 240;
+
+/** How small a dialog may be dragged. Omitted values are the diff-sized defaults above. */
+export interface ModalResizeOptions {
+  minWidth?: number;
+  minHeight?: number;
+}
 /** Leave this much viewport at each edge, so a maximised dialog cannot swallow its own title bar. */
 const EDGE_GAP = 16;
 
@@ -26,7 +32,9 @@ interface Size {
 export function useModalResize<T extends HTMLElement>(
   ref: RefObject<T | null>,
   /** While the dialog is maximised there is no size to drag: the viewport is the size. */
-  disabled: boolean
+  disabled: boolean,
+  /** Bounds for this dialog; a row list can go narrower than a side-by-side diff. */
+  { minWidth = MIN_WIDTH, minHeight = MIN_HEIGHT }: ModalResizeOptions = {}
 ) {
   const stop = useRef<(() => void) | null>(null);
   const disabledRef = useRef(disabled);
@@ -69,14 +77,14 @@ export function useModalResize<T extends HTMLElement>(
             ? start.width
             : Math.min(
                 window.innerWidth - EDGE_GAP,
-                Math.max(MIN_WIDTH, start.width + (ev.clientX - fromX))
+                Math.max(minWidth, start.width + (ev.clientX - fromX))
               );
         const height =
           dir === "x"
             ? start.height
             : Math.min(
                 window.innerHeight - EDGE_GAP,
-                Math.max(MIN_HEIGHT, start.height + (ev.clientY - fromY))
+                Math.max(minHeight, start.height + (ev.clientY - fromY))
               );
         apply({ width, height });
       };
@@ -93,7 +101,7 @@ export function useModalResize<T extends HTMLElement>(
       window.addEventListener("pointercancel", stopResize);
       window.addEventListener("blur", stopResize);
     },
-    [apply, ref]
+    [apply, ref, minWidth, minHeight]
   );
 
   return {
