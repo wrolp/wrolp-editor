@@ -170,9 +170,37 @@ const LEVEL_CHUNK = 200;
  */
 function TreeTooltip({ children, name, detail }: TipProps) {
   const { tip, show, hide } = useHoverTip();
+  /**
+   * The expand/collapse arrow is a control of its own, and a bubble naming the folder would
+   * hang over the rows it is about to open. Resting on the arrow means no bubble; going back
+   * onto the row starts the usual delay again, so the rest of the row still behaves as a row.
+   */
+  const onArrow = useRef(false);
+  const overArrow = (target: EventTarget | null) =>
+    target instanceof Element && !!target.closest(".chev.fold");
   return (
     <>
-      <div onMouseEnter={show} onMouseLeave={hide}>
+      <div
+        onMouseEnter={(e) => {
+          // Entering the row straight onto the arrow must not arm the bubble at all: the
+          // same target reaches both `mouseover` and `mouseenter`, and the delay would start.
+          onArrow.current = overArrow(e.target);
+          if (!onArrow.current) show(e);
+        }}
+        onMouseLeave={() => {
+          onArrow.current = false;
+          hide();
+        }}
+        onMouseOver={(e) => {
+          // Only a crossing between the arrow and the rest of the row matters; every other
+          // mouseover inside the row would restart the delay and keep the bubble away.
+          const arrow = overArrow(e.target);
+          if (arrow === onArrow.current) return;
+          onArrow.current = arrow;
+          if (arrow) hide();
+          else show(e);
+        }}
+      >
         {children}
       </div>
       <PathTip spot={tip?.spot ?? null} name={name} detail={detail ?? ""} />
@@ -596,7 +624,7 @@ function FolderNode({
         >
           {/* An icon, not a character: it stays crisp at any DPI, and the expanded
               state is the same glyph turned a quarter turn (see the CSS). */}
-          <span className="chev">
+          <span className="chev fold">
             <IconTreeChevron />
           </span>
           <span className="ti">
