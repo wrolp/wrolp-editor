@@ -21,6 +21,7 @@ const EN: Table = {
   "tab.closeRight": "Close tabs to the right",
   "tab.moveFirst": "Move to the front",
   "tab.moveLast": "Move to the end",
+  "tab.save": "Save",
   "tab.saveDirty": "Save this file",
   "tab.untitled": "Untitled-{n}",
 
@@ -1181,6 +1182,7 @@ const ZH: Table = {
   "tab.closeRight": "关闭右侧标签",
   "tab.moveFirst": "移到最前",
   "tab.moveLast": "移到最后",
+  "tab.save": "保存",
   "tab.saveDirty": "保存这个文件",
   "tab.untitled": "未命名-{n}",
 

@@ -65,6 +65,7 @@ import {
   IconOpenFolder,
   IconPencil,
   IconReload,
+  IconSave,
   IconSettings,
   IconSidebar,
   IconStickyScroll,
@@ -3604,6 +3605,23 @@ const defaultModeFor = useCallback(
             </>
           ) : tabMenu.panel === "root" ? (
             <>
+              {/* The menu acts on the tab that was right-clicked, which is not the one Ctrl+S
+                  would write, so a tab with unsaved text needs a save of its own here. A clean
+                  tab has nothing to write, and the row is left out rather than offered dead. */}
+              {menuTab?.dirty && (
+                <div
+                  className="ctx-item"
+                  onClick={() => {
+                    handSave(tabMenu.tabId);
+                    setTabMenu(null);
+                  }}
+                >
+                  <span className="ctx-icon">
+                    <IconSave size={14} />
+                  </span>
+                  {t("tab.save")}
+                </div>
+              )}
               <div
                 className="ctx-item"
                 onClick={() => {
