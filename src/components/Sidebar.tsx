@@ -1243,6 +1243,20 @@ export default function Sidebar(props: Props) {
   };
 
   /**
+   * Paste whatever is waiting, from one row: the entry copied inside the tree if there is one,
+   * the files on the system clipboard otherwise. Both land in the same folder and re-read it;
+   * only the source the paths come from differs, so the menu offers one "Paste" rather than two
+   * rows whose names differ by where the copy was made.
+   */
+  const runPasteAny = async (target: NodeTarget | null) => {
+    if (clipboard) {
+      await runPaste(target);
+      return;
+    }
+    await runPasteFiles(target);
+  };
+
+  /**
    * The two gestures that bring files in from Windows Explorer. Both are window-level, not
    * DOM events: WebView2 hands a file drop to Tauri rather than to the page, and the system
    * clipboard is read by the backend. A ref keeps each listener registered once while still
@@ -2311,35 +2325,21 @@ export default function Sidebar(props: Props) {
                   {t("side.menuBatchFolder")}
                 </div>
                 {/* The folder being shown has no row of its own, so this is the only place
-                    a paste into it can be asked for. */}
-                {clipboard && (
-                  <div
-                    className="ctx-item"
-                    onClick={() => {
-                      void runPaste({ path: "", name: "", isDir: true });
-                      setMenu(null);
-                    }}
-                  >
-                    <span className="ctx-icon">
-                      <IconPaste size={14} />
-                    </span>
-                    {t("side.menuPaste")}
-                  </div>
-                )}
-                {/* Always offered: whether the system clipboard holds files is only knowable
-                    at paste time, and a row that appears and disappears with another program's
-                    clipboard would be a menu that changes under the cursor. */}
+                    a paste into it can be asked for. Always offered: whether the system
+                    clipboard holds files is only knowable at paste time, and a row that appears
+                    and disappears with another program's clipboard would be a menu that changes
+                    under the cursor. */}
                 <div
                   className="ctx-item"
                   onClick={() => {
-                    void runPasteFiles({ path: "", name: "", isDir: true });
+                    void runPasteAny({ path: "", name: "", isDir: true });
                     setMenu(null);
                   }}
                 >
                   <span className="ctx-icon">
                     <IconPaste size={14} />
                   </span>
-                  {t("side.menuPasteFiles")}
+                  {t("side.menuPaste")}
                 </div>
               </>
             )
@@ -2569,31 +2569,17 @@ export default function Sidebar(props: Props) {
                 </span>
                 {t("side.menuCopy")}
               </div>
-              {clipboard && (
-                <div
-                  className="ctx-item"
-                  onClick={() => {
-                    void runPaste(menu);
-                    setMenu(null);
-                  }}
-                >
-                  <span className="ctx-icon">
-                    <IconPaste size={14} />
-                  </span>
-                  {t("side.menuPaste")}
-                </div>
-              )}
               <div
                 className="ctx-item"
                 onClick={() => {
-                  void runPasteFiles(menu);
+                  void runPasteAny(menu);
                   setMenu(null);
                 }}
               >
                 <span className="ctx-icon">
                   <IconPaste size={14} />
                 </span>
-                {t("side.menuPasteFiles")}
+                {t("side.menuPaste")}
               </div>
               <div className="ws-sep" />
               {/* All four put text on the clipboard, so all four carry the same shape:
