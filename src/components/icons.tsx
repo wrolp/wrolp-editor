@@ -219,6 +219,19 @@ export function IconGoUp({ size = 14 }: IconProps) {
   );
 }
 
+/** Sort: shrinking lines with a down arrow, the shape every file list uses for its order. */
+export function IconSort({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.8}>
+      <line x1="3" y1="7" x2="13" y2="7" />
+      <line x1="3" y1="12" x2="10" y2="12" />
+      <line x1="3" y1="17" x2="7" y2="17" />
+      <line x1="17" y1="6" x2="17" y2="18" />
+      <polyline points="14 15 17 18 20 15" />
+    </svg>
+  );
+}
+
 export function IconFolder({ size = 14 }: IconProps) {
   return (
     <svg {...base(size)} strokeWidth={1.6}>

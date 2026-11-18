@@ -114,11 +114,14 @@ pub fn create_file(parent: String, name: String) -> Result<FsEntry, String> {
     .create_new(true)
     .open(&path)
     .map_err(|e| format!("create_failed:{e}"))?;
+  let (mtime, bytes) = commands::stat_pair(&path, false);
   let path = draft::normalize_path(&path.to_string_lossy());
   Ok(FsEntry {
     name: named,
     path,
     is_dir: false,
+    mtime,
+    bytes,
   })
 }
 
@@ -131,6 +134,7 @@ pub fn create_dir(parent: String, name: String) -> Result<FsEntry, String> {
     return Err("create_exists".into());
   }
   std::fs::create_dir(&path).map_err(|e| format!("create_failed:{e}"))?;
+  let (mtime, bytes) = commands::stat_pair(&path, true);
   let path = draft::normalize_path(&path.to_string_lossy());
   Ok(FsEntry {
     // The trailing separator is how a listing says "this is a folder", and the tree reads
@@ -138,6 +142,8 @@ pub fn create_dir(parent: String, name: String) -> Result<FsEntry, String> {
     name: format!("{named}/"),
     path,
     is_dir: true,
+    mtime,
+    bytes,
   })
 }
 
@@ -252,6 +258,7 @@ pub fn copy_entry(source: String, target: String) -> Result<FsEntry, String> {
   } else {
     std::fs::copy(from, &to).map_err(|e| format!("copy_failed:{e}"))?;
   }
+  let (mtime, bytes) = commands::stat_pair(&to, is_dir);
   let path = draft::normalize_path(&to.to_string_lossy());
   Ok(FsEntry {
     // The trailing separator is how a listing says "folder", and a copy is shown by the
@@ -263,6 +270,8 @@ pub fn copy_entry(source: String, target: String) -> Result<FsEntry, String> {
     },
     path,
     is_dir,
+    mtime,
+    bytes,
   })
 }
 

@@ -136,6 +136,11 @@ pub struct FsEntry {
   pub name: String,
   pub path: String,
   pub is_dir: bool,
+  /// Last write time, epoch milliseconds; 0 when the filesystem reports none. The Explorer
+  /// sorts its date order on this, so a listing has to carry it.
+  pub mtime: u64,
+  /// Size in bytes. A folder reports 0: the listing does not sum what it holds.
+  pub bytes: u64,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -169,6 +174,11 @@ pub struct Settings {
   /// Middle by default, because the end of a file name is where the extension sits and, for a
   /// long name, usually the half that tells two files apart.
   pub explorer_name_ellipsis: String,
+  /// How the Explorer orders the rows of a folder: `<name|date|type|size>-<asc|desc>`.
+  /// `name-asc` by default, which is the order the listing arrived in before this existed.
+  /// Folders always stay above files whatever the order: the tree mixes both, and a file
+  /// between two folders reads as a folder somebody forgot to expand.
+  pub explorer_sort: String,
   /// UI language code: "en", "zh" or "system" (follow the OS). Anything else is stored as "en",
   /// so a hand-edited or removed language never leaves the interface without a table.
   pub language: String,
@@ -406,6 +416,7 @@ impl Default for Settings {
       sidebar_width: 240.0,
       sidebar_font: 12.0,
       explorer_name_ellipsis: "middle".into(),
+      explorer_sort: "name-asc".into(),
       language: "system".into(),
       restore_session: true,
       compare_reuse_tab: true,
@@ -486,6 +497,17 @@ const SIDEBAR_FONT_MIN: f64 = 11.0;
 const SIDEBAR_FONT_MAX: f64 = 20.0;
 /// Where a name too wide for the Explorer's column loses its characters: the middle, or the end.
 const NAME_ELLIPSIS: [&str; 2] = ["middle", "end"];
+/// The Explorer's row orders: the key the folder is sorted by, then the direction.
+const EXPLORER_SORT: [&str; 8] = [
+  "name-asc",
+  "name-desc",
+  "date-asc",
+  "date-desc",
+  "type-asc",
+  "type-desc",
+  "size-asc",
+  "size-desc",
+];
 /// The automatic save is off by default, so this is only the pause a fresh install starts with once
 /// somebody turns it on: long enough that typing is not interrupted by a write every other second,
 /// short enough that leaving the window for a coffee saves the file anyway.
@@ -633,6 +655,13 @@ impl Settings {
         self.explorer_name_ellipsis.clone()
       } else {
         "middle".into()
+      },
+      // Same rule as above: a value this build does not know reads as the order the
+      // Explorer used before the setting existed, rather than as a half-applied sort.
+      explorer_sort: if EXPLORER_SORT.contains(&self.explorer_sort.as_str()) {
+        self.explorer_sort.clone()
+      } else {
+        "name-asc".into()
       },
       // A fresh install follows the OS; a value this build does not know — hand-edited, or a
       // language that was removed — reads as English rather than leaving the UI to guess.
@@ -909,6 +938,14 @@ pub(crate) fn mtime_ms(meta: &std::fs::Metadata) -> u64 {
     .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
     .map(|d| d.as_millis() as u64)
     .unwrap_or(0)
+}
+
+/// The `(mtime, bytes)` pair an entry takes into a listing, for the call sites that build an
+/// `FsEntry` right after writing to disk. A folder reports 0 bytes, as in the listings.
+pub(crate) fn stat_pair(path: &std::path::Path, is_dir: bool) -> (u64, u64) {
+  std::fs::metadata(path)
+    .map(|meta| (mtime_ms(&meta), if is_dir { 0 } else { meta.len() }))
+    .unwrap_or((0, 0))
 }
 
 /// A file read off disk past the checks every reader needs: it resolves, it is a file
@@ -1809,11 +1846,18 @@ pub fn list_dir(path: String) -> Result<Vec<FsEntry>, String> {
       Ok(t) => t.is_dir(),
       Err(_) => false,
     };
+    // The scan already carries the metadata on Windows, so reading it here is not a second
+    // trip to the disk. The pair feeds the Explorer's date and size orders.
+    let meta = item.metadata().ok();
+    let mtime = meta.as_ref().map(mtime_ms).unwrap_or(0);
+    let bytes = meta.filter(|_| !is_dir).map(|m| m.len()).unwrap_or(0);
     let entry_path = dir.join(&name);
     entries.push(FsEntry {
       path: entry_path.to_string_lossy().to_string(),
       name: if is_dir { format!("{name}/") } else { name },
       is_dir,
+      mtime,
+      bytes,
     });
   }
   entries.sort_by(|a, b| {
@@ -3202,6 +3246,30 @@ mod tests {
       .filled()
       .explorer_name_ellipsis,
       "middle"
+    );
+  }
+
+  #[test]
+  fn explorer_sort_is_one_of_the_known_orders() {
+    assert_eq!(Settings::default().explorer_sort, "name-asc");
+    assert_eq!(
+      Settings {
+        explorer_sort: "date-desc".into(),
+        ..Default::default()
+      }
+      .filled()
+      .explorer_sort,
+      "date-desc"
+    );
+    // A hand-edited value falls back to the order the Explorer used before the setting.
+    assert_eq!(
+      Settings {
+        explorer_sort: "size-sideways".into(),
+        ..Default::default()
+      }
+      .filled()
+      .explorer_sort,
+      "name-asc"
     );
   }
 

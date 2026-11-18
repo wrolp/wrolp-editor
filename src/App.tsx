@@ -31,6 +31,7 @@ import StatusBar from "./components/StatusBar";
 import type { PdfViewerHandle } from "./components/PdfViewer";
 import TitleBar, { type PreviewMode } from "./components/TitleBar";
 import Toast from "./components/Toast";
+import GlobalTip from "./components/GlobalTip";
 import GroupChip from "./components/GroupChip";
 import GitPanel from "./components/GitPanel";
 import GitLocalSettingsDialog from "./components/GitLocalSettingsDialog";
@@ -82,6 +83,7 @@ import { useVersions } from "./hooks/useVersions";
 import { useWindowFrame } from "./hooks/useWindowFrame";
 import { useMenuPlacement } from "./hooks/useMenuPlacement";
 import { setLang, t } from "./lib/i18n";
+import { parseExplorerSort } from "./lib/explorerSort";
 import { parseConflicts } from "./lib/mergeConflicts";
 import {
   basename,
@@ -208,6 +210,9 @@ const DEFAULT_SETTINGS: Settings = {
   // A long name keeps both ends by default: the end of a file name is where the extension is,
   // and the old end-only cut put the extension off screen first.
   explorerNameEllipsis: "middle",
+  // The order the listing arrived in before the menu existed, so a fresh install reads the
+  // tree exactly as every build before this one did.
+  explorerSort: "name-asc",
   // Follow the OS on a fresh install, so a Chinese Windows opens in Chinese without a visit to
   // Settings; the stored value stays "system" rather than the language it resolved to.
   language: "system",
@@ -3150,6 +3155,10 @@ const defaultModeFor = useCallback(
           // The stored value is normalized by the backend; anything else falls back to the
           // default here rather than reaching the tree as a third, unhandled mode.
           nameEllipsis={settings.explorerNameEllipsis === "end" ? "end" : "middle"}
+          // Same rule as the ellipsis: the backend already normalized the stored order, and
+          // anything this build does not know falls back rather than reaching the tree.
+          sort={parseExplorerSort(settings.explorerSort)}
+          onSortChange={(next) => void saveSettings({ explorerSort: next })}
           view={sidebarView}
           rootDir={rootDir}
           expandFolders={settings.expandFolders}
@@ -4323,6 +4332,10 @@ const defaultModeFor = useCallback(
           cancelDisabled={exportJob.stage === "print"}
         />
       )}
+
+      {/* The one hover bubble for the whole app: takes over every `title`, so no OS-drawn
+          tooltip draws itself in the middle of the dark UI. */}
+      <GlobalTip />
 
       <Toast
         message={toastState.message}

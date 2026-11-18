@@ -591,10 +591,13 @@ pub fn create_encrypted(
     let _ = std::fs::remove_file(&target);
     return Err(e);
   }
+  let (mtime, bytes) = commands::stat_pair(&target, false);
   Ok(commands::FsEntry {
     name: named,
     path: normalized,
     is_dir: false,
+    mtime,
+    bytes,
   })
 }
 

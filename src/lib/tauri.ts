@@ -85,6 +85,10 @@ export interface FsEntry {
   name: string;
   path: string;
   isDir: boolean;
+  /** Last write time, epoch milliseconds; 0 when the filesystem reports none. */
+  mtime: number;
+  /** Size in bytes. A folder reports 0. */
+  bytes: number;
 }
 
 /** A folder's own modification time, epoch milliseconds; 0 when it cannot be read. */
@@ -163,6 +167,11 @@ export interface Settings {
    * tells two names apart. Unknown values read as `middle`.
    */
   explorerNameEllipsis: string;
+  /**
+   * The Explorer's row order, as `<name|date|type|size>-<asc|desc>`. `name-asc` is the
+   * order a listing arrived in before this was a choice. Unknown values read as `name-asc`.
+   */
+  explorerSort: string;
   /** Language code; unknown values are stored as-is and fall back to English in the UI. */
   language: string;
   /** Reopen the tabs of the active group on startup. */

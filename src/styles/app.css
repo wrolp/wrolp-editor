@@ -1331,13 +1331,10 @@ body.resizing .editor-host {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  /* Long paths read better from the folder name backwards. */
-  direction: rtl;
-  text-align: left;
 }
-/* Go one level up. Kept in the header row rather than the tree, so the tree only ever
-   lists what is inside the current folder. */
-.side-root-up {
+/* A control of the folder bar: go one level up, and the row order. Kept in the header row
+   rather than the tree, so the tree only ever lists what is inside the current folder. */
+.side-root-btn {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
@@ -1351,17 +1348,24 @@ body.resizing .editor-host {
   color: var(--muted);
   cursor: pointer;
 }
-.side-root-up:hover:not(:disabled) {
+.side-root-btn:hover:not(:disabled) {
   background: var(--surface-2-hover);
   color: var(--text);
 }
-.side-root-up:disabled {
+.side-root-btn:disabled {
   color: var(--text-disabled);
   cursor: default;
 }
+/* Open while pressed: the menu is showing, so the button stays in the active state rather
+   than snapping back the moment the click lands. */
+.side-root-btn.active {
+  background: var(--surface-2-hover);
+  color: var(--text);
+}
 
-/* Two-line tree tooltip: name first, dimmed full path underneath. */
-.tree-tip {
+/* The one hover bubble: a name line, and a dimmed place or detail underneath when the hint
+   has one. Drawn by `GlobalTip`, so every `title` and every two-line row hint looks the same. */
+.hover-tip {
   position: fixed;
   z-index: 120;
   /* The anchor decides where the bubble hangs; this is only the breath between the two.
@@ -1370,7 +1374,7 @@ body.resizing .editor-host {
   max-width: 420px;
   padding: 6px 9px;
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: 10px;
   background: var(--surface);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
   pointer-events: none;
@@ -1380,18 +1384,20 @@ body.resizing .editor-host {
 }
 /* Near the right edge there is no room to the right, so the bubble hangs off the
    cursor's other side instead of being clipped by the window. */
-.tree-tip.align-end {
+.hover-tip.align-end {
   transform: translateY(3px) translateX(-100%);
 }
 /* The bubble exists to say what the row could not, so neither line is cut short: a long name
    or path wraps instead, and a run with no break in it (a deep path has none) breaks where it
-   must rather than running out of the bubble. */
-.tree-tip-name {
+   must rather than running out of the bubble. A plain `title` can carry line breaks of its
+   own (a commit summary, an exact timestamp); they are kept rather than folded into one line. */
+.hover-tip-name {
   font-size: 12px;
   color: var(--text);
+  white-space: pre-line;
   overflow-wrap: anywhere;
 }
-.tree-tip-path {
+.hover-tip-path {
   font-size: 11px;
   color: var(--text-faint);
   overflow-wrap: anywhere;
@@ -1411,6 +1417,22 @@ body.resizing .editor-host {
   margin: 4px 10px 8px 0;
   text-align: center !important;
   font-size: 14px;
+}
+/* One turn per press. The glyph is remounted on every press (see `refreshSpins`), so the
+   animation replays even when the button is pressed again before the turn is over. */
+.side-refresh-glyph {
+  display: inline-block;
+}
+.side-refresh-glyph.spin {
+  animation: side-refresh-spin 0.55s ease-out;
+}
+@keyframes side-refresh-spin {
+  from {
+    transform: rotate(0turn);
+  }
+  to {
+    transform: rotate(1turn);
+  }
 }
 
 /* The split button: the folder picker and the recent-folders menu as one control.
@@ -1594,6 +1616,12 @@ body.resizing .editor-host {
 .folder-item-remove:hover {
   background: rgb(255 255 255 / 0.18);
   color: var(--on-accent);
+}
+
+/* The row-order menu: the same surface and rows as every context menu, only wider.
+   "Date modified (newest first)" is the longest label a menu in this app has. */
+.sort-menu {
+  min-width: 236px;
 }
 
 /* Scoped to the sidebar on purpose: Monaco's suggest widget also has a `.tree` class on
@@ -3810,7 +3838,7 @@ body.resizing .editor-host {
 }
 .pick-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
   padding: 6px 8px;
   border-radius: 6px;
@@ -3819,10 +3847,6 @@ body.resizing .editor-host {
 }
 .pick-row:hover {
   background: var(--surface-hover);
-}
-/* Optical centring against the first line of the two-line label. */
-.pick-row .file-glyph {
-  margin-top: 2px;
 }
 /* The name over the folder holding it. Both are cut in the middle by `NameText`, so a long
    path keeps its drive and the folder it ends in instead of losing its tail. */
@@ -6195,7 +6219,7 @@ select {
 .app[data-density="compact"] .side-btn-icon {
   margin-block: 3px 6px;
 }
-.app[data-density="compact"] .side-root-up {
+.app[data-density="compact"] .side-root-btn {
   width: 18px;
   height: 18px;
 }

@@ -31,6 +31,7 @@ import {
   IconReload,
   IconRestore,
   IconSettings,
+  IconSort,
   IconTarget,
   IconTrash,
   IconTreeChevron,
@@ -54,9 +55,13 @@ import {
   type VersionSummary,
 } from "../lib/tauri";
 import { basename, isUnder, isUntitled } from "../lib/path";
+import {
+  EXPLORER_SORTS,
+  sortEntries,
+  type ExplorerSort,
+} from "../lib/explorerSort";
 import type { NameEllipsis } from "../lib/nameEllipsis";
 import NameText from "./NameText";
-import PathTip, { useHoverTip } from "./PathTip";
 import { pathKey, type GitMark, type SidebarView } from "../lib/types";
 import { useMenuPlacement } from "../hooks/useMenuPlacement";
 
@@ -123,14 +128,6 @@ function covers(refresh: RefreshRequest | null, path: string): number {
   return isUnder(path, refresh.path) ? refresh.token : 0;
 }
 
-interface TipProps {
-  children: ReactNode;
-  /** First line: the name as shown in the tree. */
-  name: string;
-  /** Second line: the full path, dimmed so the name reads first. */
-  detail?: string;
-}
-
 /** `.folder-menu`'s CSS width. The panel is placed by hand, so the number is needed twice. */
 const FOLDER_MENU_WIDTH = 260;
 
@@ -150,6 +147,21 @@ type WatchDir = (path: string) => () => void;
 /** How tall `.folder-menu`'s caret is, and so how far below the arrow the panel starts. */
 const FOLDER_MENU_CARET = 6;
 
+/** The breath between the sort button and the menu it opens. */
+const SORT_MENU_GAP = 4;
+
+/** The row each order takes in the sort menu, and the text it reads as. */
+const SORT_LABELS: Record<ExplorerSort, string> = {
+  "name-asc": "side.sortByNameAsc",
+  "name-desc": "side.sortByNameDesc",
+  "date-desc": "side.sortByDateDesc",
+  "date-asc": "side.sortByDateAsc",
+  "type-asc": "side.sortByTypeAsc",
+  "type-desc": "side.sortByTypeDesc",
+  "size-desc": "side.sortBySizeDesc",
+  "size-asc": "side.sortBySizeAsc",
+};
+
 /**
  * How many rows one folder may draw in a single commit.
  *
@@ -159,54 +171,6 @@ const FOLDER_MENU_CARET = 6;
  * so the rows above stay clickable while the folder fills in.
  */
 const LEVEL_CHUNK = 200;
-
-/**
- * Two-line tooltip for the file tree: name on top, full path underneath.
- *
- * A native `title` attribute cannot do this — it renders one unstyled string in an
- * OS-drawn bubble, so the path would end up on the same line and could not be dimmed.
- * Hence the overlay. It hangs beside the cursor, clear of the pointer: a bubble placed at
- * the pointer's own position leaves the arrow sitting on the first characters of the name.
- */
-function TreeTooltip({ children, name, detail }: TipProps) {
-  const { tip, show, hide } = useHoverTip();
-  /**
-   * The expand/collapse arrow is a control of its own, and a bubble naming the folder would
-   * hang over the rows it is about to open. Resting on the arrow means no bubble; going back
-   * onto the row starts the usual delay again, so the rest of the row still behaves as a row.
-   */
-  const onArrow = useRef(false);
-  const overArrow = (target: EventTarget | null) =>
-    target instanceof Element && !!target.closest(".chev.fold");
-  return (
-    <>
-      <div
-        onMouseEnter={(e) => {
-          // Entering the row straight onto the arrow must not arm the bubble at all: the
-          // same target reaches both `mouseover` and `mouseenter`, and the delay would start.
-          onArrow.current = overArrow(e.target);
-          if (!onArrow.current) show(e);
-        }}
-        onMouseLeave={() => {
-          onArrow.current = false;
-          hide();
-        }}
-        onMouseOver={(e) => {
-          // Only a crossing between the arrow and the rest of the row matters; every other
-          // mouseover inside the row would restart the delay and keep the bubble away.
-          const arrow = overArrow(e.target);
-          if (arrow === onArrow.current) return;
-          onArrow.current = arrow;
-          if (arrow) hide();
-          else show(e);
-        }}
-      >
-        {children}
-      </div>
-      <PathTip spot={tip?.spot ?? null} name={name} detail={detail ?? ""} />
-    </>
-  );
-}
 
 /**
  * The name of a tree row, or the input that stands in for it while that row is renamed.
@@ -342,6 +306,11 @@ interface TreeHandlers {
   gitMarks: ReadonlyMap<string, GitMark>;
   /** How many changed paths sit under each folder, by `pathKey`. */
   gitDirs: ReadonlyMap<string, number>;
+  /**
+   * How each folder's rows are ordered. Every level of the tree reads it, so a change made
+   * in the header re-reads no folder: the listings already on hand are sorted again.
+   */
+  sort: ExplorerSort;
 }
 
 interface NodeProps extends TreeHandlers {
@@ -430,73 +399,75 @@ function FileRow({
   const ignored = mark?.tone === "ignored";
   const target: NodeTarget = { path: entry.path, name: entry.name, isDir: false };
   return (
-    <TreeTooltip name={entry.name} detail={entry.path}>
-      <div
-        className={`tree-row file${active ? " ctx-active" : ""}${selected.has(key) ? " sel" : ""}${
-          ignored ? " ctx-ignored" : ""
-        }`}
-        // A file drop over this row belongs in the folder holding it.
-        data-dir={parentOf(entry.path)}
-        style={indent(depth)}
-        // A click inside the row is the edit taking or losing the focus, not a request to
-        // open the file the row happens to name.
-        onClick={
-          editing
-            ? undefined
-            : (e) => {
-                // A modified click is about the selection, not about opening: it stops here
-                // so the view's own handler does not clear what it just changed.
-                if (e.ctrlKey || e.metaKey) {
-                  e.stopPropagation();
-                  onToggleSelect(target);
-                  return;
-                }
-                if (e.shiftKey) {
-                  e.stopPropagation();
-                  onSelectRange(target, siblings);
-                  return;
-                }
-                onOpenPath(entry.path);
+    <div
+      className={`tree-row file${active ? " ctx-active" : ""}${selected.has(key) ? " sel" : ""}${
+        ignored ? " ctx-ignored" : ""
+      }`}
+      // The row's hover hint: name first, the full path underneath. Drawn by `GlobalTip`,
+      // the same bubble the rest of the app uses for its plain `title`s.
+      data-tip={entry.name}
+      data-tip-detail={entry.path}
+      // A file drop over this row belongs in the folder holding it.
+      data-dir={parentOf(entry.path)}
+      style={indent(depth)}
+      // A click inside the row is the edit taking or losing the focus, not a request to
+      // open the file the row happens to name.
+      onClick={
+        editing
+          ? undefined
+          : (e) => {
+              // A modified click is about the selection, not about opening: it stops here
+              // so the view's own handler does not clear what it just changed.
+              if (e.ctrlKey || e.metaKey) {
+                e.stopPropagation();
+                onToggleSelect(target);
+                return;
               }
+              if (e.shiftKey) {
+                e.stopPropagation();
+                onSelectRange(target, siblings);
+                return;
+              }
+              onOpenPath(entry.path);
+            }
+      }
+      onContextMenu={(e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openMenu(target, e.clientX, e.clientY);
+      }}
+    >
+      <span className="chev" />
+      <span className="ti">
+        <FileIcon name={entry.name} />
+      </span>
+      <RowName
+        editing={editing}
+        name={entry.name}
+        mode={nameEllipsis}
+        onCommit={(name) =>
+          onRename({ path: entry.path, name: entry.name, isDir: false }, name)
         }
-        onContextMenu={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          openMenu(target, e.clientX, e.clientY);
-        }}
-      >
-        <span className="chev" />
-        <span className="ti">
-          <FileIcon name={entry.name} />
+        onCancel={onRenameEnd}
+      />
+      {mark && (
+        <span
+          className={`tree-git ${mark.tone}`}
+          title={t("git.markTitle", {
+            letter: mark.letter,
+            state: t(
+              mark.tone === "ignored"
+                ? "git.markIgnored"
+                : mark.staged
+                  ? "git.markStaged"
+                  : "git.markUnstaged",
+            ),
+          })}
+        >
+          {mark.letter}
         </span>
-        <RowName
-          editing={editing}
-          name={entry.name}
-          mode={nameEllipsis}
-          onCommit={(name) =>
-            onRename({ path: entry.path, name: entry.name, isDir: false }, name)
-          }
-          onCancel={onRenameEnd}
-        />
-        {mark && (
-          <span
-            className={`tree-git ${mark.tone}`}
-            title={t("git.markTitle", {
-              letter: mark.letter,
-              state: t(
-                mark.tone === "ignored"
-                  ? "git.markIgnored"
-                  : mark.staged
-                    ? "git.markStaged"
-                    : "git.markUnstaged",
-              ),
-            })}
-          >
-            {mark.letter}
-          </span>
-        )}
-      </div>
-    </TreeTooltip>
+      )}
+    </div>
   );
 }
 
@@ -584,71 +555,78 @@ function FolderNode({
 
   // The rows already read stay on screen while a newer listing is on its way. Blanking them
   // for a loading row would unmount every folder open inside, and a folder that mounts starts
-  // folded — which is exactly the shape the refresh was supposed to keep.
-  const children = listing ? listing.entries : null;
+  // folded — which is exactly the shape the refresh was supposed to keep. The order is applied
+  // here rather than by re-reading: the listing is the disk's answer, and sorting is a view of it.
+  const children = useMemo(
+    () => (listing ? sortEntries(listing.entries, handlers.sort) : null),
+    [listing, handlers.sort]
+  );
 
   return (
     <>
-      <TreeTooltip name={entry.name.replace(/\/$/, "")} detail={entry.path}>
-        <div
-          className={`tree-row folder${collapsed ? " collapsed" : ""}${selected.has(key) ? " sel" : ""}${
-            folderIgnored ? " ctx-ignored" : ""
-          }`}
-          // A file drop over a folder row belongs inside that folder.
-          data-dir={entry.path.replace(/[\\/]+$/, "")}
-          style={indent(depth)}
-          onClick={
-            editing
-              ? undefined
-              : (e) => {
-                  if (e.ctrlKey || e.metaKey) {
-                    e.stopPropagation();
-                    onToggleSelect(target);
-                    return;
-                  }
-                  if (e.shiftKey) {
-                    e.stopPropagation();
-                    onSelectRange(target, siblings);
-                    return;
-                  }
-                  const next = !collapsed;
-                  setCollapsed(next);
-                  handlers.onFold(key, next);
+      <div
+        className={`tree-row folder${collapsed ? " collapsed" : ""}${selected.has(key) ? " sel" : ""}${
+          folderIgnored ? " ctx-ignored" : ""
+        }`}
+        // The row's hover hint: name first, the full path underneath. Drawn by `GlobalTip`,
+        // the same bubble the rest of the app uses for its plain `title`s.
+        data-tip={entry.name.replace(/\/$/, "")}
+        data-tip-detail={entry.path}
+        // A file drop over a folder row belongs inside that folder.
+        data-dir={entry.path.replace(/[\\/]+$/, "")}
+        style={indent(depth)}
+        onClick={
+          editing
+            ? undefined
+            : (e) => {
+                if (e.ctrlKey || e.metaKey) {
+                  e.stopPropagation();
+                  onToggleSelect(target);
+                  return;
                 }
+                if (e.shiftKey) {
+                  e.stopPropagation();
+                  onSelectRange(target, siblings);
+                  return;
+                }
+                const next = !collapsed;
+                setCollapsed(next);
+                handlers.onFold(key, next);
+              }
+        }
+        onContextMenu={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openMenu(target, e.clientX, e.clientY);
+        }}
+      >
+        {/* An icon, not a character: it stays crisp at any DPI, and the expanded
+            state is the same glyph turned a quarter turn (see the CSS). The arrow is a
+            control of its own, so resting on it means no bubble about the folder. */}
+        <span className="chev fold" data-tip-skip>
+          <IconTreeChevron />
+        </span>
+        <span className="ti">
+          <IconFolder />
+        </span>
+        <RowName
+          editing={editing}
+          name={entry.name}
+          mode={handlers.nameEllipsis}
+          onCommit={(name) =>
+            onRename({ path: entry.path, name: entry.name, isDir: true }, name)
           }
-          onContextMenu={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            openMenu(target, e.clientX, e.clientY);
-          }}
-        >
-          {/* An icon, not a character: it stays crisp at any DPI, and the expanded
-              state is the same glyph turned a quarter turn (see the CSS). */}
-          <span className="chev fold">
-            <IconTreeChevron />
+          onCancel={onRenameEnd}
+        />
+        {folderCount > 0 && (
+          <span
+            className="tree-git-count"
+            title={t("git.dirChanges", { n: folderCount })}
+          >
+            {folderCount}
           </span>
-          <span className="ti">
-            <IconFolder />
-          </span>
-          <RowName
-            editing={editing}
-            name={entry.name}
-            mode={handlers.nameEllipsis}
-            onCommit={(name) =>
-              onRename({ path: entry.path, name: entry.name, isDir: true }, name)
-            }
-            onCancel={onRenameEnd}
-          />
-          {folderCount > 0 && (
-            <span
-              className="tree-git-count"
-              title={t("git.dirChanges", { n: folderCount })}
-            >
-              {folderCount}
-            </span>
-          )}
-        </div>
-      </TreeTooltip>
+        )}
+      </div>
       {!collapsed && (
         <>
           {children === null ? (
@@ -795,6 +773,8 @@ interface Props extends Omit<
   fontSize: number;
   /** Where a tree row's name is cut when the column cannot hold it: both ends, or the end. */
   nameEllipsis: NameEllipsis;
+  /** Store a new row order for the files to remember; `sort` is what is on screen. */
+  onSortChange: (sort: ExplorerSort) => void;
   view: SidebarView;
   rootDir: string | null;
   history: HistoryEntry[];
@@ -888,6 +868,8 @@ export default function Sidebar(props: Props) {
     width,
     fontSize,
     nameEllipsis,
+    sort,
+    onSortChange,
     view,
     rootDir,
     history,
@@ -955,6 +937,15 @@ export default function Sidebar(props: Props) {
   const [batch, setBatch] = useState<NodeTarget[] | null>(null);
   /** Whether the recent-folders menu is open under the picker button. */
   const [foldersOpen, setFoldersOpen] = useState(false);
+  /** Counts refresh presses: each one remounts the glyph, which replays its one-turn spin. */
+  const [refreshSpins, setRefreshSpins] = useState(0);
+  /** Whether the row-order menu is open under the sort button. */
+  const [sortOpen, setSortOpen] = useState(false);
+  /** Where that menu opens: the sort button's corner, taken when it is pressed. */
+  const [sortAt, setSortAt] = useState<{ x: number; y: number } | null>(null);
+  const sortButton = useRef<HTMLButtonElement>(null);
+  const sortMenu = useRef<HTMLDivElement>(null);
+  const sortMenuAt = useMenuPlacement(sortAt, sortMenu);
   /**
    * Where the open panel sits: the arrow's screen rect, taken the moment it opens.
    *
@@ -1125,6 +1116,26 @@ export default function Sidebar(props: Props) {
       window.removeEventListener("keydown", onKey);
     };
   }, [foldersOpen]);
+
+  // Same dismissal for the row-order menu. Its button stops `mousedown` for the same reason:
+  // otherwise a press on it while the menu is open would close the menu and reopen it.
+  useEffect(() => {
+    if (!sortOpen) return;
+    const close = () => setSortOpen(false);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") close();
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("wheel", close, { passive: true });
+    window.addEventListener("blur", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("wheel", close);
+      window.removeEventListener("blur", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [sortOpen]);
 
   const copy = async (text: string) => {
     const ok = await copyText(text);
@@ -1731,6 +1742,10 @@ export default function Sidebar(props: Props) {
     };
   }, [view]);
 
+  // The order is a view of the listing, not another read of the disk: the rows already in
+  // hand are sorted again, so changing it costs a render and never a directory visit.
+  const sortedEntries = useMemo(() => sortEntries(entries, sort), [entries, sort]);
+
   if (!visible) return null;
 
   return (
@@ -1792,18 +1807,6 @@ export default function Sidebar(props: Props) {
           setMenu({ path: "", name: "", isDir: true, x: e.clientX, y: e.clientY });
         }}
       >
-        <div className="side-root" title={rootDir ?? undefined}>
-          <span className="side-root-path">{rootDir ?? t("side.noFolder")}</span>
-          <button
-            className="side-root-up"
-            title={parentDir ? t("side.upToParentNamed", { name: parentName }) : t("side.noParent")}
-            aria-label={t("side.upToParent")}
-            disabled={!parentDir}
-            onClick={() => parentDir && onSetRoot(parentDir)}
-          >
-            <IconGoUp size={13} />
-          </button>
-        </div>
         <div className="side-actions">
           {/* A split button: the picker on the left, the recent-folders menu as its right
               half. They belong together because they are two ways to answer the same
@@ -1915,6 +1918,7 @@ export default function Sidebar(props: Props) {
             className="side-btn side-btn-icon"
             title={t("side.refresh")}
             onClick={() => {
+              setRefreshSpins((n) => n + 1);
               // The whole tree is the root folder's own subtree, so this is the same request
               // the root's context menu makes: every open folder re-reads and stays open.
               if (!rootDir) return;
@@ -1924,9 +1928,75 @@ export default function Sidebar(props: Props) {
               clearSelection();
             }}
           >
-            ↻
+            {/* Keyed by the press count so a second press remounts the glyph and starts the
+                turn over, rather than being swallowed by an animation still running. */}
+            <span key={refreshSpins} className={`side-refresh-glyph${refreshSpins ? " spin" : ""}`}>
+              ↻
+            </span>
           </button>
         </div>
+        {/* Under the picker, above the rows: where the tree is and how it is read. The sort
+            control sits after "go up" because both act on the folder on screen rather than on
+            where the Explorer is pointed. */}
+        <div className="side-root" title={rootDir ?? undefined}>
+          <NameText name={rootDir ?? t("side.noFolder")} mode="middle" className="side-root-path" />
+          <button
+            className="side-root-btn"
+            title={parentDir ? t("side.upToParentNamed", { name: parentName }) : t("side.noParent")}
+            aria-label={t("side.upToParent")}
+            disabled={!parentDir}
+            onClick={() => parentDir && onSetRoot(parentDir)}
+          >
+            <IconGoUp size={13} />
+          </button>
+          <button
+            ref={sortButton}
+            className={`side-root-btn${sortOpen ? " active" : ""}`}
+            title={t("side.sort")}
+            aria-label={t("side.sort")}
+            aria-expanded={sortOpen}
+            // The menu closes on a `mousedown` anywhere: without this, pressing the button
+            // while it is open would close it and then reopen it.
+            onMouseDown={(e) => e.stopPropagation()}
+            onClick={() => {
+              if (sortOpen) {
+                setSortOpen(false);
+                return;
+              }
+              // Placed on the way open: the menu closes itself on the next wheel or click,
+              // so the rect cannot go stale while it is shown.
+              const r = sortButton.current?.getBoundingClientRect();
+              if (r) setSortAt({ x: r.left, y: r.bottom + SORT_MENU_GAP });
+              setSortOpen(true);
+            }}
+          >
+            <IconSort size={13} />
+          </button>
+        </div>
+        {sortOpen && sortAt && (
+          <div
+            ref={sortMenu}
+            className="ctx-menu sort-menu"
+            style={sortMenuAt}
+            // A press inside the menu is the menu's own business; dismissing on the way down
+            // would unmount the row before its click could land.
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            {EXPLORER_SORTS.map((value) => (
+              <div
+                key={value}
+                className="ctx-item"
+                onClick={() => {
+                  onSortChange(value);
+                  setSortOpen(false);
+                }}
+              >
+                <span>{t(SORT_LABELS[value])}</span>
+                <span className="ctx-check">{sort === value ? "✓" : ""}</span>
+              </div>
+            ))}
+          </div>
+        )}
         {/* The handler the tree used to carry now sits on the whole view, so the blank
             space below the rows is covered by the same one: the round trip to the root
             folder's own row is the only way to create anything in it. */}
@@ -1940,10 +2010,11 @@ export default function Sidebar(props: Props) {
                 // it has been drawn, while a refresh of the same folder keeps the rows the
                 // user already had on screen.
                 key={rootDir}
-                entries={entries}
+                entries={sortedEntries}
                 depth={0}
                 activePath={activePath}
                 nameEllipsis={nameEllipsis}
+                sort={sort}
                 onOpenPath={onOpenPath}
                 onCompare={onCompare}
                 expandLimit={expandLimit}

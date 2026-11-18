@@ -6,7 +6,6 @@ import type { Tab } from "../lib/types";
 import { isUntitled } from "../lib/path";
 import type { NameEllipsis } from "../lib/nameEllipsis";
 import NameText from "./NameText";
-import PathTip, { useHoverTip } from "./PathTip";
 
 interface Props {
   tabs: Tab[];
@@ -140,8 +139,6 @@ export default function TabBar({
   onRenameEnd,
 }: Props) {
   const barRef = useRef<HTMLDivElement>(null);
-  /** One bubble for the whole strip: a tab passes its id when the pointer rests on it. */
-  const { tip, show: showTip, hide: hideTip } = useHoverTip<number>("below");
   /**
    * Drag state for reordering. The strip is not rearranged while the pointer moves: doing
    * that changes which tab sits under the cursor mid-gesture, so the strip keeps swapping
@@ -256,9 +253,8 @@ export default function TabBar({
   };
 
   const beginDrag = (id: number, x: number) => {
-    // A bubble left over from resting on the tab before the drag would follow the pointer
-    // across the strip, describing whichever tab it started on.
-    hideTip();
+    // No bubble to clear here: it is dropped on the press that starts the gesture, and the
+    // strip silences its hints while `drag` is set.
     const spot = dropAt(x);
     gesture.current = true;
     setDrag({ id, x: spot.x, index: spot.index });
@@ -306,16 +302,14 @@ export default function TabBar({
     );
   }
 
-  // The tab the bubble describes, looked up by id: a tab closed while the pointer rests on it
-  // leaves nothing behind. A tab with no place of its own yields no bubble at all.
-  const hovered = tip ? tabs.find((tab) => tab.id === tip.key) : undefined;
-  const hoveredTip = hovered ? tipFor(hovered) : null;
-
   return (
     <div
       className={`tabbar${drag ? " dragging" : ""}`}
       ref={barRef}
       data-tauri-drag-region
+      // A drag passes over many tabs and means none of them, so the strip silences every
+      // hint under it while one is in progress.
+      data-tip-off={drag ? "" : undefined}
       onWheel={(e) => {
         const bar = e.currentTarget;
         const max = bar.scrollWidth - bar.clientWidth;
@@ -399,7 +393,12 @@ export default function TabBar({
         e.preventDefault();
       }}
     >
-      {tabs.map((tab) => (
+      {tabs.map((tab) => {
+        // Below the tab rather than above it: the strip sits at the top of the window, and a
+        // bubble over the tab would cover the name it is describing. A tab with no place of
+        // its own (Settings, an untitled buffer) carries no second line and so no hint.
+        const info = tipFor(tab);
+        return (
         <div
           key={tab.id}
           data-id={tab.id}
@@ -410,13 +409,12 @@ export default function TabBar({
           className={`tab${tab.id === activeId ? " active" : ""}${
             drag?.id === tab.id ? " dragging" : ""
           }`}
-          // The bubble replaces the native `title`: the path needs a line of its own, which
-          // an OS-drawn tooltip cannot do. A drag passes over many tabs and means none of
-          // them, so nothing is armed while one is in progress.
-          onMouseEnter={(e) => {
-            if (!drag) showTip(e, tab.id);
-          }}
-          onMouseLeave={hideTip}
+          // The two-line bubble replaces the native `title`: the path needs a line of its
+          // own, which an OS-drawn tooltip cannot do. A drag passes over many tabs and means
+          // none of them, so the strip silences its hints while one is in progress.
+          data-tip={info.detail ? info.name : undefined}
+          data-tip-detail={info.detail || undefined}
+          data-tip-anchor="below"
         >
           <TabIcon tab={tab} />
           {tab.id === renamingId ? (
@@ -459,7 +457,8 @@ export default function TabBar({
             ×
           </button>
         </div>
-      ))}
+        );
+      })}
 
       {/* Where the dragged tab would land. The offset is into the strip's *content*, not the
           viewport — see `dropOffset`. Hidden when the gap is the tab's own: the two gaps
@@ -468,12 +467,6 @@ export default function TabBar({
       {drag && !dropIsNoop(drag) && (
         <div className="tab-drop-line" style={{ left: dropOffset(drag.x) }}
         />
-      )}
-
-      {/* Below the tab rather than above it: the strip sits at the top of the window, and a
-          bubble over the tab would cover the name it is describing. */}
-      {tip && hoveredTip && (
-        <PathTip spot={tip.spot} name={hoveredTip.name} detail={hoveredTip.detail} />
       )}
     </div>
   );

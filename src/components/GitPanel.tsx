@@ -24,7 +24,6 @@ import { basename } from "../lib/path";
 import { useMenuPlacement } from "../hooks/useMenuPlacement";
 import type { NameEllipsis } from "../lib/nameEllipsis";
 import NameText from "./NameText";
-import PathTip, { useHoverTip } from "./PathTip";
 import { LOG_PAGE_CHOICES, type GitController } from "../hooks/useGit";
 import type { GitRepoRow } from "../hooks/useGitRepos";
 import { buildGraph } from "../lib/gitGraph";
@@ -262,12 +261,6 @@ export default function GitPanel({
    * this reading, not a preference of theirs.
    */
   const [collapsedDirs, setCollapsedDirs] = useState<Record<string, boolean>>({});
-  /**
-   * One hover bubble for every file row in the panel, keyed by the file's absolute path — the
-   * two-line shape the Explorer draws, because a native `title` cannot put the path on a line
-   * of its own or dim it.
-   */
-  const { tip: fileTip, show: showFileTip, hide: hideFileTip } = useHoverTip<string>("pointer");
   const [amend, setAmend] = useState(false);
   /** The message HEAD had when amend was turned on, so switching it off can drop just that text. */
   const [amendBase, setAmendBase] = useState("");
@@ -895,8 +888,9 @@ export default function GitPanel({
                 <div
                   key={`${entry.oid}:${file.path}`}
                   className="git-log-file"
-                  onMouseEnter={(event) => showFileTip(event, file.abs)}
-                  onMouseLeave={hideFileTip}
+                  // Name over the folder holding it, the same hint the Explorer's rows draw.
+                  data-tip={basename(file.abs)}
+                  data-tip-detail={parentOf(file.abs)}
                   onClick={() => onCommitFileDiff(entry, file, repoRoot)}
                 >
                   <span className={`git-badge ${badgeTone(file.status)}`}>
@@ -927,8 +921,9 @@ export default function GitPanel({
         key={`${scope}:${file.path}`}
         className="git-row"
         style={depth > 0 ? { paddingLeft: 12 + depth * 12 } : undefined}
-        onMouseEnter={(event) => showFileTip(event, file.abs)}
-        onMouseLeave={hideFileTip}
+        // Name over the folder holding it, the same hint the Explorer's rows draw.
+        data-tip={basename(file.abs)}
+        data-tip-detail={parentOf(file.abs)}
         onClick={() => onDiff(file, scope, repoRoot)}
         onContextMenu={(event) => openRowMenu(event, file)}
       >
@@ -1460,8 +1455,9 @@ export default function GitPanel({
                   <div
                     key={`u:${file.path}`}
                     className="git-row conflict"
-                    onMouseEnter={(event) => showFileTip(event, file.abs)}
-                    onMouseLeave={hideFileTip}
+                    // Name over the folder holding it, the same hint the Explorer's rows draw.
+                    data-tip={basename(file.abs)}
+                    data-tip-detail={parentOf(file.abs)}
                     onClick={() => onMergeConflict(file)}
                   >
                     <span className="git-badge conflict">U</span>
@@ -1964,17 +1960,6 @@ export default function GitPanel({
           onSaveSsh={git.saveSshCredential}
           onTrustHost={git.trustHost}
           onTrustCert={git.trustCert}
-        />
-      )}
-
-      {/* Name over the folder holding it. The path here is the answer to "where is this",
-          and the name is already the line above — repeating it in the second line only makes
-          the bubble longer than the row it describes. */}
-      {fileTip && (
-        <PathTip
-          spot={fileTip.spot}
-          name={basename(fileTip.key)}
-          detail={parentOf(fileTip.key)}
         />
       )}
     </div>
