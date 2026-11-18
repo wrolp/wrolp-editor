@@ -2923,8 +2923,17 @@ const defaultModeFor = useCallback(
   /**
    * A PDF is not text, so the backend reports it as unreadable — but it is not unreadable to
    * the reader, which draws it here instead of showing that failure.
+   *
+   * Only while the PDF is the pane on screen. `fileTab` is the last real file, kept mounted
+   * behind a comparison so its Monaco model survives (see `editorTab`), and the reader is
+   * absolutely positioned above the pane — left on, it covers a diff opened over it.
    */
-  const isPdf = !!tabs.fileTab && /\.pdf$/i.test(tabs.fileTab.path);
+  const isPdf =
+    !!tabs.fileTab &&
+    !showDiff &&
+    !showMerge &&
+    !showCommit &&
+    /\.pdf$/i.test(tabs.fileTab.path);
   const showUnopenable = !!tabs.fileTab?.unopenable && !isPdf;
   /** The PDF on screen, when there is one; the status bar's page box belongs to it alone. */
   const pdfPath = isPdf ? tabs.fileTab?.path ?? null : null;
