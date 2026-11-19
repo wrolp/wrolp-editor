@@ -13,7 +13,7 @@
 use crate::commands::{self, protected_roots, refused_by_scope, FsEntry, HistoryEntry, SavedFile};
 use crate::draft;
 use crate::group::{GroupStore, GroupTab};
-use crate::rename::{check_name, under, NameError};
+use crate::rename::{check_name, rekey_state, under, NameError, Renamed};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use tauri::AppHandle;
@@ -274,6 +274,117 @@ pub fn copy_entry(source: String, target: String) -> Result<FsEntry, String> {
     is_dir,
     mtime,
     bytes,
+  })
+}
+
+/// Put `from` at `to`, falling back to a copy and a delete when the two are on different
+/// volumes.
+///
+/// `rename` cannot cross volumes: the contents would have to be read and written anyway, so
+/// the only way to honour the gesture is to copy the entry and then take the original away.
+/// The copy is removed again when the delete fails, because leaving both sides behind is a
+/// copy the user never asked for.
+fn move_across(from: &Path, to: &Path, is_dir: bool) -> Result<(), String> {
+  if std::fs::rename(from, to).is_ok() {
+    return Ok(());
+  }
+  let copied = if is_dir {
+    copy_tree(from, to)
+  } else {
+    std::fs::copy(from, to)
+      .map(|_| ())
+      .map_err(|e| format!("copy_failed:{e}"))
+  };
+  if let Err(e) = copied {
+    if is_dir {
+      let _ = std::fs::remove_dir_all(to);
+    } else {
+      let _ = std::fs::remove_file(to);
+    }
+    return Err(e);
+  }
+  let removed = if is_dir {
+    std::fs::remove_dir_all(from)
+  } else {
+    std::fs::remove_file(from)
+  };
+  if let Err(e) = removed {
+    if is_dir {
+      let _ = std::fs::remove_dir_all(to);
+    } else {
+      let _ = std::fs::remove_file(to);
+    }
+    return Err(format!("move_failed:{e}"));
+  }
+  Ok(())
+}
+
+/// Move a file, or a folder and everything in it, into another folder.
+///
+/// A move is the one entry operation that takes something away from where it was, so nothing
+/// is replaced: a folder already holding that name is a refusal rather than a reason to
+/// invent a numbered one. Everything the app keys by the path is re-homed afterwards, so an
+/// open tab, its draft and its version history follow the entry rather than being left
+/// pointing at a file that is no longer there.
+#[tauri::command(async)]
+pub fn move_entry(app: AppHandle, source: String, target: String) -> Result<Renamed, String> {
+  // `old` is the identity the re-homing keys on; the move itself uses the spelling on disk,
+  // because the name it carries over comes from these paths — a lowercased source would put
+  // `Report.txt` down as `report.txt`.
+  let old = draft::normalize_path(&source);
+  let from_io = draft::io_path(&source);
+  let dir = draft::io_path(&target);
+  if old.is_empty() || from_io.is_empty() || dir.is_empty() {
+    return Err("path_empty".into());
+  }
+  let from = Path::new(&from_io);
+  let dir_path = Path::new(&dir);
+  // Read as the entry itself: a link is what it is, not what it points at.
+  let meta = from
+    .symlink_metadata()
+    .map_err(|e| format!("move_not_found:{e}"))?;
+  if !dir_path.is_dir() {
+    return Err("move_no_target".into());
+  }
+  // The same line a copy and a delete draw: neither end of a move may be a drive root or a
+  // folder that holds the whole profile or the system directory.
+  if refused_by_scope(dir_path, &protected_roots()) || refused_by_scope(from, &protected_roots()) {
+    return Err("move_refused".into());
+  }
+  if meta.file_type().is_symlink() {
+    return Err("move_link".into());
+  }
+  let name = from
+    .file_name()
+    .map(|n| n.to_string_lossy().to_string())
+    .ok_or("move_no_name")?;
+  let to = dir_path.join(&name);
+  let new = draft::normalize_path(&to.to_string_lossy());
+  if new.is_empty() {
+    return Err("path_unresolvable".into());
+  }
+  // Dropped back into the folder it came from: nothing moves, so nothing has to be re-homed.
+  if new == old {
+    return Ok(Renamed {
+      old_path: old,
+      path: new,
+      name,
+    });
+  }
+  let is_dir = meta.is_dir();
+  // A folder moved inside itself would carry its own destination along with it.
+  if is_dir && under(&new, &old) {
+    return Err("move_into_itself".into());
+  }
+  if to.exists() {
+    return Err("move_exists".into());
+  }
+  move_across(from, &to, is_dir)?;
+  rekey_state(&app, &old, &new)?;
+  Ok(Renamed {
+    old_path: old,
+    path: new,
+    name,
   })
 }
 

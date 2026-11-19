@@ -353,6 +353,17 @@ export function IconCopy({ size = 14 }: IconProps) {
   );
 }
 
+/** Cut: the scissors that take the entry out of where it was. */
+export function IconCut({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <circle cx="6" cy="6" r="2.5" />
+      <circle cx="6" cy="18" r="2.5" />
+      <path d="M8.1 7.7L20 18M8.1 16.3L20 6" />
+    </svg>
+  );
+}
+
 /** Paste: the clipboard the copy is waiting on. */
 export function IconPaste({ size = 14 }: IconProps) {
   return (

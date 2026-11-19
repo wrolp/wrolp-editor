@@ -1554,6 +1554,34 @@ export default function App() {
   );
 
   /**
+   * Move a file or a folder into another folder, then re-home what follows its path.
+   *
+   * Pending drafts are written first for the same reason a rename writes them: a debounced
+   * draft that landed after the backend had re-homed them would put one back under the old
+   * path. A refused move touches nothing, which is what leaves the tree as it was.
+   */
+  const moveEntryTo = useCallback(
+    async (source: string, target: string): Promise<boolean> => {
+      await draft.flushAll();
+      const out = await api.moveEntry(source, target).catch((e) => {
+        toast(errorMessage(e));
+        return null;
+      });
+      if (!out) return false;
+      // A move back into the folder it came from answers with the same path and nothing moved.
+      if (out.path === out.oldPath) return true;
+      rehomePairs([out]);
+      if (rootRef.current && isUnder(rootRef.current, out.oldPath)) {
+        setSidebarRoot(rekeyPath(rootRef.current, out.oldPath, out.path));
+      }
+      refreshHistory();
+      toast(t("side.moved", { name: basename(out.path) }));
+      return true;
+    },
+    [draft, rehomePairs, refreshHistory, setSidebarRoot, toast]
+  );
+
+  /**
    * Create a file, a folder, or an encrypted file in the Explorer's tree.
    *
    * A new file opens straight away: it is empty, so there is nothing to decide about it, and
@@ -3326,6 +3354,7 @@ const defaultModeFor = useCallback(
           onBrowseImages={(dir) => void tabs.openGallery(dir)}
           onCreate={createEntry}
           onPaste={pasteEntry}
+          onMove={moveEntryTo}
           onPasteFiles={pasteFiles}
           onDropFiles={dropFiles}
           onOpenDroppedFiles={openDroppedFiles}

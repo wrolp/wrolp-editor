@@ -1689,6 +1689,13 @@ body.resizing .editor-host {
   outline-offset: -2px;
   color: var(--text-strong);
 }
+/* A row is being carried to another folder. The pointer leads the gesture, so the cursor
+   says so everywhere it goes, and nothing under it may start selecting text instead. */
+body.tree-dragging,
+body.tree-dragging * {
+  cursor: grabbing !important;
+  user-select: none;
+}
 .tree-row .chev {
   flex: 0 0 12px;
   width: 12px;

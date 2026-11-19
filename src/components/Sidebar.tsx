@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
@@ -15,6 +16,7 @@ import {
   IconChevron,
   IconCompare,
   IconCopy,
+  IconCut,
   IconEye,
   IconEyeOff,
   IconFile,
@@ -78,6 +80,11 @@ interface MenuTarget extends NodeTarget {
   y: number;
 }
 
+/** What "Copy" or "Cut" last took: the node, and which of the two gestures took it. */
+interface ClipTarget extends NodeTarget {
+  cut: boolean;
+}
+
 /**
  * What the name being typed will produce.
  *
@@ -130,6 +137,9 @@ function covers(refresh: RefreshRequest | null, path: string): number {
 
 /** `.folder-menu`'s CSS width. The panel is placed by hand, so the number is needed twice. */
 const FOLDER_MENU_WIDTH = 260;
+
+/** How far the pointer has to travel before a press on a row becomes a drag. */
+const DRAG_THRESHOLD = 4;
 
 /**
  * How often the folders on screen are asked for their stamp. A stamp is one metadata call per
@@ -279,6 +289,11 @@ interface TreeHandlers {
   onToggleSelect: (target: NodeTarget) => void;
   /** Selects every sibling between the anchor and this row (Shift+click). */
   onSelectRange: (target: NodeTarget, siblings: NodeTarget[]) => void;
+  /**
+   * A row was pressed. That may be a click or the start of a drag, and only the pointer
+   * travelling far enough from where it went down decides which.
+   */
+  onRowPress: (target: NodeTarget, e: ReactPointerEvent<HTMLDivElement>) => void;
   /** The folder a new entry is being named in, and what it will be; null when idle. */
   creating: CreatingTarget | null;
   /** Creates a node on disk; resolves false when the name or the disk refused it. */
@@ -388,6 +403,7 @@ function FileRow({
   selected,
   onToggleSelect,
   onSelectRange,
+  onRowPress,
   siblings,
   gitMarks,
 }: NodeProps & { entry: FsEntry; siblings: NodeTarget[] }) {
@@ -407,8 +423,14 @@ function FileRow({
       // the same bubble the rest of the app uses for its plain `title`s.
       data-tip={entry.name}
       data-tip-detail={entry.path}
+      // The row's own path: a keyboard cut follows the last row pressed, and this is how
+      // that press is turned back into the node it landed in.
+      data-path={entry.path}
       // A file drop over this row belongs in the folder holding it.
       data-dir={parentOf(entry.path)}
+      // A row can be dragged into a folder elsewhere in the tree. While its name is being
+      // edited the press belongs to the field, or selecting the text would move the file.
+      onPointerDown={editing ? undefined : (e) => onRowPress(target, e)}
       style={indent(depth)}
       // A click inside the row is the edit taking or losing the focus, not a request to
       // open the file the row happens to name.
@@ -487,6 +509,7 @@ function FolderNode({
   selected,
   onToggleSelect,
   onSelectRange,
+  onRowPress,
   siblings,
   ...handlers
 }: NodeProps & { entry: FsEntry; siblings: NodeTarget[] }) {
@@ -572,8 +595,12 @@ function FolderNode({
         // the same bubble the rest of the app uses for its plain `title`s.
         data-tip={entry.name.replace(/\/$/, "")}
         data-tip-detail={entry.path}
+        // The row's own path, as for a file row: what Ctrl+X names.
+        data-path={entry.path}
         // A file drop over a folder row belongs inside that folder.
         data-dir={entry.path.replace(/[\\/]+$/, "")}
+        // A folder drags into another folder, taking everything in it along.
+        onPointerDown={editing ? undefined : (e) => onRowPress(target, e)}
         style={indent(depth)}
         onClick={
           editing
@@ -642,6 +669,7 @@ function FolderNode({
               renaming={renaming}
               onRename={onRename}
               onRenameEnd={onRenameEnd}
+              onRowPress={onRowPress}
               creating={creating}
               onCreate={onCreate}
               onCreateEnd={onCreateEnd}
@@ -761,6 +789,7 @@ interface Props extends Omit<
   | "selected"
   | "onToggleSelect"
   | "onSelectRange"
+  | "onRowPress"
 > {
   visible: boolean;
   width: number;
@@ -821,6 +850,12 @@ interface Props extends Omit<
    * nothing was copied, in which case the tree is left showing what it already has.
    */
   onPaste: (source: string, target: string) => Promise<boolean>;
+  /**
+   * Moves `source` into the folder `target`, whole if it is a folder. Resolves false when the
+   * move was refused — the name is taken, the target is inside the entry — in which case
+   * nothing on disk changed and the tree still shows what it had.
+   */
+  onMove: (source: string, target: string) => Promise<boolean>;
   /**
    * Pastes the files sitting on the system clipboard — the ones Explorer copied — into `dir`.
    * Resolves false when nothing landed, which leaves the tree showing what it already has.
@@ -964,14 +999,16 @@ export default function Sidebar(props: Props) {
   /** The open panel itself, so a wheel inside it can be told from a wheel anywhere else. */
   const foldersPanel = useRef<HTMLDivElement>(null);
   /**
-   * What "Copy" last took, waiting to be pasted.
+   * What "Copy" or "Cut" last took, waiting to be pasted.
    *
-   * A path rather than the bytes: the tree is a view of the disk, and the copy is done by
-   * the backend at paste time, so a folder copied and then edited still pastes what is there
-   * now. It is also why the entry has to still exist when the paste happens — a copy is a
-   * promise about a place, not a snapshot carried across.
+   * A path rather than the bytes: the tree is a view of the disk, and the work is done by the
+   * backend at paste time, so a folder copied and then edited still pastes what is there now.
+   * It is also why the entry has to still exist when the paste happens — either gesture is a
+   * promise about a place, not a snapshot carried across. `cut` is only a question of what the
+   * paste does: the bytes move instead of being copied, and the entry is then out of the
+   * clipboard, because a cut happens once.
    */
-  const [clipboard, setClipboard] = useState<NodeTarget | null>(null);
+  const [clipboard, setClipboard] = useState<ClipTarget | null>(null);
   const [refreshed, setRefreshed] = useState<Record<string, number>>({});
   /** The refresh aimed at one folder, and what it covers. See `covers`. */
   const [refresh, setRefresh] = useState<RefreshRequest | null>(null);
@@ -1222,22 +1259,28 @@ export default function Sidebar(props: Props) {
     return parentOf(target.path) || rootDir;
   };
 
-  /** Paste the copied entry into a folder, then re-read that folder so the copy shows. */
-  const runPaste = async (target: NodeTarget | null) => {
-    const dir = pasteTarget(target);
-    if (!clipboard || !dir) return;
-    if (!(await props.onPaste(clipboard.path, dir))) return;
-    bumpFolder(dir);
-  };
-
   /**
-   * Paste what Windows Explorer copied into a folder. There is no internal clipboard involved:
-   * the files come from the system one, and the backend names them the same way a copy inside
-   * the tree does.
+   * Put whatever is waiting into `dir`, then re-read what changed.
+   *
+   * The internal clipboard comes first: an entry copied or cut inside the tree is the more
+   * recent gesture, and pasting the system clipboard over it would silently ignore it. With
+   * nothing inside the tree, the files Explorer copied are what a paste means.
+   *
+   * A cut is spent once it lands: the entry is now somewhere else, so offering the same move
+   * again would only ever fail. Both ends of the tree are re-read then, because a move empties
+   * the folder it came from as well as filling the one it went to.
    */
-  const runPasteFiles = async (target: NodeTarget | null) => {
-    const dir = pasteTarget(target);
-    if (!dir) return;
+  const pasteInto = async (dir: string) => {
+    if (clipboard) {
+      const source = clipboard.path;
+      const cut = clipboard.cut;
+      if (!(await (cut ? props.onMove(source, dir) : props.onPaste(source, dir)))) return;
+      if (cut) setClipboard(null);
+      bumpFolder(dir);
+      const from = parentOf(source);
+      if (cut && from && pathKey(from) !== pathKey(dir)) bumpFolder(from);
+      return;
+    }
     if (!(await props.onPasteFiles(dir))) return;
     bumpFolder(dir);
   };
@@ -1249,12 +1292,243 @@ export default function Sidebar(props: Props) {
    * rows whose names differ by where the copy was made.
    */
   const runPasteAny = async (target: NodeTarget | null) => {
-    if (clipboard) {
-      await runPaste(target);
+    const dir = pasteTarget(target);
+    if (!dir) return;
+    await pasteInto(dir);
+  };
+
+  /**
+   * Cut the row the last press landed in, which is what a Ctrl+X over the tree is aimed at.
+   * One entry at a time: the clipboard a paste reads holds a single path, the same way the
+   * menu's own Copy does.
+   */
+  const cutRow = (row: { path: string; isDir: boolean } | null) => {
+    if (!row) return;
+    const path = row.path.replace(/[\\/]+$/, "");
+    if (!path) return;
+    const known = selected.get(pathKey(path));
+    const name = (known?.name ?? basename(path)).replace(/\/$/, "");
+    setClipboard({ path, name, isDir: row.isDir, cut: true });
+    onError(t("side.cutReady", { name }));
+  };
+
+  /**
+   * Move one or more rows into a folder, then re-read both ends.
+   *
+   * One at a time, so a refused row does not take the rest with it. A row already in the
+   * target, and a row that sits inside another row being moved, are dropped from the list
+   * rather than asked for: the answer could only be a refusal. The folder that lost them and
+   * the one that took them are each read once, at the end.
+   */
+  const runMove = async (sources: string[], dir: string) => {
+    const wanted = sources.filter(
+      (source) =>
+        pathKey(source) !== pathKey(dir) && pathKey(parentOf(source)) !== pathKey(dir)
+    );
+    const moved = wanted.filter(
+      (source) =>
+        !wanted.some(
+          (other) => pathKey(other) !== pathKey(source) && isUnder(source, other)
+        )
+    );
+    const changed = new Set<string>();
+    let any = false;
+    for (const source of moved) {
+      if (!(await props.onMove(source, dir))) continue;
+      any = true;
+      const from = parentOf(source);
+      if (from) changed.add(from);
+    }
+    if (!any) return;
+    changed.add(dir);
+    for (const folder of changed) bumpFolder(folder);
+    // The rows that moved are no longer in the folder they were picked in, so the highlight
+    // they carried would point at nothing.
+    clearSelection();
+  };
+
+  /**
+   * The rows in flight: filled in once a press has travelled far enough to be a drag.
+   *
+   * A row that is part of the selection carries the selection; any other row carries itself,
+   * which is what lets one file be moved without clearing what was picked before it.
+   */
+  const dragPaths = useRef<string[]>([]);
+
+  /**
+   * A press that may still turn into a drag, and whether it already has.
+   *
+   * `el` is the row that was pressed, kept so the pointer can be captured on it: with the
+   * capture in place a release outside the window still arrives, and a drag that lost its
+   * pointerup would otherwise stay half-started.
+   */
+  const dragPress = useRef<{
+    x: number;
+    y: number;
+    rows: NodeTarget[];
+    el: HTMLElement;
+    pointerId: number;
+    active: boolean;
+  } | null>(null);
+  /** When the click that follows a drag has to be swallowed, and 0 when there is none. */
+  const suppressClick = useRef(0);
+
+  const startDragPress = (target: NodeTarget, e: ReactPointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    const key = pathKey(target.path);
+    dragPress.current = {
+      x: e.clientX,
+      y: e.clientY,
+      rows: selected.has(key) && selected.size > 1 ? [...selected.values()] : [target],
+      el: e.currentTarget,
+      pointerId: e.pointerId,
+      active: false,
+    };
+  };
+
+  /** The folder a drop at `el` would land in, or null where a drop means nothing. */
+  const moveDirAt = (el: HTMLElement | null): string | null => {
+    if (!el) return null;
+    const folder = el.closest<HTMLElement>(".tree-row.folder");
+    if (folder) return folder.dataset.dir ?? null;
+    // A file row is not a place, and neither is the header: only the blank space of the tree
+    // belongs to the folder the Explorer is showing.
+    if (el.closest(".tree-row")) return null;
+    return el.closest(".tree") ? rootDir : null;
+  };
+
+  /**
+   * True when the rows in flight may land in `dir`.
+   *
+   * The folder a row is already in is not a destination: the move would put it back where it
+   * came from, which is what dropping it on its own row has to mean — nothing at all.
+   */
+  const canMoveTo = (dir: string) =>
+    dragPaths.current.length > 0 &&
+    dragPaths.current.every(
+      (path) =>
+        pathKey(path) !== pathKey(dir) &&
+        pathKey(parentOf(path)) !== pathKey(dir) &&
+        !isUnder(dir, path)
+    );
+
+  /**
+   * Lights up the folder a drop would land in. Written straight to the row's class, the same
+   * way the native drop highlight is: a drag reports a position many times a second, and
+   * re-rendering the tree on each of those is not worth a highlight.
+   */
+  const moveTargetRow = useRef<HTMLElement | null>(null);
+  const markMoveTarget = (row: HTMLElement | null) => {
+    if (moveTargetRow.current === row) return;
+    moveTargetRow.current?.classList.remove("drop-target");
+    row?.classList.add("drop-target");
+    moveTargetRow.current = row;
+  };
+
+  /**
+   * The pointer moving while a row is pressed: the gesture becomes a drag once it has gone
+   * `DRAG_THRESHOLD` from where it went down, and after that every move looks for the folder
+   * underneath it.
+   */
+  const dragMove = (e: PointerEvent) => {
+    const press = dragPress.current;
+    if (!press) return;
+    if (!press.active) {
+      if (
+        Math.abs(e.clientX - press.x) < DRAG_THRESHOLD &&
+        Math.abs(e.clientY - press.y) < DRAG_THRESHOLD
+      ) {
+        return;
+      }
+      press.active = true;
+      // A folder's listing spells its name with a trailing separator, and a path handed to
+      // the backend must not: the separator would name a folder that does not exist as such.
+      dragPaths.current = press.rows.map((row) => row.path.replace(/[\\/]+$/, ""));
+      document.body.classList.add("tree-dragging");
+      try {
+        press.el.setPointerCapture(press.pointerId);
+      } catch {
+        // The row was re-read out of the tree while it was pressed. The release still
+        // reaches the window, so the gesture can finish without the capture.
+      }
+    }
+    const under = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+    const dir = moveDirAt(under);
+    if (!dir || !canMoveTo(dir)) {
+      markMoveTarget(null);
       return;
     }
-    await runPasteFiles(target);
+    markMoveTarget(under?.closest<HTMLElement>(".tree-row.folder") ?? null);
   };
+
+  /** The pointer going up: land the rows where they were let go, or drop the gesture. */
+  const dragEnd = (e: PointerEvent) => {
+    const press = dragPress.current;
+    dragPress.current = null;
+    document.body.classList.remove("tree-dragging");
+    if (!press?.active) {
+      markMoveTarget(null);
+      return;
+    }
+    // The release is followed by a click, and that click is the tail of a drag rather than
+    // a request to open the row it happens to land on.
+    suppressClick.current = Date.now();
+    const under = document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null;
+    const dir = moveDirAt(under);
+    const paths = dragPaths.current;
+    const allowed = !!dir && canMoveTo(dir);
+    dragPaths.current = [];
+    markMoveTarget(null);
+    if (!dir || !allowed) return;
+    void runMove(paths, dir);
+  };
+
+  /** A drag that will never be released on purpose: the pointer was cancelled, or the window lost it. */
+  const dragCancel = () => {
+    const press = dragPress.current;
+    dragPress.current = null;
+    if (press?.active) suppressClick.current = Date.now();
+    dragPaths.current = [];
+    document.body.classList.remove("tree-dragging");
+    markMoveTarget(null);
+  };
+
+  const dragHandlers = { move: dragMove, end: dragEnd, cancel: dragCancel };
+  const dragHandlersRef = useRef(dragHandlers);
+  dragHandlersRef.current = dragHandlers;
+
+  /**
+   * A drag inside the tree is followed on the window, not by the HTML drag events: Tauri
+   * claims WebView2's whole drag-and-drop channel on Windows (`dragDropEnabled`, which is what
+   * makes a file dropped from Explorer arrive as a window event), and while it does, no
+   * `dragstart` ever reaches the page. Pointer events are not affected by that.
+   */
+  useEffect(() => {
+    const move = (e: PointerEvent) => dragHandlersRef.current.move(e);
+    const end = (e: PointerEvent) => dragHandlersRef.current.end(e);
+    const cancel = () => dragHandlersRef.current.cancel();
+    const guardClick = (e: MouseEvent) => {
+      const at = suppressClick.current;
+      if (!at) return;
+      suppressClick.current = 0;
+      // The click a release leaves behind arrives at once; anything later is the user's.
+      if (Date.now() - at > 800) return;
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    window.addEventListener("pointermove", move, true);
+    window.addEventListener("pointerup", end, true);
+    window.addEventListener("pointercancel", cancel, true);
+    window.addEventListener("blur", cancel);
+    window.addEventListener("click", guardClick, true);
+    return () => {
+      window.removeEventListener("pointermove", move, true);
+      window.removeEventListener("pointerup", end, true);
+      window.removeEventListener("pointercancel", cancel, true);
+      window.removeEventListener("blur", cancel);
+      window.removeEventListener("click", guardClick, true);
+    };
+  }, []);
 
   /**
    * The two gestures that bring files in from Windows Explorer. Both are window-level, not
@@ -1266,6 +1540,8 @@ export default function Sidebar(props: Props) {
     onDropFiles: props.onDropFiles,
     onOpenDroppedFiles: props.onOpenDroppedFiles,
     onPasteFiles: props.onPasteFiles,
+    pasteInto,
+    cutRow,
     bumpFolder,
     rootDir,
     view,
@@ -1407,39 +1683,56 @@ export default function Sidebar(props: Props) {
 
   /**
    * Where the last press landed in this sidebar. A shortcut follows the last place used, and
-   * a press on a row names the folder that row belongs to; a press on the blank space of the
-   * tree names the folder being shown.
+   * a press on a row names the row itself and the folder it belongs to; a press on the blank
+   * space of the tree names the folder being shown and no row.
    */
-  const sidebarPress = useRef<{ used: boolean; dir: string | null }>({ used: false, dir: null });
+  const sidebarPress = useRef<{
+    used: boolean;
+    dir: string | null;
+    row: { path: string; isDir: boolean } | null;
+  }>({ used: false, dir: null, row: null });
   useEffect(() => {
     const track = (e: PointerEvent) => {
       const el = e.target as HTMLElement | null;
+      const row = el?.closest<HTMLElement>(".tree-row") ?? null;
+      const path = row?.dataset.path;
       sidebarPress.current = {
         used: !!el?.closest(".sidebar"),
         dir: el?.closest<HTMLElement>("[data-dir]")?.dataset.dir ?? null,
+        row: path ? { path, isDir: !!row?.classList.contains("folder") } : null,
       };
     };
     window.addEventListener("pointerdown", track, true);
     return () => window.removeEventListener("pointerdown", track, true);
   }, []);
 
+  /**
+   * Ctrl+X and Ctrl+V over the tree: cut the row the last press landed in, and paste into
+   * the folder it named. Both go through the same clipboard the menu uses, so a cut followed
+   * by a paste is one move rather than a copy, and neither gesture reaches the editor.
+   */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.ctrlKey || e.metaKey) || e.key.toLowerCase() !== "v") return;
+      if (!(e.ctrlKey || e.metaKey)) return;
+      const key = e.key.toLowerCase();
+      if (key !== "v" && key !== "x") return;
       const el = e.target as HTMLElement | null;
-      // Monaco, a rename field and any dialog keep their own paste.
+      // Monaco, a rename field and any dialog keep their own paste and cut.
       if (el?.closest("input, textarea, [contenteditable], .monaco-editor, .modal")) return;
-      // So does the rest of the window: a Ctrl+V aimed at the editor is not a request to
-      // copy files into the folder, even when the editor happens not to hold the focus.
+      // So does the rest of the window: a shortcut aimed at the editor is not a request to
+      // work on files, even when the editor happens not to hold the focus.
       if (!sidebarPress.current.used) return;
       const state = dropRef.current;
       if (!state.visible || state.view !== "explorer") return;
+      if (key === "x") {
+        e.preventDefault();
+        state.cutRow(sidebarPress.current.row);
+        return;
+      }
       const dir = sidebarPress.current.dir || state.rootDir;
       if (!dir) return;
       e.preventDefault();
-      void state.onPasteFiles(dir).then((ok) => {
-        if (ok) state.bumpFolder(dir);
-      });
+      void state.pasteInto(dir);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -2049,6 +2342,7 @@ export default function Sidebar(props: Props) {
                 selected={new Set(selected.keys())}
                 onToggleSelect={toggleSelect}
                 onSelectRange={selectRange}
+                onRowPress={startDragPress}
                 onContextMenu={(target, x, y) => {
                   // A right-click outside the selection means that row alone: keeping a
                   // selection the user is not looking at would make the menu act on rows
@@ -2557,7 +2851,7 @@ export default function Sidebar(props: Props) {
               <div
                 className="ctx-item"
                 onClick={() => {
-                  setClipboard({ path: menu.path, name: menu.name, isDir: menu.isDir });
+                  setClipboard({ path: menu.path, name: menu.name, isDir: menu.isDir, cut: false });
                   // Nothing else moves when a copy is taken, so without a word about it the
                   // menu closing would be the only sign that anything happened.
                   onError(t("side.copyReady", { name: menu.name.replace(/\/$/, "") }));
@@ -2568,6 +2862,21 @@ export default function Sidebar(props: Props) {
                   <IconCopy size={14} />
                 </span>
                 {t("side.menuCopy")}
+              </div>
+              {/* A cut is the same clipboard with a different paste: the entry is taken from
+                  where it is rather than duplicated, so the word about it says so. */}
+              <div
+                className="ctx-item"
+                onClick={() => {
+                  setClipboard({ path: menu.path, name: menu.name, isDir: menu.isDir, cut: true });
+                  onError(t("side.cutReady", { name: menu.name.replace(/\/$/, "") }));
+                  setMenu(null);
+                }}
+              >
+                <span className="ctx-icon">
+                  <IconCut size={14} />
+                </span>
+                {t("side.menuCut")}
               </div>
               <div
                 className="ctx-item"

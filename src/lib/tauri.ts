@@ -934,6 +934,16 @@ export const api = {
   copyEntry: (source: string, target: string) =>
     invoke<FsEntry>("copy_entry", { source, target }),
   /**
+   * Move a file, or a folder and everything in it, into `target`.
+   *
+   * Unlike a copy, a move never renames what it lands on: a folder already holding that name
+   * is refused, because the other name is somebody's entry and this gesture is not about it.
+   * Everything the app keys by the old path is re-homed on the backend, and the pair is handed
+   * back for the parts of the store the window owns.
+   */
+  moveEntry: (source: string, target: string) =>
+    invoke<Renamed>("move_entry", { source, target }),
+  /**
    * Copy the files on the system clipboard (what Explorer put there) into `target`.
    *
    * Each one lands by the same rules as `copyEntry`. A source that cannot be taken does not

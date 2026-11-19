@@ -91,6 +91,7 @@ pub fn run() {
       entry::create_file,
       entry::create_dir,
       entry::copy_entry,
+      entry::move_entry,
       entry::paste_clipboard_files,
       entry::copy_dropped_files,
       entry::keep_file,
