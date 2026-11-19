@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from "react";
+import { useLayoutEffect, useRef, type MouseEvent } from "react";
 import { cutMiddle, type NameEllipsis } from "../lib/nameEllipsis";
 
 interface Props {
@@ -19,6 +19,11 @@ interface Props {
   /**
    * Put the whole name in a native tooltip while it is cut. Opt-in: rows that already hang a
    * hover bubble of their own (the Explorer, the tab strip) would otherwise show two.
+   *
+   * A middle cut knows when it cut — it did the cutting — so its title is written with the
+   * text. An end cut is the browser's, and whether it cut is only known from the laid-out
+   * widths; that is asked at hover, so a list pays for the answer one row at a time instead of
+   * measuring every row as it is drawn.
    */
   tooltip?: boolean;
 }
@@ -117,10 +122,20 @@ export default function NameText({ name, mode, className, pinned = false, toolti
     return () => observer.disconnect();
   }, [name, mode, ghost, tooltip]);
 
+  // The whole name, for the browser's ellipsis case only: an end cut leaves the text in place,
+  // so `scrollWidth` against `clientWidth` is what says whether anything is hidden.
+  const hintOnHover = (e: MouseEvent<HTMLSpanElement>) => {
+    const el = e.currentTarget;
+    const hint = el.scrollWidth > el.clientWidth ? name : "";
+    if (el.title !== hint) el.title = hint;
+  };
+
   return (
     <span
       ref={boxRef}
       className={className ? `${className}${ghost ? " pinned" : ""}` : undefined}
+      // Only the end cut needs this: a middle cut already wrote its own title while fitting.
+      onMouseEnter={tooltip && mode === "end" ? hintOnHover : undefined}
     >
       {ghost ? (
         <>

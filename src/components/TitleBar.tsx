@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import TabBar from "./TabBar";
 import { TabIcon } from "./FileIcon";
+import NameText from "./NameText";
 import { t } from "../lib/i18n";
 import {
   IconChevron,
@@ -183,7 +184,13 @@ export default function TitleBar(props: Props) {
                   }}
                 >
                   <TabIcon tab={tab} />
-                  <span className="dd-name">{tab.name}</span>
+                  <NameText
+                    name={tab.name}
+                    mode="end"
+                    className="dd-name"
+                    // The row cuts a long name with an ellipsis; hovering it names the file.
+                    tooltip
+                  />
                   <button
                     className="dd-close"
                     title={t("tab.close")}
