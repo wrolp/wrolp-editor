@@ -23,6 +23,68 @@ interface Props {
   tooltip?: boolean;
 }
 
+/** One label waiting for its cut. */
+interface Fit {
+  /** The element whose width the text is measured against. */
+  box: HTMLSpanElement;
+  /** Where the cut goes: the box itself, or the copy drawn over a pinned ghost. */
+  target: HTMLSpanElement;
+  name: string;
+  /** A pinned label is sized by its whole name, so its cut may use every pixel of it. */
+  exact: boolean;
+  tooltip: boolean;
+}
+
+/**
+ * The labels waiting to be fitted, and whether a flush is already booked.
+ *
+ * A label works out its width and then writes the cut text into itself, and that write
+ * invalidates the layout the next label's measurement needs. Done row by row, a few thousand
+ * changed paths laid the whole document out once per path — which is why switching to a
+ * repository with many untracked files stopped the window. Queued, every width is read before
+ * any text is written, so one layout answers the whole list; the cuts themselves are measured on
+ * a canvas, which forces no layout at all.
+ */
+let pending: Fit[] = [];
+let booked = false;
+
+function queueFit(fit: Fit) {
+  pending.push(fit);
+  if (booked) return;
+  booked = true;
+  // A microtask rather than a frame: the queue is filled by layout effects, which run before the
+  // commit is painted, so a name is cut the first time its row is on screen.
+  queueMicrotask(flushFits);
+}
+
+function flushFits() {
+  booked = false;
+  const jobs = pending;
+  pending = [];
+  // Read: every width, with no write in between.
+  const widths = new Array<number>(jobs.length);
+  for (let i = 0; i < jobs.length; i += 1) {
+    const { box } = jobs[i];
+    widths[i] = box.isConnected ? box.getBoundingClientRect().width : 0;
+  }
+  // Write: the cuts. A width of 0 is a row outside the viewport and skipped
+  // (`content-visibility`), and cutting those down to the ellipsis would be worse than the full
+  // name; a row that has since gone has nothing to write into.
+  for (let i = 0; i < jobs.length; i += 1) {
+    const { box, target, name, exact, tooltip } = jobs[i];
+    if (!box.isConnected) continue;
+    const width = widths[i];
+    // A row keeps a pixel so its own cut never touches the edge; a pinned tab is already sized
+    // by the whole name, and taking one away there would cut a name that fits.
+    const next = width > 1 ? cutMiddle(box, name, exact ? width : width - 1) : name;
+    if (target.textContent !== next) target.textContent = next;
+    // The title goes on the box rather than the cut text, so a pinned label is covered as well.
+    // It is only there while something is missing from the name on screen.
+    const hint = tooltip && next !== name ? name : "";
+    if (box.title !== hint) box.title = hint;
+  }
+}
+
 /**
  * A name, shortened in the middle or at the end, measured against the space it is given.
  *
@@ -37,30 +99,20 @@ export default function NameText({ name, mode, className, pinned = false, toolti
   const ghost = pinned && mode === "middle";
 
   useLayoutEffect(() => {
+    // `end` is the stylesheet's own `text-overflow`: the name is written out whole and the
+    // browser draws the ellipsis. There is nothing to measure, and nothing to watch.
+    if (mode !== "middle") return;
     const box = boxRef.current;
     if (!box) return;
     // A row writes into the node it measures; a pinned tab measures the wrapper — sized by the
     // hidden copy — and writes into the copy drawn over it.
     const target = ghost ? cutRef.current : box;
     if (!target) return;
-    const fit = () => {
-      // `end`, and any row whose width is not known yet, is the stylesheet's own
-      // `text-overflow`: the name is written out whole and the browser draws the ellipsis.
-      // A width of 0 means the row is outside the viewport and skipped (`content-visibility`),
-      // and cutting every one of those down to the ellipsis would be worse than the full name.
-      const width = mode === "middle" ? box.getBoundingClientRect().width : 0;
-      // A row keeps a pixel so its own cut never touches the edge; a pinned tab is already
-      // sized by the whole name, and taking one away there would cut a name that fits.
-      const next = width > 1 ? cutMiddle(box, name, ghost ? width : width - 1) : name;
-      if (target.textContent !== next) target.textContent = next;
-      // The title goes on the box rather than the cut text, so a pinned label is covered as
-      // well. It is only there while something is missing from the name on screen.
-      const hint = tooltip && next !== name ? name : "";
-      if (box.title !== hint) box.title = hint;
-    };
-    fit();
-    if (mode !== "middle") return;
-    const observer = new ResizeObserver(fit);
+    const fit: Fit = { box, target, name, exact: ghost, tooltip };
+    queueFit(fit);
+    // A row's width can move without its name changing: the sidebar is resized, a sibling label
+    // is cut, the window is widened.
+    const observer = new ResizeObserver(() => queueFit(fit));
     observer.observe(box);
     return () => observer.disconnect();
   }, [name, mode, ghost, tooltip]);
