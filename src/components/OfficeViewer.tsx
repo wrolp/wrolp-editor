@@ -544,7 +544,10 @@ export default function OfficeViewer({ path, kind, csvText }: Props) {
 
   const step = (delta: number) => {
     if (records.length === 0) return;
-    setRecord(Math.min(Math.max(current + delta, 0), records.length - 1));
+    // The first record's "previous" is the last one: the counter walks a ring, so the arrow
+    // at the top of the list is a way round rather than a dead end.
+    const next = current + delta;
+    setRecord(next < 0 ? records.length - 1 : Math.min(next, records.length - 1));
   };
 
   /**
@@ -839,7 +842,6 @@ export default function OfficeViewer({ path, kind, csvText }: Props) {
                     type="button"
                     className="office-record-page-arrow prev"
                     aria-label={t("office.recordsPrev")}
-                    disabled={current <= 0}
                     onClick={() => step(-1)}
                   >
                     <IconChevron size={16} />
