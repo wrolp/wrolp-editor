@@ -1459,7 +1459,7 @@ export default function App() {
    * than once per pair.
    */
   const rehomePairs = useCallback(
-    (pairs: { oldPath: string; path: string }[]) => {
+    (pairs: { oldPath: string; path: string; name?: string }[]) => {
       // One simultaneous substitution, the same rule the hooks apply: a batch can swap two
       // paths, so each pair is tried against the path as it was and the first match wins.
       const mapPath = (path: string) => {
@@ -1497,15 +1497,15 @@ export default function App() {
         return null;
       });
       if (!out) return false;
-      // A name that differs only in spelling Windows folds away moves nothing, and there is
-      // then nothing to re-home.
-      if (out.path === out.oldPath) return true;
+      // The same name as before: nothing moved and nothing follows it. A change of case is
+      // not this — the key stays the same there, but the spelling and the labels do change.
+      if (out.path === out.oldPath && out.name === basename(out.oldPath)) return true;
       rehomePairs([out]);
       if (rootRef.current && isUnder(rootRef.current, out.oldPath)) {
         setSidebarRoot(rekeyPath(rootRef.current, out.oldPath, out.path));
       }
       refreshHistory();
-      toast(t("rename.done", { name: basename(out.path) }));
+      toast(t("rename.done", { name: out.name }));
       return true;
     },
     [draft, rehomePairs, refreshHistory, setSidebarRoot, toast]
@@ -1526,7 +1526,11 @@ export default function App() {
         return null;
       });
       if (!out) return false;
-      const moved = out.filter((pair) => pair.path !== pair.oldPath);
+      // A change of case keeps the same key, so it is not a `path` move — but the spelling
+      // and the tab labels follow it, so it still counts as one.
+      const moved = out.filter(
+        (pair) => pair.path !== pair.oldPath || pair.name !== basename(pair.oldPath)
+      );
       if (moved.length === 0) return true;
       rehomePairs(moved);
       const root = rootRef.current;

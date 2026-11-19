@@ -217,8 +217,10 @@ fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
 /// paste that had to be numbered is not a surprise found later.
 #[tauri::command(async)]
 pub fn copy_entry(source: String, target: String) -> Result<FsEntry, String> {
-  let from = draft::normalize_path(&source);
-  let dir = draft::normalize_path(&target);
+  // The spelling on disk, not the identity key: `normalize_path` lowercases on Windows, and
+  // the copy takes its name from this path — `Report.txt` used to land as `report.txt`.
+  let from = draft::io_path(&source);
+  let dir = draft::io_path(&target);
   if from.is_empty() || dir.is_empty() {
     return Err("path_empty".into());
   }
@@ -304,7 +306,9 @@ pub struct ClipboardPaste {
 /// count comes back so the caller can say what happened — but when nothing lands, the first
 /// reason is the error, because that is the one worth showing.
 fn copy_sources(sources: Vec<PathBuf>, target: String) -> Result<ClipboardPaste, String> {
-  let dir = draft::normalize_path(&target);
+  // Passed on to `copy_entry` as the folder to copy into, so it keeps the case the listing
+  // showed rather than the lowercased identity key.
+  let dir = draft::io_path(&target);
   if dir.is_empty() {
     return Err("path_empty".into());
   }
@@ -620,6 +624,38 @@ mod tests {
     assert!(
       names.iter().any(|n| n == "MyFolder"),
       "the folder must land on disk with the case the user typed, got {names:?}"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn a_pasted_copy_keeps_the_case_of_the_source_name() {
+    let dir = scratch("copy-case");
+    let root = std::path::PathBuf::from(&dir);
+    let from = root.join("from");
+    let to = root.join("to");
+    std::fs::create_dir_all(&from).expect("source dir");
+    std::fs::create_dir_all(&to).expect("target dir");
+    let source = from.join("Report.TXT");
+    std::fs::write(&source, b"x").expect("source file");
+
+    let copied = copy_entry(
+      source.to_string_lossy().into_owned(),
+      to.to_string_lossy().into_owned(),
+    )
+    .expect("copy");
+
+    assert_eq!(copied.name, "Report.TXT");
+    // The listing, not the returned name: on Windows `to/report.txt` would still resolve, so
+    // the only honest check is the spelling the directory holds.
+    let names: Vec<String> = std::fs::read_dir(&to)
+      .expect("read")
+      .flatten()
+      .map(|item| item.file_name().to_string_lossy().into_owned())
+      .collect();
+    assert!(
+      names.iter().any(|n| n == "Report.TXT"),
+      "the copy must keep the case of the source name, got {names:?}"
     );
     let _ = std::fs::remove_dir_all(&dir);
   }

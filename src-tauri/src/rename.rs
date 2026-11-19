@@ -25,6 +25,9 @@ use zeroize::Zeroize;
 pub struct Renamed {
   pub old_path: String,
   pub path: String,
+  /// The name the entry now carries, in the spelling on disk. A key is lowercased on
+  /// Windows, so a label cut from `path` would read `readme.md` over `README.md`.
+  pub name: String,
 }
 
 /// Longest single name segment Windows will take.
@@ -120,37 +123,67 @@ pub fn validate_name(raw: &str) -> Result<String, String> {
 #[tauri::command]
 pub fn rename_path(app: AppHandle, path: String, name: String) -> Result<Renamed, String> {
   let clean = validate_name(&name)?;
+  // `old` is the identity every store keys by, and `from` is the spelling the filesystem
+  // holds. They are not the same on Windows, where the identity is lowercased: moving the
+  // identity would put an uppercased name back down in lowercase.
   let old = draft::normalize_path(&path);
-  if old.is_empty() {
+  let from = draft::io_path(&path);
+  if old.is_empty() || from.is_empty() {
     return Err("path_empty".into());
   }
-  let source = Path::new(&old);
+  let source = Path::new(&from);
   source
     .metadata()
     .map_err(|e| format!("rename_not_found:{e}"))?;
   // The same line the asset scope draws: a folder that holds a whole drive, the system
   // directory or the user's profile is not this app's to rename.
-  if refused_by_scope(source, &protected_roots()) {
+  if refused_by_scope(Path::new(&old), &protected_roots()) {
     return Err("rename_refused".into());
   }
   let parent = source.parent().ok_or("rename_no_parent")?;
-  let new = draft::normalize_path(&parent.join(&clean).to_string_lossy());
+  // The folder's own spelling plus the name as typed. Running the joined path through
+  // `normalize_path` would canonicalize it to the entry that is there now, which for a
+  // change of case is the very name being replaced.
+  let to = parent.join(&clean);
+  let to_text = to.to_string_lossy().to_string();
+  let new = draft::normalize_path(&to_text);
   if new.is_empty() {
     return Err("path_unresolvable".into());
   }
-  // Everything the app keeps is spelled lowercase on Windows, so a rename that only changes
-  // case cannot be stored. Say nothing and move nothing rather than half-doing it.
   if new != old {
-    if Path::new(&new).exists() {
+    if to.exists() {
       return Err("rename_exists".into());
     }
-    std::fs::rename(source, &new).map_err(|e| format!("rename_failed:{e}"))?;
+    std::fs::rename(source, &to).map_err(|e| format!("rename_failed:{e}"))?;
     rekey_state(&app, &old, &new)?;
+  } else if to_text != from {
+    // Only the spelling changed, which Windows reports as the target being taken by the
+    // entry itself. The file steps aside and lands from there; its identity, and so every
+    // store keyed by it, does not change.
+    rename_spelling(source, parent, &to)?;
   }
   Ok(Renamed {
     old_path: old,
     path: new,
+    name: clean,
   })
+}
+
+/// Move an entry onto itself under another spelling.
+///
+/// A case change is the one rename a case-insensitive filesystem will not take directly,
+/// because the target name already answers as the source. Going through a name nothing holds
+/// is what makes the new spelling stick.
+fn rename_spelling(source: &Path, parent: &Path, to: &Path) -> Result<(), String> {
+  let bridge = free_bridge(parent);
+  std::fs::rename(source, &bridge).map_err(|e| format!("rename_failed:{e}"))?;
+  if let Err(e) = std::fs::rename(&bridge, to) {
+    // Put the entry back under the name it had: a failed rename must not leave it parked
+    // under a temporary name no store knows about.
+    let _ = std::fs::rename(&bridge, source);
+    return Err(format!("rename_failed:{e}"));
+  }
+  Ok(())
 }
 
 /// One rename asked for as part of a batch: the entry at `path` takes the bare name `name`.
@@ -164,13 +197,26 @@ pub struct RenameRequest {
 /// One entry a batch will move, plus the name it waits under when its target is still
 /// occupied by another entry of the same batch.
 struct Planned {
+  /// Identity of the entry, as every store keys it.
   old: String,
+  /// Identity it will be stored under.
   new: String,
+  /// The spelling on disk, which is what the moves themselves use.
+  from: String,
+  /// The spelling the entry will carry on disk.
+  to: String,
   /// True when another planned entry is moving out of `new`, so that name is only free once
   /// that entry has moved. Such an entry steps aside first and lands in the second pass.
   waits: bool,
   /// The temporary name it steps aside to, filled in while the batch runs.
   bridge: String,
+}
+
+impl Planned {
+  /// True when the disk has to move something: another name, or the same name in another case.
+  fn moves(&self) -> bool {
+    self.from != self.to
+  }
 }
 
 /// Rename several entries, and re-home the state that follows each of them.
@@ -190,6 +236,10 @@ pub fn rename_entries(app: AppHandle, items: Vec<RenameRequest>) -> Result<Vec<R
     planned
       .into_iter()
       .map(|item| Renamed {
+        name: Path::new(&item.to)
+          .file_name()
+          .map(|n| n.to_string_lossy().to_string())
+          .unwrap_or_default(),
         old_path: item.old,
         path: item.new,
       })
@@ -208,28 +258,32 @@ fn plan_batch(items: &[RenameRequest]) -> Result<Vec<Planned>, String> {
   for item in items {
     let clean = validate_name(&item.name)?;
     let old = draft::normalize_path(&item.path);
-    if old.is_empty() {
+    let from = draft::io_path(&item.path);
+    if old.is_empty() || from.is_empty() {
       return Err("path_empty".into());
     }
     // The same entry twice: the second rename would look for a file the first one moved.
     if !sources.insert(old.clone()) {
       return Err("rename_batch_duplicate".into());
     }
-    let source = Path::new(&old);
+    let source = Path::new(&from);
     source
       .metadata()
       .map_err(|e| format!("rename_not_found:{e}"))?;
-    if refused_by_scope(source, &protected_roots()) {
+    if refused_by_scope(Path::new(&old), &protected_roots()) {
       return Err("rename_refused".into());
     }
     let parent = source.parent().ok_or("rename_no_parent")?;
-    let new = draft::normalize_path(&parent.join(&clean).to_string_lossy());
+    let to = parent.join(&clean).to_string_lossy().to_string();
+    let new = draft::normalize_path(&to);
     if new.is_empty() {
       return Err("path_unresolvable".into());
     }
     planned.push(Planned {
       old,
       new,
+      from,
+      to,
       waits: false,
       bridge: String::new(),
     });
@@ -244,9 +298,10 @@ fn plan_batch(items: &[RenameRequest]) -> Result<Vec<Planned>, String> {
     }
   }
   // Two entries may not land on one name, whether they are in one folder or rely on the same
-  // name in different ones only by accident.
+  // name in different ones only by accident. A change of case lands on its own identity, so
+  // it counts here too: `B.txt` and `b.txt` are one name, not two.
   let mut targets = HashSet::new();
-  for item in planned.iter().filter(|item| item.new != item.old) {
+  for item in planned.iter().filter(|item| item.moves()) {
     if !targets.insert(item.new.clone()) {
       return Err("rename_batch_duplicate".into());
     }
@@ -255,13 +310,17 @@ fn plan_batch(items: &[RenameRequest]) -> Result<Vec<Planned>, String> {
   // sources; anything else would be overwritten rather than moved.
   let vacated: HashSet<String> = planned
     .iter()
-    .filter(|item| item.new != item.old)
+    .filter(|item| item.moves())
     .map(|item| item.old.clone())
     .collect();
-  for item in planned.iter_mut().filter(|item| item.new != item.old) {
+  for item in planned.iter_mut().filter(|item| item.moves()) {
+    if item.new == item.old {
+      // The only entry under the target name is the one being renamed, in another case.
+      continue;
+    }
     if vacated.contains(&item.new) {
       item.waits = true;
-    } else if Path::new(&item.new).exists() {
+    } else if Path::new(&item.to).exists() {
       return Err("rename_exists".into());
     }
   }
@@ -275,11 +334,27 @@ fn apply_batch(planned: &mut [Planned]) -> Result<(), String> {
     if !planned[index].waits {
       continue;
     }
-    let parent = Path::new(&planned[index].old)
+    let parent = Path::new(&planned[index].from)
       .parent()
       .ok_or("rename_no_parent")?;
     let bridge = free_bridge(parent);
-    if let Err(e) = std::fs::rename(&planned[index].old, &bridge) {
+    if let Err(e) = std::fs::rename(&planned[index].from, &bridge) {
+      undo_batch(planned, &[], &bridged);
+      return Err(format!("rename_failed:{e}"));
+    }
+    planned[index].bridge = bridge.to_string_lossy().to_string();
+    bridged.push(index);
+  }
+  // A name that only changes case is its own occupied target, so it steps aside as well:
+  // Windows would otherwise report the target as taken and leave the old spelling in place.
+  for index in 0..planned.len() {
+    let item = &planned[index];
+    if item.waits || !item.moves() || item.new != item.old {
+      continue;
+    }
+    let parent = Path::new(&item.from).parent().ok_or("rename_no_parent")?;
+    let bridge = free_bridge(parent);
+    if let Err(e) = std::fs::rename(&item.from, &bridge) {
       undo_batch(planned, &[], &bridged);
       return Err(format!("rename_failed:{e}"));
     }
@@ -290,17 +365,20 @@ fn apply_batch(planned: &mut [Planned]) -> Result<(), String> {
   // vacated by the time it lands.
   let mut landed: Vec<usize> = Vec::new();
   for index in 0..planned.len() {
-    if planned[index].waits || planned[index].new == planned[index].old {
+    if planned[index].waits
+      || !planned[index].moves()
+      || planned[index].new == planned[index].old
+    {
       continue;
     }
-    if let Err(e) = std::fs::rename(&planned[index].old, &planned[index].new) {
+    if let Err(e) = std::fs::rename(&planned[index].from, &planned[index].to) {
       undo_batch(planned, &landed, &bridged);
       return Err(format!("rename_failed:{e}"));
     }
     landed.push(index);
   }
   for &index in &bridged {
-    if let Err(e) = std::fs::rename(&planned[index].bridge, &planned[index].new) {
+    if let Err(e) = std::fs::rename(&planned[index].bridge, &planned[index].to) {
       undo_batch(planned, &landed, &bridged);
       return Err(format!("rename_failed:{e}"));
     }
@@ -317,10 +395,10 @@ fn apply_batch(planned: &mut [Planned]) -> Result<(), String> {
 /// that stopped the batch is the one worth saying, and a second one would only bury it.
 fn undo_batch(planned: &[Planned], landed: &[usize], bridged: &[usize]) {
   for &index in landed.iter().rev() {
-    let _ = std::fs::rename(&planned[index].new, &planned[index].old);
+    let _ = std::fs::rename(&planned[index].to, &planned[index].from);
   }
   for &index in bridged.iter().rev() {
-    let _ = std::fs::rename(&planned[index].bridge, &planned[index].old);
+    let _ = std::fs::rename(&planned[index].bridge, &planned[index].from);
   }
 }
 
@@ -368,7 +446,10 @@ fn rekey_batch(app: &AppHandle, planned: &[Planned]) -> Result<(), String> {
 }
 
 /// Move every stored path that pointed at `old` or inside it.
-fn rekey_state(app: &AppHandle, old: &str, new: &str) -> Result<(), String> {
+///
+/// Shared with `entry::move_entry`: a move changes a path exactly the way a rename does, so
+/// the state that follows one is the state that follows the other.
+pub(crate) fn rekey_state(app: &AppHandle, old: &str, new: &str) -> Result<(), String> {
   draft::rekey_prefix(app, old, new)?;
   file_settings::rekey_prefix(app, old, new)?;
   // A PDF's reading position belongs to the file, so it follows it across a rename too.
@@ -426,11 +507,13 @@ fn rekey_history(app: &AppHandle, old: &str, new: &str) -> Result<(), String> {
     let moved = rekey(&item.path, old, new);
     if moved != item.path {
       item.path = moved;
-      // The name is what the list shows, so it follows the path rather than staying stale.
-      item.name = Path::new(&item.path)
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| item.path.clone());
+      // The name is what the list shows, so it follows the path rather than staying stale —
+      // and in the spelling on disk, because the path here is a key and is lowercased on
+      // Windows while the entry itself may not be.
+      let shown = draft::display_name(&item.path);
+      if !shown.is_empty() {
+        item.name = shown;
+      }
       changed = true;
     }
   }
@@ -634,16 +717,57 @@ mod tests {
     let _ = std::fs::remove_dir_all(&dir);
   }
 
-  /// Windows folds case, so a batch that only changes the spelling asks for nothing.
+  /// A name that only changes case is one name to a case-insensitive filesystem, so the entry
+  /// has to step aside before it can land under the new spelling. Reading the folder rather
+  /// than asking `Path::exists` is what tells the two spellings apart.
   #[test]
-  fn a_name_that_only_changes_case_moves_nothing() {
+  fn a_name_that_only_changes_case_lands_in_the_new_spelling() {
     let dir = sandbox("case");
     std::fs::write(dir.join("a.txt"), "a").unwrap();
     let items = [ask(&dir, "a.txt", "A.txt")];
     let mut planned = plan_batch(&items).unwrap();
-    assert_eq!(planned[0].old, planned[0].new);
+    if cfg!(windows) {
+      // The key is lowercased there, so only the spelling moved.
+      assert_eq!(planned[0].old, planned[0].new, "the identity does not change");
+    }
+    assert!(planned[0].moves(), "the spelling does");
     apply_batch(&mut planned).unwrap();
-    assert!(dir.join("a.txt").exists());
+    assert_eq!(names(&dir), vec!["A.txt".to_string()]);
+    assert_eq!(std::fs::read_to_string(dir.join("A.txt")).unwrap(), "a");
     let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  /// The same case change on its own, without a batch around it.
+  #[test]
+  fn renaming_the_spelling_of_one_entry_leaves_its_text_alone() {
+    let dir = sandbox("spelling");
+    std::fs::write(dir.join("report.txt"), "text").unwrap();
+    let source = dir.join("report.txt");
+    rename_spelling(&source, &dir, &dir.join("Report.TXT")).unwrap();
+    assert_eq!(names(&dir), vec!["Report.TXT".to_string()]);
+    assert_eq!(std::fs::read_to_string(dir.join("Report.TXT")).unwrap(), "text");
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  /// A batch may not hand a name to one entry while another is only changing the case of it:
+  /// `B.txt` and `b.txt` are the same name.
+  #[test]
+  fn a_case_change_and_a_taker_of_that_name_are_refused() {
+    let dir = sandbox("case-taken");
+    std::fs::write(dir.join("a.txt"), "a").unwrap();
+    std::fs::write(dir.join("b.txt"), "b").unwrap();
+    let items = [ask(&dir, "a.txt", "A.txt"), ask(&dir, "b.txt", "a.txt")];
+    assert!(matches!(plan_batch(&items), Err(code) if code == "rename_batch_duplicate"));
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  /// The names one folder holds, in the spelling the filesystem reports.
+  fn names(dir: &Path) -> Vec<String> {
+    let mut out: Vec<String> = std::fs::read_dir(dir)
+      .unwrap()
+      .map(|entry| entry.unwrap().file_name().to_string_lossy().to_string())
+      .collect();
+    out.sort();
+    out
   }
 }

@@ -1135,84 +1135,108 @@ export function useEditorTabs({
    * model is still under the old path. Pending drafts must already be flushed by the caller,
    * or they would be written back under the old key.
    */
-  const rekeyTabsMany = useCallback((pairs: { oldPath: string; path: string }[]) => {
-    // One simultaneous substitution. A batch can swap two names, so every pair is tried
-    // against the path as it was and the first match wins; entries of a batch never nest,
-    // which is what makes one match the right number.
-    const mapPath = (path: string) => {
+  const rekeyTabsMany = useCallback(
+    (pairs: { oldPath: string; path: string; name?: string }[]) => {
+      // One simultaneous substitution. A batch can swap two names, so every pair is tried
+      // against the path as it was and the first match wins; entries of a batch never nest,
+      // which is what makes one match the right number.
+      const mapPath = (path: string) => {
+        for (const pair of pairs) {
+          const next = rekeyPath(path, pair.oldPath, pair.path);
+          if (next !== path) return next;
+        }
+        return path;
+      };
+      // The spelling the disk gave each name. A path is a key and is lowercased on Windows,
+      // so a tab labelled from it would read `readme.md` over `README.md`.
+      const named = new Map<string, string>();
       for (const pair of pairs) {
-        const next = rekeyPath(path, pair.oldPath, pair.path);
-        if (next !== path) return next;
+        if (pair.name) named.set(pathKey(pair.path), pair.name);
       }
-      return path;
-    };
-    const moved = new Map<string, string>();
-    for (const tab of tabsRef.current) {
-      if (!isFileTab(tab) || isUntitled(tab.path)) continue;
-      const next = mapPath(tab.path);
-      if (next !== tab.path) moved.set(pathKey(tab.path), next);
-    }
-    if (moved.size === 0) return;
-
-    const h = editorRef.current;
-    if (h) {
+      const moved = new Map<string, string>();
+      // A rename that only changes case keeps the same key, so only the label can follow it.
+      const relabelled = new Map<string, string>();
       for (const tab of tabsRef.current) {
-        const next = moved.get(pathKey(tab.path));
-        if (!next) continue;
-        const model = h.monaco.editor.getModel(h.monaco.Uri.parse(modelUri(tab.path)));
-        // A tab that has never mounted has no model to move; Editor builds it under the new
-        // path the first time the tab is shown.
-        if (!model) continue;
-        const uri = h.monaco.Uri.parse(modelUri(next));
-        if (h.monaco.editor.getModel(uri)) {
-          // A tab left over for the new path already keeps a model there. That model belongs
-          // to the path, so this one is dropped rather than made to fight it for the URI.
-          model.dispose();
+        if (!isFileTab(tab) || isUntitled(tab.path)) continue;
+        const next = mapPath(tab.path);
+        if (next !== tab.path) {
+          moved.set(pathKey(tab.path), next);
           continue;
         }
-        // Monaco 0.57 has no API to rename a model's URI; the model is rebuilt under the new
-        // path with its text and its language, and the editor follows it when it is showing it.
-        const rebuilt = h.monaco.editor.createModel(model.getValue(), model.getLanguageId(), uri);
-        if (h.editor.getModel() === model) h.editor.setModel(rebuilt);
-        model.dispose();
+        const name = named.get(pathKey(tab.path));
+        if (name && name !== tab.name) relabelled.set(pathKey(tab.path), name);
       }
-    }
-    for (const [key, next] of moved) {
-      const target = pathKey(next);
-      const offset = cursors.current.get(key);
-      if (offset !== undefined) {
-        cursors.current.delete(key);
-        cursors.current.set(target, offset);
+      if (moved.size === 0 && relabelled.size === 0) return;
+
+      const h = editorRef.current;
+      if (h) {
+        for (const tab of tabsRef.current) {
+          const next = moved.get(pathKey(tab.path));
+          if (!next) continue;
+          const model = h.monaco.editor.getModel(h.monaco.Uri.parse(modelUri(tab.path)));
+          // A tab that has never mounted has no model to move; Editor builds it under the new
+          // path the first time the tab is shown.
+          if (!model) continue;
+          const uri = h.monaco.Uri.parse(modelUri(next));
+          if (h.monaco.editor.getModel(uri)) {
+            // A tab left over for the new path already keeps a model there. That model belongs
+            // to the path, so this one is dropped rather than made to fight it for the URI.
+            model.dispose();
+            continue;
+          }
+          // Monaco 0.57 has no API to rename a model's URI; the model is rebuilt under the new
+          // path with its text and its language, and the editor follows it when it is showing it.
+          const rebuilt = h.monaco.editor.createModel(
+            model.getValue(),
+            model.getLanguageId(),
+            uri
+          );
+          if (h.editor.getModel() === model) h.editor.setModel(rebuilt);
+          model.dispose();
+        }
       }
-      if (pendingCursors.current.delete(key)) pendingCursors.current.add(target);
-    }
-    const rekeyed = (tab: Tab): Tab => {
-      const next = moved.get(pathKey(tab.path));
-      return !next || !isFileTab(tab)
-        ? tab
-        : {
-            ...tab,
-            path: next,
-            name: basename(next),
-            // A rename keeps the type the user picked: the overrides were re-keyed with the
-            // file, so the language chosen for it goes on applying at the new path.
-            language: tab.fileSettings.language ?? langOf(next, tab.original),
-          };
-    };
-    setTabs((prev) => prev.map(rekeyed));
-    setRestoreQueue((q) =>
-      q.map((req) => {
-        const next = moved.get(pathKey(req.path));
-        return next ? { ...req, path: next, name: basename(next) } : req;
-      })
-    );
-    // This tab is what the editor keeps showing behind a Settings or comparison tab, so it
-    // has to move with its tab rather than be re-derived from the stale object.
-    const last = lastFileTabRef.current;
-    if (last) lastFileTabRef.current = rekeyed(last);
-    // A document can point at its own pictures, and the grant covered the old folder.
-    for (const next of moved.values()) void api.allowAssetDir(parentOf(next)).catch(() => {});
-  }, []);
+      for (const [key, next] of moved) {
+        const target = pathKey(next);
+        const offset = cursors.current.get(key);
+        if (offset !== undefined) {
+          cursors.current.delete(key);
+          cursors.current.set(target, offset);
+        }
+        if (pendingCursors.current.delete(key)) pendingCursors.current.add(target);
+      }
+      const rekeyed = (tab: Tab): Tab => {
+        if (!isFileTab(tab)) return tab;
+        const key = pathKey(tab.path);
+        const next = moved.get(key);
+        if (!next) {
+          const name = relabelled.get(key);
+          return name ? { ...tab, name } : tab;
+        }
+        return {
+          ...tab,
+          path: next,
+          name: named.get(pathKey(next)) ?? basename(next),
+          // A rename keeps the type the user picked: the overrides were re-keyed with the
+          // file, so the language chosen for it goes on applying at the new path.
+          language: tab.fileSettings.language ?? langOf(next, tab.original),
+        };
+      };
+      setTabs((prev) => prev.map(rekeyed));
+      setRestoreQueue((q) =>
+        q.map((req) => {
+          const next = moved.get(pathKey(req.path));
+          return next ? { ...req, path: next, name: basename(next) } : req;
+        })
+      );
+      // This tab is what the editor keeps showing behind a Settings or comparison tab, so it
+      // has to move with its tab rather than be re-derived from the stale object.
+      const last = lastFileTabRef.current;
+      if (last) lastFileTabRef.current = rekeyed(last);
+      // A document can point at its own pictures, and the grant covered the old folder.
+      for (const next of moved.values()) void api.allowAssetDir(parentOf(next)).catch(() => {});
+    },
+    []
+  );
 
   /** One pair, for a rename that moves a single entry. */
   const rekeyTabs = useCallback(

@@ -142,6 +142,14 @@ export interface FolderHistoryEntry {
 export interface Renamed {
   oldPath: string;
   path: string;
+  /**
+   * The name the entry now carries, in the spelling the filesystem holds.
+   *
+   * `path` is an identity key and is lowercased on Windows, so a label cut from it would
+   * read `readme.md` over `README.md` — a rename that only changes case leaves `path` as it
+   * was and changes nothing but this.
+   */
+  name: string;
 }
 
 /** One entry of a batch rename: a bare name for the entry at `path`. */
