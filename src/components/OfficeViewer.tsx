@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { t } from "../lib/i18n";
 import { api, errorMessage } from "../lib/tauri";
 import type { OfficeKind } from "../lib/path";
@@ -547,12 +547,15 @@ export default function OfficeViewer({ path, kind, csvText }: Props) {
     setRecord(Math.min(Math.max(current + delta, 0), records.length - 1));
   };
 
-  /** Width of the title column, dragged by the user; null keeps the layout's own share. */
+  /**
+   * Width of the title column, once the user has dragged it; null lets the column take the
+   * width of its longest title, which is the width it needs to be read without wrapping.
+   */
   const [labelWidth, setLabelWidth] = useState<number | null>(null);
 
   /** The divider between titles and data: drag it left or right to re-measure the column. */
   const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
-    const card = event.currentTarget.parentElement;
+    const card = event.currentTarget.closest<HTMLElement>(".office-record-card");
     const label = card?.querySelector<HTMLElement>(".office-record-label");
     if (!card || !label) return;
     event.preventDefault();
@@ -776,21 +779,13 @@ export default function OfficeViewer({ path, kind, csvText }: Props) {
             {item ? (
               <>
                 <div
-                  className="office-record-card"
+                  className={`office-record-card${showTitles ? "" : " no-titles"}`}
                   style={
                     labelWidth == null
                       ? undefined
-                      : ({ "--record-label-width": `${labelWidth}px` } as CSSProperties)
+                      : { gridTemplateColumns: `${labelWidth}px minmax(0, 1fr)` }
                   }
                 >
-                  {showTitles && (
-                    <div
-                      className="office-record-divider"
-                      role="separator"
-                      aria-orientation="vertical"
-                      onPointerDown={startResize}
-                    />
-                  )}
                   {Array.from({ length: sheetCols }, (_, column) => {
                     const value = item.cells[column] ?? "";
                     const picture = cellImages[`${item.row}:${column}`];
@@ -801,7 +796,19 @@ export default function OfficeViewer({ path, kind, csvText }: Props) {
                     if (!value && !picture && (!showTitles || !title)) return null;
                     return (
                       <div className="office-record-field" key={column}>
-                        {showTitles && <div className="office-record-label">{title}</div>}
+                        {showTitles && (
+                          <div className="office-record-label">
+                            {title}
+                            {/* The drag handle rides on the column's edge; every field carries
+                                one so the divider can be grabbed anywhere down the card. */}
+                            <div
+                              className="office-record-divider"
+                              role="separator"
+                              aria-orientation="vertical"
+                              onPointerDown={startResize}
+                            />
+                          </div>
+                        )}
                         <div className="office-record-value">
                           {picture ? (
                             <img className="office-record-image" src={picture.url} alt="" />

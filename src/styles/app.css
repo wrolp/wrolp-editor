@@ -7008,26 +7008,33 @@ select {
   outline: none;
 }
 .office-record-card {
-  /* One measurement shared by every row and by the divider, so the column is a single edge. */
-  --record-label-width: min(20%, 200px);
+  /* Two columns: the titles take the width of the longest of them, and no more than the share
+     they were given before — narrow titles give the room back to the data instead of leaving a
+     column of empty space, and a title that is longer than the share still wraps where it
+     always did. A drag replaces the first column with a fixed width, which is why the rows are
+     laid out here rather than one by one. */
   position: relative;
   flex: 1 1 auto;
   width: 100%;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: fit-content(min(20%, 200px)) minmax(0, 1fr);
+  align-content: start;
   min-height: 120px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--surface);
   overflow: hidden;
 }
+/* The rows are only there to pair a title with its value: their two cells are the card's
+   grid items, so every row shares the one column measurement. */
 .office-record-field {
-  display: flex;
-  align-items: stretch;
+  display: contents;
+}
+.office-record-field > * {
   border-bottom: 1px solid var(--border);
 }
-.office-record-field:last-child {
+.office-record-field:last-child > * {
   border-bottom: 0;
 }
 /* The divider rides on the label's right border: a wider hit area than the hairline it moves. */
@@ -7035,10 +7042,9 @@ select {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: var(--record-label-width);
+  right: -5px;
   z-index: 2;
   width: 9px;
-  transform: translateX(-4px);
   cursor: col-resize;
   touch-action: none;
 }
@@ -7056,7 +7062,10 @@ select {
   background: var(--accent);
 }
 .office-record-label {
-  flex: 0 0 var(--record-label-width);
+  /* The divider is placed against this cell's right edge. */
+  position: relative;
+  grid-column: 1;
+  min-width: 0;
   padding: 10px 12px;
   border-right: 1px solid var(--border);
   background: var(--surface-active);
@@ -7068,7 +7077,7 @@ select {
   word-break: break-word;
 }
 .office-record-value {
-  flex: 1 1 auto;
+  grid-column: 2;
   min-width: 0;
   padding: 10px 16px;
   line-height: 1.7;
@@ -7077,8 +7086,13 @@ select {
   overflow-wrap: anywhere;
   user-select: text;
 }
+/* No titles to name the fields: the data is the whole row, not the second half of it. */
+.office-record-card.no-titles .office-record-value {
+  grid-column: 1 / -1;
+}
 /* Pictures floating over the record's row are not tied to a column, so they follow the fields. */
 .office-record-floats {
+  grid-column: 1 / -1;
   display: flex;
   flex-direction: column;
   gap: 10px;
