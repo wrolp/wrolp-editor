@@ -15,6 +15,7 @@ import {
   IconRestore,
   IconSettings,
   IconSidebar,
+  IconTable,
 } from "./icons";
 import type { Tab } from "../lib/types";
 import type { NameEllipsis } from "../lib/nameEllipsis";
@@ -37,6 +38,9 @@ interface Props {
   /** Current preview layout; null hides the control (not a markdown document). */
   previewMode: PreviewMode | null;
   onPreviewMode: (mode: PreviewMode) => void;
+  /** CSV only: the table view or the text; null hides the control. */
+  sheetMode: "sheet" | "text" | null;
+  onSheetMode: (mode: "sheet" | "text") => void;
   onSelect: (id: number) => void;
   onClose: (id: number) => void;
   /** Writes the file behind one tab, asked for by that tab's dirty mark. */
@@ -180,6 +184,30 @@ export default function TitleBar(props: Props) {
       </button>
 
       <div className="titlebar-actions">
+        {props.sheetMode && (
+          <div
+            className="mode-seg"
+            role="group"
+            aria-label={t("office.sheetModeLabel")}
+            data-tauri-drag-region="false"
+          >
+            {(["sheet", "text"] as const).map((mode) => {
+              const Glyph = mode === "sheet" ? IconTable : IconModeText;
+              const active = props.sheetMode === mode;
+              return (
+                <button
+                  key={mode}
+                  className={`mode-btn${active ? " active" : ""}`}
+                  title={t(`office.sheetMode.${mode}`)}
+                  aria-pressed={active}
+                  onClick={() => props.onSheetMode(mode)}
+                >
+                  <Glyph />
+                </button>
+              );
+            })}
+          </div>
+        )}
         {props.previewMode && (
           <div
             className="mode-seg"

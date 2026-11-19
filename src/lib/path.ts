@@ -502,6 +502,14 @@ export function isSvg(path: string): boolean {
 }
 
 /**
+ * A CSV is plain text, but it is a table of rows and columns: it opens in the sheet viewer
+ * like a workbook, and the text is where it is edited.
+ */
+export function isCsv(path: string): boolean {
+  return extOf(path) === "csv";
+}
+
+/**
  * A whole HTML document. Like SVG it is both source and picture, so it gets the same
  * preview pane treatment rather than being lumped in with the images: what renders here is
  * a page, with its own stylesheet and behaviour, not a picture of one.
@@ -522,5 +530,49 @@ export function isPreviewableImage(path: string): boolean {
  * text reader's refusal says nothing about whether the file can be shown.
  */
 export function isPdf(path: string): boolean {
-  return extOf(path) === "pdf";
+  return extOf(path).toLowerCase() === "pdf";
+}
+
+/** The three Office families, each drawn by its own renderer. */
+export type OfficeKind = "word" | "sheet" | "slides";
+
+/**
+ * The extension-to-family table.
+ *
+ * Only the OOXML formats are listed: the older `.doc`, `.xls` and `.ppt` are different
+ * binary formats entirely, and the renderers that read the modern ones cannot read them.
+ * Offering a viewer for a file it would then fail on is worse than not offering one.
+ */
+const OFFICE_KINDS: Record<string, OfficeKind> = {
+  docx: "word",
+  xlsx: "sheet",
+  pptx: "slides",
+};
+
+/** Which renderer draws this document, or null when it is not one of the three. */
+export function officeKind(path: string): OfficeKind | null {
+  return OFFICE_KINDS[extOf(path).toLowerCase()] ?? null;
+}
+
+/**
+ * A Word document, a spreadsheet or a slide deck: a zip of XML that the app draws from its
+ * own bytes rather than editing as text.
+ */
+export function isOfficeDoc(path: string): boolean {
+  return officeKind(path) !== null;
+}
+
+/** Anything the app draws instead of editing: the same "no text buffer" answer as a picture. */
+export function isDrawnDoc(path: string): boolean {
+  return isPdf(path) || isOfficeDoc(path);
+}
+
+/**
+ * How the status bar names a drawn document, in the format's own letters.
+ *
+ * Taken from the extension rather than from the tab's language: for an extension the editor
+ * cannot parse, the language says `plaintext`, which is not what is on screen.
+ */
+export function drawnLabel(path: string): string {
+  return isDrawnDoc(path) ? extOf(path).toUpperCase() : "";
 }

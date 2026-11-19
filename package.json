@@ -21,13 +21,17 @@
     "@tauri-apps/plugin-opener": "^2",
     "@tauri-apps/plugin-updater": "^2.14.0",
     "docx": "^9.15.0",
+    "docx-preview": "^0.4.1",
     "dompurify": "^3.4.16",
+    "jszip": "^3.10.2",
     "marked": "^18.0.14",
     "mermaid": "^12.1.0",
     "monaco-editor": "^0.57.0",
     "pdfjs-dist": "^6.4.299",
+    "pptx-preview": "^1.0.7",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2",

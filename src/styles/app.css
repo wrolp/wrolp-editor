@@ -6064,6 +6064,10 @@ select {
    same way a markdown preview is, so they get the same bar rather than the platform's. */
 .pdf-scroll,
 .pdf-outline,
+/* The office viewer's pane is a document surface like the PDF reader's: the sheet grid and
+   the record list both scroll in it, and the platform bar would be the one heavy line in a
+   pane otherwise drawn in hairlines. */
+.office-scroll,
 .commit-list {
   scrollbar-width: thin;
   scrollbar-color: var(--scroll-thumb) transparent;
@@ -6081,6 +6085,7 @@ select {
 .md-body pre::-webkit-scrollbar,
 .pdf-scroll::-webkit-scrollbar,
 .pdf-outline::-webkit-scrollbar,
+.office-scroll::-webkit-scrollbar,
 .pick-list::-webkit-scrollbar,
 .commit-list::-webkit-scrollbar {
   width: var(--scroll-size);
@@ -6100,10 +6105,12 @@ select {
 .md-body pre::-webkit-scrollbar-corner,
 .pdf-scroll::-webkit-scrollbar-track,
 .pdf-outline::-webkit-scrollbar-track,
+.office-scroll::-webkit-scrollbar-track,
 .pick-list::-webkit-scrollbar-track,
 /* The pages scroll both ways once a wide page is zoomed in, so the corner where the two bars
    meet is a visible square unless it is told to be transparent too. */
 .pdf-scroll::-webkit-scrollbar-corner,
+.office-scroll::-webkit-scrollbar-corner,
 .commit-list::-webkit-scrollbar-track {
   background: transparent;
 }
@@ -6120,6 +6127,7 @@ select {
 .md-body pre::-webkit-scrollbar-thumb,
 .pdf-scroll::-webkit-scrollbar-thumb,
 .pdf-outline::-webkit-scrollbar-thumb,
+.office-scroll::-webkit-scrollbar-thumb,
 .pick-list::-webkit-scrollbar-thumb,
 .commit-list::-webkit-scrollbar-thumb {
   background: var(--scroll-thumb);
@@ -6142,6 +6150,7 @@ select {
 .md-body pre:hover::-webkit-scrollbar-thumb,
 .pdf-scroll:hover::-webkit-scrollbar-thumb,
 .pdf-outline:hover::-webkit-scrollbar-thumb,
+.office-scroll:hover::-webkit-scrollbar-thumb,
 .pick-list:hover::-webkit-scrollbar-thumb,
 .commit-list:hover::-webkit-scrollbar-thumb {
   background-color: var(--scroll-thumb-hover);
@@ -6782,6 +6791,445 @@ select {
    the app's. */
 .print-root {
   display: none;
+}
+
+/* ---------- Office documents (Word, Excel, PowerPoint) ----------
+   The three renderers bring their own layout and their own page colours; this section only
+   supplies the frame they sit in. Like `.pdf-view`, the frame fills the pane by position
+   rather than by flex: the editor is hidden behind it, and `flex: 1` would leave it at zero
+   height in the preview-only row. */
+.office-view {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+.office-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 20px 20px 32px;
+}
+/* A spreadsheet is a grid rather than a page: it starts at the top-left corner of the pane and
+   takes whatever width its columns need. */
+.office-sheet .office-scroll {
+  display: block;
+  padding: 0;
+}
+.office-doc {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+}
+/* Word pages: docx-preview lays them out on white paper at 96dpi, and the wrapper it builds
+   around them is left transparent so the pane keeps the app's own surface. */
+.office-word .docx-wrapper {
+  background: transparent;
+  padding: 0;
+}
+.office-word .docx-wrapper > section.docx {
+  background: #fff;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+}
+/* Slides are laid out at a fixed 16:9 canvas by the renderer; the shadow separates one slide
+   from the next the way it does a page. */
+.office-slides .office-doc > div {
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+}
+/* The sheet and the layer its pictures sit on. An anchor is a cell coordinate, so the
+   pictures are measured against the laid-out cells rather than placed in flow. */
+.office-grid-wrap {
+  position: relative;
+  display: inline-block;
+  width: max-content;
+}
+.office-grid-pictures {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.office-grid-pictures img {
+  position: absolute;
+  display: block;
+  object-fit: contain;
+}
+.office-grid {
+  border-collapse: collapse;
+  background: var(--surface);
+  color: var(--text);
+  font: 12px/1.5 var(--mono, ui-monospace, monospace);
+}
+.office-grid th,
+.office-grid td {
+  border: 1px solid var(--border);
+  padding: 2px 8px;
+  text-align: left;
+  vertical-align: top;
+  white-space: pre;
+}
+/* The column letters and row numbers stay on screen while the sheet scrolls: they are how a
+   cell is named, so they are worthless once they have scrolled away. */
+.office-grid thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--surface-active);
+  color: var(--muted);
+  font-weight: 600;
+  text-align: center;
+}
+.office-grid-gutter {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--surface-active);
+  color: var(--muted);
+  font-weight: 600;
+  text-align: right;
+  min-width: 40px;
+}
+/* A sticky cell is composited separately, so while a scrollbar is dragged its layer can trail
+   the scroll by a fraction of a pixel and a sliver of the columns shows along the pinned edge.
+   The apron is painted from the cell itself, inside its z-index, and covers that sliver. */
+.office-grid-gutter::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -2px;
+  width: 2px;
+  background: var(--surface-active);
+  pointer-events: none;
+}
+.office-grid thead .office-grid-gutter {
+  z-index: 3;
+}
+/* A picture stored inside a cell takes the cell's place rather than being laid over it. */
+.office-cell-image {
+  display: block;
+  max-width: 220px;
+  max-height: 160px;
+  object-fit: contain;
+}
+/* The switch between the grid and one-record-at-a-time, along the top edge where a viewer
+   puts its own view controls. */
+.office-sheet-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.office-view-switch {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.office-view-switch button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  padding: 3px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.office-view-switch button:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+.office-view-switch button.active {
+  color: var(--text-strong);
+  background: var(--surface-active);
+}
+/* The title block a record is named from: whether to draw it, and which rows it occupies. */
+.office-record-config {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+.office-record-config label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+/* Only the two settings fields: the jump box next to them is wider, and this rule would
+   otherwise clip its placeholder down to the same 52px. */
+.office-record-config label input[type="number"] {
+  width: 52px;
+  padding: 2px 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+}
+/* Without this the platform's own ring is drawn around these fields: a thick white border on a
+   dark bar, unlike every other input in the app, which turns its border accent instead. */
+.office-record-config label input[type="number"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+/* One record: each cell of the row is a field, the title on its left, the data on its right. */
+.office-records {
+  box-sizing: border-box;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 28px 20px;
+  outline: none;
+}
+.office-record-card {
+  /* One measurement shared by every row and by the divider, so the column is a single edge. */
+  --record-label-width: min(20%, 200px);
+  position: relative;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 120px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.office-record-field {
+  display: flex;
+  align-items: stretch;
+  border-bottom: 1px solid var(--border);
+}
+.office-record-field:last-child {
+  border-bottom: 0;
+}
+/* The divider rides on the label's right border: a wider hit area than the hairline it moves. */
+.office-record-divider {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: var(--record-label-width);
+  z-index: 2;
+  width: 9px;
+  transform: translateX(-4px);
+  cursor: col-resize;
+  touch-action: none;
+}
+.office-record-divider::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 1px;
+  background: transparent;
+  transition: background-color 0.15s ease;
+}
+.office-record-divider:hover::after {
+  background: var(--accent);
+}
+.office-record-label {
+  flex: 0 0 var(--record-label-width);
+  padding: 10px 12px;
+  border-right: 1px solid var(--border);
+  background: var(--surface-active);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.office-record-value {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 10px 16px;
+  line-height: 1.7;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+/* Pictures floating over the record's row are not tied to a column, so they follow the fields. */
+.office-record-floats {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--border);
+}
+.office-record-image {
+  display: block;
+  max-width: 100%;
+  max-height: 60vh;
+  object-fit: contain;
+  border-radius: 4px;
+}
+.office-record-blank {
+  color: var(--muted);
+}
+/* A page number over the page, not a caption under it: with a tall record the caption sat past
+   the fold, so the one thing that says where you are needed a scroll to find. Sticky keeps the
+   pill at the bottom of the visible pane and lets it settle under a short card.
+   At rest it is only the number: the pill itself and the arrows stay out of the way until the
+   pointer arrives. The count is painted white and blended by `difference`, so it takes the
+   opposite of whatever the record shows underneath — dark on a light picture, light on the
+   card — without measuring anything. The hover plate is a real background, which this mode
+   would invert as well, so the blend only runs while the pill is see-through. */
+.office-record-count {
+  position: sticky;
+  bottom: 12px;
+  z-index: 2;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  /* The outline stays at rest so the pill reads as a control; like the number it is painted
+     white and inverted by the blend, so it shows on the card and on a bright picture alike.
+     Partial alpha keeps it from drawing a hard ring. */
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 999px;
+  background: transparent;
+  color: #fff;
+  mix-blend-mode: difference;
+  font-size: 11px;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.office-record-count:hover {
+  mix-blend-mode: normal;
+  color: var(--text);
+  border-color: var(--border);
+  background: var(--surface);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+}
+/* The arrows live in the pill, either side of the page number they move, and stay as legible
+   as the number: they are the part of the pill a pointer actually aims at. */
+.office-record-page-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  opacity: 1;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+.office-record-page-arrow:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+.office-record-page-arrow:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+/* IconChevron points down; a quarter turn either way makes the two navigation arrows. */
+.office-record-page-arrow.prev svg {
+  transform: rotate(90deg);
+}
+.office-record-page-arrow.next svg {
+  transform: rotate(-90deg);
+}
+/* The page number itself is the field: type one, press Enter. The stepper would only add
+   another pair of arrows beside the two already there. It is also the one element that stays
+   fully lit at rest, so where you are reads at a glance. */
+.office-record-page-input {
+  width: 44px;
+  padding: 2px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  appearance: textfield;
+}
+.office-record-page-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--bg);
+}
+.office-record-page-input::-webkit-outer-spin-button,
+.office-record-page-input::-webkit-inner-spin-button {
+  appearance: none;
+  margin: 0;
+}
+.office-record-page-total {
+  padding-right: 2px;
+  white-space: nowrap;
+  opacity: 0.45;
+  transition: opacity 0.15s ease;
+}
+.office-record-count:hover .office-record-page-total {
+  opacity: 1;
+}
+/* One tab per sheet, along the bottom edge where a spreadsheet puts them. */
+.office-sheet-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  padding: 4px 8px;
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+.office-sheet-tab {
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  padding: 3px 10px;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.office-sheet-tab:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+.office-sheet-tab.active {
+  color: var(--text-strong);
+  background: var(--surface-active);
+  border-color: var(--border);
+}
+.office-status {
+  padding: 24px;
+  color: var(--muted);
+}
+.office-error {
+  max-width: 60ch;
+  color: var(--danger);
+}
+.office-note,
+.office-empty {
+  padding: 16px 24px;
+  color: var(--muted);
+  font-size: 12px;
 }
 @media print {
   body.printing > *:not(.print-root) {

@@ -89,15 +89,18 @@ import { parseConflicts } from "./lib/mergeConflicts";
 import {
   basename,
   isBitmapImage,
+  isCsv,
   isExecutableExt,
   isHtml,
   isMarkdown,
+  isOfficeDoc,
   isPreviewableImage,
   isSvg,
   isUnder,
   isUntitled,
   langOf,
   modelUri,
+  officeKind,
   openableExtensions,
   rekeyPath,
 } from "./lib/path";
@@ -151,6 +154,13 @@ import {
  * together. Loading it only when a PDF is opened keeps it out of the startup bundle.
  */
 const PdfViewer = lazy(() => import("./components/PdfViewer"));
+
+/**
+ * The three Office renderers are loaded the same way, and for the same reason: together they
+ * are several times the size of the editor, and a session that never opens a document pays
+ * nothing for them.
+ */
+const OfficeViewer = lazy(() => import("./components/OfficeViewer"));
 
 /** The colour family of one `git status` letter, shared by the panel and the Explorer. */
 function gitTone(letter: string): GitMarkTone {
@@ -2441,6 +2451,13 @@ export default function App() {
   /** Only a real file tab has a path for the path actions (reveal, copy, per-file settings). */
   const menuTabIsFile = !!menuTab && isFileTab(menuTab);
   /**
+   * A tab whose content is drawn rather than held as text. A picture and an Office document
+   * have no buffer to compare, version or encrypt, so those actions are left out of the menu
+   * instead of being offered dead.
+   */
+  const menuTabIsDrawn =
+    !!menuTabPath && (isBitmapImage(menuTabPath) || isOfficeDoc(menuTabPath));
+  /**
    * The rules the two versioning menu items have to describe, read when the menu opens. Asked
    * rather than remembered because the answer depends on two stores the user may have just
    * changed from Settings.
@@ -2938,7 +2955,26 @@ const defaultModeFor = useCallback(
     !showMerge &&
     !showCommit &&
     /\.pdf$/i.test(tabs.fileTab.path);
-  const showUnopenable = !!tabs.fileTab?.unopenable && !isPdf;
+  /**
+   * A Word document, spreadsheet or slide deck on screen: like a PDF, it is drawn from its
+   * own bytes and has no text behind it, so the editor is hidden rather than emptied.
+   */
+  const officeView =
+    tabs.fileTab && !showDiff && !showMerge && !showCommit
+      ? officeKind(tabs.fileTab.path)
+      : null;
+  /**
+   * A CSV on screen as a table. Its bytes are text, so unlike a workbook there is an editor
+   * behind it; the title bar's toggle says which of the two is showing, and the table is the
+   * way in because that is what the file is.
+   */
+  const csvPath =
+    tabs.fileTab && !showDiff && !showMerge && !showCommit && isCsv(tabs.fileTab.path)
+      ? tabs.fileTab.path
+      : null;
+  const [csvAsText, setCsvAsText] = useState<Record<string, boolean>>({});
+  const csvTable = csvPath && !csvAsText[csvPath] ? csvPath : null;
+  const showUnopenable = !!tabs.fileTab?.unopenable && !isPdf && !officeView && !csvTable;
   /** The PDF on screen, when there is one; the status bar's page box belongs to it alone. */
   const pdfPath = isPdf ? tabs.fileTab?.path ?? null : null;
   const onPdfPage = useCallback(
@@ -3075,6 +3111,20 @@ const defaultModeFor = useCallback(
   }, [needsPreviewText, editorTab?.path, editorTab?.original, contentRev]);
 
   /**
+   * The CSV's live buffer, so its table shows what the editor holds rather than what was last
+   * saved. The editor is mounted behind the table, which is why this reads the model.
+   */
+  const csvText = useMemo(() => {
+    if (!csvTable) return "";
+    const handle = editorRef.current;
+    if (!handle) return tabs.fileTab?.original ?? "";
+    const model = handle.monaco.editor.getModel(
+      handle.monaco.Uri.parse(modelUri(csvTable))
+    );
+    return model?.getValue() ?? tabs.fileTab?.original ?? "";
+  }, [csvTable, tabs.fileTab?.original, contentRev]);
+
+  /**
    * A debounced copy of `previewText`. Markdown is re-parsed and an HTML frame is rebuilt
    * from this, and doing either on every keystroke is what makes typing in a long document
    * stutter. A different file is shown at once: waiting to switch would look like a hang.
@@ -3142,6 +3192,16 @@ const defaultModeFor = useCallback(
             : null
         }
         onPreviewMode={setPreviewMode}
+        sheetMode={!showSettings && csvPath ? (csvTable ? "sheet" : "text") : null}
+        onSheetMode={(mode) => {
+          if (!csvPath) return;
+          setCsvAsText((previous) => {
+            const next = { ...previous };
+            if (mode === "text") next[csvPath] = true;
+            else delete next[csvPath];
+            return next;
+          });
+        }}
         onSelect={tabs.selectTab}
         onClose={requestClose}
         onSave={handSave}
@@ -3302,7 +3362,9 @@ const defaultModeFor = useCallback(
                   showMerge ||
                   showCommit ||
                   showUnopenable ||
-                  isPdf
+                  isPdf ||
+                  officeView ||
+                  csvTable
                     ? "none"
                     : "block",
               }}
@@ -3382,6 +3444,22 @@ const defaultModeFor = useCallback(
                   outlineWidth={settings.pdfOutlineWidth}
                   onSaveOutlineWidth={(width) => void saveSettings({ pdfOutlineWidth: width })}
                   onPageChange={onPdfPage}
+                />
+              </Suspense>
+            </PaneErrorBoundary>
+          )}
+
+          {/* A Word document, a spreadsheet or a slide deck takes the pane the same way a PDF
+              does: the renderer is the only view of it that means anything. A CSV comes here
+              too, but from its text rather than its bytes. */}
+          {(officeView || csvTable) && tabs.fileTab && !showSettings && !showGallery && (
+            <PaneErrorBoundary>
+              <Suspense fallback={<div className="office-status">{t("app.loading")}</div>}>
+                <OfficeViewer
+                  key={tabs.fileTab.path}
+                  path={tabs.fileTab.path}
+                  kind={officeView ?? "sheet"}
+                  csvText={csvTable ? csvText : undefined}
                 />
               </Suspense>
             </PaneErrorBoundary>
@@ -3749,7 +3827,7 @@ const defaultModeFor = useCallback(
                   {/* The one comparison that needs the file on disk: the other side is this
                       tab's buffer, and the disk side is read fresh so it shows what the
                       file holds now rather than what the tab was opened with. */}
-                  {!isBitmapImage(menuTabPath) && (
+                  {!menuTabIsDrawn && (
                     <div
                       className="ctx-item"
                       onClick={() => {
@@ -3767,7 +3845,7 @@ const defaultModeFor = useCallback(
               )}
               {/* A comparison can start from any text buffer: the left side is what the tab
                   holds, saved or not. A picture has no text to compare, so it is left out. */}
-              {menuTabIsFile && !isBitmapImage(menuTabPath) && (
+              {menuTabIsFile && !menuTabIsDrawn && (
                 <div
                   className="ctx-item"
                   onClick={() => {
@@ -3793,7 +3871,7 @@ const defaultModeFor = useCallback(
                   to a document the user chose to encrypt. */}
               {menuTabIsFile &&
                 !isUntitled(menuTabPath) &&
-                !isBitmapImage(menuTabPath) &&
+                !menuTabIsDrawn &&
                 !isLockedBlank(menuTab) &&
                 !menuTab?.encrypted && (
                   <>
@@ -3839,7 +3917,7 @@ const defaultModeFor = useCallback(
                   its buffer is the empty stand-in for a document nobody has read, so writing
                   that back over the real one is the exact damage the lock exists to prevent.
                   Unlocking it first costs one password the user is going to type anyway. */}
-              {menuTabIsFile && !isBitmapImage(menuTabPath) && !isLockedBlank(menuTab) && (
+              {menuTabIsFile && !menuTabIsDrawn && !isLockedBlank(menuTab) && (
                 menuTab?.encrypted ? (
                   <>
                     <div
@@ -3909,7 +3987,7 @@ const defaultModeFor = useCallback(
                         {/* Preview is a layout rather than an override kept per file, so it
                             stays a plain switch at the top of the list. A raster image has no
                             text pane to toggle to, so it is not offered there. */}
-                        {!isBitmapImage(menuTabPath) && (
+                        {!menuTabIsDrawn && (
                           <div
                             className="ctx-item"
                             onClick={() => {

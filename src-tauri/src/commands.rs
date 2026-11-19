@@ -27,13 +27,13 @@ pub(crate) const BINARY_EXT: [&str; 11] = [
   "png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "ico", "tif", "tiff", "heic",
 ];
 
-/// Documents the app draws itself instead of editing: a PDF is rendered by the reader from its
-/// own bytes.
+/// Documents the app draws itself instead of editing: a PDF, a Word file, a spreadsheet or a
+/// slide deck is rendered by its own viewer from the file's bytes.
 ///
-/// Kept apart from the picture table because a gallery must not offer a PDF as an image, while
-/// opening one has to succeed: a file the app can show belongs in the recent list and in a
-/// restored session, not in the unopenable pile.
-const READER_EXT: [&str; 1] = ["pdf"];
+/// Kept apart from the picture table because a gallery must not offer one of these as an
+/// image, while opening one has to succeed: a file the app can show belongs in the recent list
+/// and in a restored session, not in the unopenable pile.
+const READER_EXT: [&str; 4] = ["pdf", "docx", "xlsx", "pptx"];
 
 /// Whether the editor has no buffer to offer for this path: a picture the previews draw, or a
 /// document the reader draws. Reading it for its metadata only is what lets `open_file` succeed.

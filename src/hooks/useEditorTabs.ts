@@ -15,7 +15,7 @@ import {
 } from "../lib/tauri";
 import {
   basename,
-  isPdf,
+  isDrawnDoc,
   isUntitled,
   langOf,
   modelUri,
@@ -64,15 +64,16 @@ const UNOPENABLE_CODES = new Set([
 ]);
 
 /**
- * A PDF as a real tab.
+ * A file the app draws from its own bytes, as a real tab.
  *
- * The reader draws a PDF from its own bytes, so the text reader's refusal says nothing about
- * whether the file can be shown: an older backend calls it unreadable binary. Filing it as an
- * unopenable placeholder is what kept PDFs out of the saved group and out of the next session,
- * so a refusal for a `.pdf` builds this tab instead — no text buffer, nothing to save, and a
- * path the group store can keep.
+ * The readers draw a PDF, a Word document, a spreadsheet and a slide deck from the file
+ * itself, so the text reader's refusal says nothing about whether the file can be shown: an
+ * older backend calls them unreadable binary, and a document larger than the text reader's
+ * limit is refused outright. Filing one as an unopenable placeholder is what kept such files
+ * out of the saved group and out of the next session, so a refusal for one of them builds
+ * this tab instead — no text buffer, nothing to save, and a path the group store can keep.
  */
-function pdfTab(id: number, path: string): Tab {
+function drawnTab(id: number, path: string): Tab {
   return {
     id,
     path,
@@ -679,9 +680,10 @@ export function useEditorTabs({
         if (!record) return false;
         const err = String(e);
         const code = err.split(":", 1)[0];
-        // A PDF the text reader refuses is still a file the reader draws, and a tab that is not
-        // a placeholder is one the group store keeps and the next session restores.
-        if (UNOPENABLE_CODES.has(code) && isPdf(raw)) {
+        // A PDF or an Office document the text reader refuses is still one its own renderer
+        // draws, and a tab that is not a placeholder is one the group store keeps and the
+        // next session restores.
+        if (UNOPENABLE_CODES.has(code) && isDrawnDoc(raw)) {
           const existing = tabsRef.current.find(
             (t) => isFileTab(t) && pathKey(t.path) === pathKey(raw)
           );
@@ -689,7 +691,7 @@ export function useEditorTabs({
             await activate(existing.id);
             return true;
           }
-          const target = pdfTab(nextId(), raw);
+          const target = drawnTab(nextId(), raw);
           setTabs((prev) => [...prev, target]);
           await activate(target.id);
           return true;
@@ -1248,10 +1250,11 @@ export function useEditorTabs({
   const snapshotTabs = useCallback((): { tabs: GroupTab[]; active: string } => {
     const h = editorRef.current;
     // A placeholder is skipped because a file that failed yesterday is not worth staging again;
-    // a PDF is not a placeholder of that kind — the reader draws it whatever the text reader
-    // thought — so it is saved even when it was opened by a build that called it unreadable.
+    // a PDF or an Office document is not a placeholder of that kind — its renderer draws it
+    // whatever the text reader thought — so it is saved even when it was opened by a build
+    // that called it unreadable.
     const live = tabsRef.current.filter(
-      (t) => isFileTab(t) && (!t.unopenable || isPdf(t.path))
+      (t) => isFileTab(t) && (!t.unopenable || isDrawnDoc(t.path))
     );
     const tabs = live.map((tab) => {
       // Only an untitled tab's text is worth copying here: `toStoredTab` drops the value for
@@ -1309,11 +1312,12 @@ export function useEditorTabs({
                 fileSettings: EMPTY_FILE_SETTINGS,
               };
             } catch (e) {
-              // Same reasoning as opening: a PDF the text reader refuses is still one the
-              // reader draws, so its tab comes back instead of being counted as a skip.
+              // Same reasoning as opening: a PDF or an Office document the text reader
+              // refuses is still one its renderer draws, so its tab comes back instead of
+              // being counted as a skip.
               const code = String(e).split(":", 1)[0];
-              return UNOPENABLE_CODES.has(code) && isPdf(entry.path)
-                ? pdfTab(nextId(), entry.path)
+              return UNOPENABLE_CODES.has(code) && isDrawnDoc(entry.path)
+                ? drawnTab(nextId(), entry.path)
                 : null;
             }
           }
