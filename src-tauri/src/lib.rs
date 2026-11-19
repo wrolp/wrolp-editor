@@ -1,4 +1,5 @@
 mod ai;
+mod archive;
 mod backup;
 mod commands;
 mod context_menu;
@@ -88,12 +89,12 @@ pub fn run() {
       commands::save_file,
       rename::rename_path,
       rename::rename_entries,
-      entry::create_file,
-      entry::create_dir,
-      entry::copy_entry,
+      entry::create_file_command,
+      entry::create_dir_command,
+      entry::copy_entry_command,
       entry::move_entry,
-      entry::paste_clipboard_files,
-      entry::copy_dropped_files,
+      entry::paste_clipboard_files_command,
+      entry::copy_dropped_files_command,
       entry::keep_file,
       entry::remove_entry,
       commands::get_draft,
@@ -102,6 +103,10 @@ pub fn run() {
       commands::list_dir,
       commands::dir_stamps,
       gallery::list_images,
+      archive::archive_detect,
+      archive::list_archive,
+      archive::extract_archive,
+      archive::clear_archive_cache,
       commands::allow_asset_dir,
       commands::render_diagram,
       commands::get_file_settings,

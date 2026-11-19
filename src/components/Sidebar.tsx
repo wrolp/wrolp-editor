@@ -834,6 +834,20 @@ interface Props extends Omit<
   onSetRoot: (dir: string) => void;
   /** Opens the folder's pictures in a gallery tab. */
   onBrowseImages: (dir: string) => void;
+  /**
+   * Unpacks an archive and points the Explorer at the copy. The copy is read-only, so this is
+   * how an archive is read without it ever becoming a second place to edit files.
+   */
+  onBrowseArchive: (path: string) => void;
+  /**
+   * The archive whose unpacked copy the Explorer is showing, or null when it shows a folder.
+   * `source` is the archive itself, for the two buttons on the note.
+   */
+  archive: { dir: string; source: string; name: string; entries: number; bytes: number } | null;
+  /** Leave the unpacked copy and go back to the folder the archive lives in. */
+  onCloseArchive: () => void;
+  /** Reveal the archive, not the copy, in Windows Explorer. */
+  onShowArchive: (path: string) => void;
   /** Open one version beside what the editor holds now. */
   onCompareVersion: (path: string, oid: string) => void;
   /** Put a version's text into the editor, marked unsaved. */
@@ -897,6 +911,19 @@ interface Props extends Omit<
   gitPanel: ReactNode;
 }
 
+/** A byte count in the short form a note row can hold: `1.4 MB`, `812 KB`, `97 B`. */
+function sizeLabel(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value < 10 ? value.toFixed(1) : Math.round(value)} ${units[unit]}`;
+}
+
 export default function Sidebar(props: Props) {
   const {
     visible,
@@ -925,6 +952,10 @@ export default function Sidebar(props: Props) {
     onReveal,
     onSetRoot,
     onBrowseImages,
+    onBrowseArchive,
+    archive,
+    onCloseArchive,
+    onShowArchive,
     onCompareVersion,
     onRestoreVersion,
     onGitLocalChanged,
@@ -951,6 +982,8 @@ export default function Sidebar(props: Props) {
   const [localGit, setLocalGit] = useState<GitLocalPathState | null>(null);
   /** The path the probe was asked about, so a late answer for another row is dropped. */
   const localGitFor = useRef<string | null>(null);
+  /** The row whose archive probe is the current one: a slow answer for an old row is dropped. */
+  const archiveProbe = useRef<string | null>(null);
   /** `pathKey` of the node whose name is being edited in place. */
   const [renaming, setRenaming] = useState<string | null>(null);
   /** The folder a new entry is being named in, and what it will be. */
@@ -1065,6 +1098,23 @@ export default function Sidebar(props: Props) {
         unassume: localGit.tracked && localGit.assumed,
       }
     : null;
+
+  /**
+   * The archive the row under the pointer is, if it is one. Read from its bytes rather than its
+   * name, so a `.zip` that is anything else does not offer a menu item that would only fail.
+   */
+  const [archiveHit, setArchiveHit] = useState<{ path: string; format: string } | null>(null);
+  const probeArchive = useCallback(async (path: string) => {
+    const wanted = pathKey(path);
+    archiveProbe.current = wanted;
+    setArchiveHit(null);
+    try {
+      const format = await api.archiveDetect(path);
+      if (archiveProbe.current === wanted && format) setArchiveHit({ path, format });
+    } catch {
+      if (archiveProbe.current === wanted) setArchiveHit(null);
+    }
+  }, []);
 
 
   /**
@@ -2304,6 +2354,29 @@ export default function Sidebar(props: Props) {
             ))}
           </div>
         )}
+        {/* The unpacked copy is a view, not a folder: the note says where it came from, and
+            the two buttons are how to leave it — one reveals the archive, the other deletes
+            the copy and goes back to the folder it lived in. */}
+        {archive && rootDir && pathKey(rootDir) === pathKey(archive.dir) && (
+          <div className="archive-note" title={t("side.archiveReadOnly")}>
+            <span className="archive-note-text">
+              {t("side.archiveNote", {
+                name: archive.name,
+                count: archive.entries,
+                size: sizeLabel(archive.bytes),
+              })}
+            </span>
+            <button
+              className="archive-note-btn"
+              onClick={() => onShowArchive(archive.source)}
+            >
+              {t("side.archiveReveal")}
+            </button>
+            <button className="archive-note-btn" onClick={onCloseArchive}>
+              {t("side.archiveClose")}
+            </button>
+          </div>
+        )}
         {/* The handler the tree used to carry now sits on the whole view, so the blank
             space below the rows is covered by the same one: the round trip to the root
             folder's own row is the only way to create anything in it. */}
@@ -2352,6 +2425,11 @@ export default function Sidebar(props: Props) {
                     setAnchor(pathKey(target.path));
                   }
                   setMenu({ ...target, x, y });
+                  if (target.isDir) {
+                    setArchiveHit(null);
+                  } else {
+                    void probeArchive(target.path);
+                  }
                   void probeLocalGit(target.path);
                 }}
               />
@@ -2656,6 +2734,23 @@ export default function Sidebar(props: Props) {
                     </span>
                     {t("side.menuOpen")}
                   </div>
+                  {/* Offered only when the bytes say it is one: an archive is read by
+                      unpacking it into the app's cache and showing that copy, and an item
+                      that led to "not an archive" would be a menu lying about the file. */}
+                  {archiveHit && pathKey(archiveHit.path) === pathKey(menu.path) && (
+                    <div
+                      className="ctx-item"
+                      onClick={() => {
+                        onBrowseArchive(menu.path);
+                        setMenu(null);
+                      }}
+                    >
+                      <span className="ctx-icon">
+                        <IconFolder size={14} />
+                      </span>
+                      {t("side.menuBrowseArchive")}
+                    </div>
+                  )}
                   <div
                     className="ctx-item"
                     onClick={() => {

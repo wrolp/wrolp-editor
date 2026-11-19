@@ -1330,6 +1330,40 @@ body.resizing .editor-host {
   background: var(--surface-2);
   overflow: hidden;
 }
+/* The note above an unpacked archive's tree: what the copy is, and the two ways out of it. */
+.archive-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 10px 6px;
+  padding: 4px 6px 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  font-size: 11px;
+  color: var(--muted);
+}
+.archive-note-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.archive-note-btn {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: none;
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+.archive-note-btn:hover {
+  color: var(--text);
+  border-color: var(--accent);
+}
 .side-root-path {
   flex: 1 1 auto;
   min-width: 0;

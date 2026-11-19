@@ -371,6 +371,14 @@ pub struct Settings {
   pub ai_key: String,
   /// How long one AI request may run, in milliseconds.
   pub ai_timeout_ms: u32,
+  /// Largest unpacked size one archive may occupy. Checked from the listing and again while
+  /// writing, so a header that lies cannot get past it.
+  pub archive_max_total_bytes: u64,
+  /// Days an unpacked archive's folder survives without being looked at before the next
+  /// extract sweeps it.
+  pub archive_keep_days: u32,
+  /// Point the Explorer at the unpacked copy as soon as it is ready.
+  pub archive_open_after_extract: bool,
 }
 
 /// One OpenAI-compatible service in the AI settings.
@@ -478,6 +486,9 @@ impl Default for Settings {
       ai_model: String::new(),
       ai_key: String::new(),
       ai_timeout_ms: 90_000,
+      archive_max_total_bytes: 2 * 1024 * 1024 * 1024,
+      archive_keep_days: 7,
+      archive_open_after_extract: true,
     }
   }
 }
@@ -851,6 +862,17 @@ impl Settings {
       } else {
         self.ai_timeout_ms.clamp(10_000, 180_000)
       },
+      // 0 would refuse every archive, which is a stray zero rather than a wish to unpack
+      // nothing; the ceiling is the value the code was written against.
+      archive_max_total_bytes: if self.archive_max_total_bytes == 0 {
+        2 * 1024 * 1024 * 1024
+      } else {
+        self
+          .archive_max_total_bytes
+          .clamp(64 * 1024 * 1024, 2 * 1024 * 1024 * 1024)
+      },
+      archive_keep_days: self.archive_keep_days.min(365),
+      archive_open_after_extract: self.archive_open_after_extract,
     }
   }
 }
@@ -1397,6 +1419,7 @@ pub fn save_file(
   encoding: Option<String>,
   bom: Option<bool>,
 ) -> Result<SavedFile, String> {
+  crate::archive::refuse_if_cached(&app, &path)?;
   let normalized = draft::normalize_path(&path);
   if normalized.is_empty() {
     return Err("path_empty".into());

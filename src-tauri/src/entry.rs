@@ -103,7 +103,13 @@ pub(crate) fn new_entry_path(
 ///
 /// The file starts empty: it is a file the user asked to exist, not one with anything in it,
 /// and an editor that invented content would be writing text nobody typed.
-#[tauri::command(async)]
+#[tauri::command(async, rename = "create_file")]
+pub fn create_file_command(app: AppHandle, parent: String, name: String) -> Result<FsEntry, String> {
+  crate::archive::refuse_if_cached(&app, &parent)?;
+  create_file(parent, name)
+}
+
+/// The creation itself, once the folder has been cleared to receive it.
 pub fn create_file(parent: String, name: String) -> Result<FsEntry, String> {
   let (path, named) = new_entry_path(&parent, &name, DEFAULT_EXT)?;
   // `create_new` rather than a plain write: it refuses a name that was taken between the
@@ -126,7 +132,13 @@ pub fn create_file(parent: String, name: String) -> Result<FsEntry, String> {
 }
 
 /// Create a folder inside `parent`.
-#[tauri::command(async)]
+#[tauri::command(async, rename = "create_dir")]
+pub fn create_dir_command(app: AppHandle, parent: String, name: String) -> Result<FsEntry, String> {
+  crate::archive::refuse_if_cached(&app, &parent)?;
+  create_dir(parent, name)
+}
+
+/// The creation itself, once the folder has been cleared to receive it.
 pub fn create_dir(parent: String, name: String) -> Result<FsEntry, String> {
   let named = check_name(&name).map_err(name_error)?;
   let path = target_of(&parent, &named)?;
@@ -215,7 +227,15 @@ fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
 /// The copy lands beside whatever else is there rather than replacing it, which is why the
 /// name it ends up with is the answer this returns: the caller shows the real name, so a
 /// paste that had to be numbered is not a surprise found later.
-#[tauri::command(async)]
+#[tauri::command(async, rename = "copy_entry")]
+pub fn copy_entry_command(app: AppHandle, source: String, target: String) -> Result<FsEntry, String> {
+  // An unpacked archive is a view of somebody else's bytes: copying into it would edit a copy
+  // that the next clean-up deletes, so the refusal is the same one every write makes.
+  crate::archive::refuse_if_cached(&app, &target)?;
+  copy_entry(source, target)
+}
+
+/// The copy itself, once the destination has been cleared to receive it.
 pub fn copy_entry(source: String, target: String) -> Result<FsEntry, String> {
   // The spelling on disk, not the identity key: `normalize_path` lowercases on Windows, and
   // the copy takes its name from this path — `Report.txt` used to land as `report.txt`.
@@ -328,6 +348,8 @@ fn move_across(from: &Path, to: &Path, is_dir: bool) -> Result<(), String> {
 /// pointing at a file that is no longer there.
 #[tauri::command(async)]
 pub fn move_entry(app: AppHandle, source: String, target: String) -> Result<Renamed, String> {
+  crate::archive::refuse_if_cached(&app, &source)?;
+  crate::archive::refuse_if_cached(&app, &target)?;
   // `old` is the identity the re-homing keys on; the move itself uses the spelling on disk,
   // because the name it carries over comes from these paths — a lowercased source would put
   // `Report.txt` down as `report.txt`.
@@ -446,7 +468,13 @@ fn copy_sources(sources: Vec<PathBuf>, target: String) -> Result<ClipboardPaste,
 }
 
 /// Copy every file the system clipboard lists into `target`.
-#[tauri::command(async)]
+#[tauri::command(async, rename = "paste_clipboard_files")]
+pub fn paste_clipboard_files_command(app: AppHandle, target: String) -> Result<ClipboardPaste, String> {
+  crate::archive::refuse_if_cached(&app, &target)?;
+  paste_clipboard_files(target)
+}
+
+/// The paste itself, once the destination has been cleared to receive it.
 pub fn paste_clipboard_files(target: String) -> Result<ClipboardPaste, String> {
   let sources = clipboard_files()?;
   if sources.is_empty() {
@@ -459,7 +487,17 @@ pub fn paste_clipboard_files(target: String) -> Result<ClipboardPaste, String> {
 ///
 /// A drop already carries absolute paths, so there is no clipboard to read — but the naming,
 /// the refusals and the report are the very same ones a clipboard paste goes through.
-#[tauri::command(async)]
+#[tauri::command(async, rename = "copy_dropped_files")]
+pub fn copy_dropped_files_command(
+  app: AppHandle,
+  paths: Vec<String>,
+  target: String,
+) -> Result<ClipboardPaste, String> {
+  crate::archive::refuse_if_cached(&app, &target)?;
+  copy_dropped_files(paths, target)
+}
+
+/// The copy itself, once the destination has been cleared to receive it.
 pub fn copy_dropped_files(paths: Vec<String>, target: String) -> Result<ClipboardPaste, String> {
   if paths.is_empty() {
     return Err("clipboard_empty".into());
@@ -533,6 +571,7 @@ pub fn keep_file(
 /// and does not reach the Recycle Bin. That is the whole reason the frontend asks first.
 #[tauri::command(async)]
 pub fn remove_entry(app: AppHandle, path: String) -> Result<(), String> {
+  crate::archive::refuse_if_cached(&app, &path)?;
   let target = draft::normalize_path(&path);
   if target.is_empty() {
     return Err("path_empty".into());

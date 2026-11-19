@@ -42,6 +42,12 @@ git2 = { version = "0.21.0", default-features = false, features = ["vendored-lib
 # SSE path, `json` the request body.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
 futures-util = "0.3"
+# Archive browsing: `zip` reads the central directory (so a listing costs no unpacking) and
+# deflate entries; `tar` + `flate2` cover `.tar` and `.tar.gz`. All three are pure Rust, so the
+# build keeps the same Windows story as the rest of the tree.
+zip = { version = "2", default-features = false, features = ["deflate"] }
+tar = "0.4"
+flate2 = "1"
 
 [target.'cfg(windows)'.dependencies]
 tauri-plugin-single-instance = "2"

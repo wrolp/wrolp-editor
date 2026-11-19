@@ -113,6 +113,43 @@ export interface ImageList {
   scanned: number;
 }
 
+/** One entry of an archive, as the archive itself describes it. */
+export interface ArchiveEntry {
+  /** Relative path inside the archive, with forward slashes. */
+  path: string;
+  isDir: boolean;
+  /** Unpacked size, from the header: good enough to refuse early, not to trust in a loop. */
+  bytes: number;
+  packed: number;
+  encrypted: boolean;
+}
+
+/** What an archive holds, listed without unpacking any of it. */
+export interface ArchiveListing {
+  /** `zip`, `tar` or `tarGz`. */
+  format: string;
+  entries: ArchiveEntry[];
+  totalBytes: number;
+  encrypted: boolean;
+  /** The listing stopped at its cap: the extract would refuse this archive. */
+  truncated: boolean;
+}
+
+/** Why one entry was left out of an unpacked copy. `reason` is a code, not a sentence. */
+export interface ArchiveSkip {
+  path: string;
+  reason: string;
+}
+
+/** Where an archive was unpacked, and what happened on the way. */
+export interface ArchiveExtract {
+  /** The folder the archive now lives in, normalized like every other path. */
+  dir: string;
+  entries: number;
+  skipped: ArchiveSkip[];
+  bytes: number;
+}
+
 /** What pasting the system clipboard produced: the copies made, and sources it could not take. */
 export interface ClipboardPaste {
   copied: FsEntry[];
@@ -1033,6 +1070,22 @@ export const api = {
    */
   listImages: (dir: string, recursive: boolean) =>
     invoke<ImageList>("list_images", { dir, recursive }),
+  /**
+   * The archive format of a file, decided by its first bytes rather than its name, or `null`
+   * when it is not an archive this build can open.
+   */
+  archiveDetect: (path: string) => invoke<string | null>("archive_detect", { path }),
+  /** What is inside an archive, read from its index without unpacking anything. */
+  listArchive: (path: string) => invoke<ArchiveListing>("list_archive", { path }),
+  /**
+   * Unpack an archive into the app's own cache and return where it landed. The copy is
+   * read-only in the editor: it is a view of the archive, not a second place to edit it.
+   * Asking twice for the same unchanged archive returns the same folder.
+   */
+  extractArchive: (path: string) => invoke<ArchiveExtract>("extract_archive", { path }),
+  /** Delete one unpacked archive (the folder the Explorer is showing), or all of them. */
+  clearArchiveCache: (dir?: string | null) =>
+    invoke<void>("clear_archive_cache", { dir: dir ?? null }),
   fileSettingsView: (path: string) => invoke<FileSettingsView>("file_settings_view", { path }),
   saveFileSettings: (path: string, settings: FileSettings) =>
     invoke<FileSettings>("save_file_settings", { path, settings }),

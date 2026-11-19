@@ -525,6 +525,20 @@ export default function App() {
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SETTINGS.sidebarWidth);
   const [sidebarView, setSidebarView] = useState<SidebarView>("explorer");
   const [rootDir, setRootDir] = useState<string | null>(null);
+  /**
+   * The archive the Explorer is showing through its unpacked copy, if any.
+   *
+   * The copy is a real folder, so everything below this point reads it like any other tree. It
+   * is deliberately not written into the group: the folder is temporary, and a group whose root
+   * pointed into the cache would reopen on a folder the next clean-up may have deleted.
+   */
+  const [archiveView, setArchiveView] = useState<{
+    dir: string;
+    source: string;
+    name: string;
+    entries: number;
+    bytes: number;
+  } | null>(null);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   /** Folders the Explorer has been pointed at, newest first. */
   const [folderHistory, setFolderHistory] = useState<FolderHistoryEntry[]>([]);
@@ -1456,6 +1470,49 @@ export default function App() {
     },
     [refreshFolderHistory]
   );
+
+  /**
+   * Unpack an archive and show the copy in the Explorer.
+   *
+   * The scan the tree already does then reads the copy like any folder, which is the whole
+   * point of unpacking instead of teaching every feature a virtual path. What the copy does not
+   * get is the group's root: it is temporary, so it is shown without being recorded.
+   */
+  const browseArchive = useCallback(
+    async (path: string) => {
+      try {
+        const out = await api.extractArchive(path);
+        setArchiveView({
+          dir: out.dir,
+          source: path,
+          name: basename(path),
+          entries: out.entries,
+          bytes: out.bytes,
+        });
+        rootRef.current = out.dir;
+        setRootDir(out.dir);
+        setSidebarView("explorer");
+        setSidebarVisible(true);
+        if (out.skipped.length > 0) {
+          toast(t("side.archiveSkipped", { count: out.skipped.length }));
+        }
+      } catch (e) {
+        toast(errorMessage(e));
+      }
+    },
+    [toast]
+  );
+
+  /** Leave the unpacked copy: go back beside the archive and delete the copy. */
+  const closeArchive = useCallback(() => {
+    const view = archiveView;
+    setArchiveView(null);
+    if (!view) return;
+    const back = parentOf(view.source);
+    rootRef.current = back;
+    setRootDir(back);
+    void api.clearArchiveCache(view.dir).catch(() => undefined);
+  }, [archiveView]);
 
   /**
    * Move everything this window keys by a path, after the backend has moved the entry.
@@ -3352,6 +3409,12 @@ const defaultModeFor = useCallback(
             setSidebarRoot(dir);
           }}
           onBrowseImages={(dir) => void tabs.openGallery(dir)}
+          onBrowseArchive={(path) => void browseArchive(path)}
+          archive={archiveView}
+          onCloseArchive={closeArchive}
+          onShowArchive={(path) => {
+            revealItemInDir(path).catch((e) => toast(errorMessage(e)));
+          }}
           onCreate={createEntry}
           onPaste={pasteEntry}
           onMove={moveEntryTo}

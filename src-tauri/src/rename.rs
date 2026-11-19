@@ -122,6 +122,7 @@ pub fn validate_name(raw: &str) -> Result<String, String> {
 
 #[tauri::command]
 pub fn rename_path(app: AppHandle, path: String, name: String) -> Result<Renamed, String> {
+  crate::archive::refuse_if_cached(&app, &path)?;
   let clean = validate_name(&name)?;
   // `old` is the identity every store keys by, and `from` is the spelling the filesystem
   // holds. They are not the same on Windows, where the identity is lowercased: moving the
@@ -229,6 +230,9 @@ impl Planned {
 /// Everything is checked before anything moves, so a refused batch leaves the disk alone.
 #[tauri::command]
 pub fn rename_entries(app: AppHandle, items: Vec<RenameRequest>) -> Result<Vec<Renamed>, String> {
+  for item in &items {
+    crate::archive::refuse_if_cached(&app, &item.path)?;
+  }
   let mut planned = plan_batch(&items)?;
   apply_batch(&mut planned)?;
   rekey_batch(&app, &planned)?;
