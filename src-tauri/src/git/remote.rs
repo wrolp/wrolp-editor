@@ -104,10 +104,18 @@ pub struct ConflictSides {
   pub autosolved: usize,
 }
 
+/// Every configured remote, with its URL stripped of user info for display.
+///
+/// This used to be a plain command, which put `Repository::discover` on the main thread: opening
+/// the repository reads its config, and switching repository in the panel is exactly when this
+/// runs, so a slow disk froze the window itself rather than just the list.
 #[tauri::command]
-pub fn git_remotes(root: String) -> Result<Vec<RemoteInfo>, String> {
-  let opened = discover(&root)?;
-  list_remotes(&opened.repo)
+pub async fn git_remotes(root: String) -> Result<Vec<RemoteInfo>, String> {
+  super::blocking("remotes", move || {
+    let opened = discover(&root)?;
+    list_remotes(&opened.repo)
+  })
+  .await
 }
 
 /// Every configured remote, with its URL stripped of user info for display.

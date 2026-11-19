@@ -61,9 +61,9 @@ pub struct SummaryView {
   pub files: usize,
 }
 
-#[tauri::command(async)]
-pub fn git_repo_summary(root: String) -> Result<SummaryView, String> {
-  summary_of(&root)
+#[tauri::command]
+pub async fn git_repo_summary(root: String) -> Result<SummaryView, String> {
+  super::blocking("summary", move || summary_of(&root)).await
 }
 
 pub(crate) fn summary_of(root: &str) -> Result<SummaryView, String> {
@@ -117,9 +117,9 @@ pub(crate) fn summary_of(root: &str) -> Result<SummaryView, String> {
   })
 }
 
-#[tauri::command(async)]
-pub fn git_status(root: String) -> Result<StatusView, String> {
-  status_of(&root)
+#[tauri::command]
+pub async fn git_status(root: String) -> Result<StatusView, String> {
+  super::blocking("status", move || status_of(&root)).await
 }
 
 /// The status options the panel uses. The summary has its own, below, because it does not need

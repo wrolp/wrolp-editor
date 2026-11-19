@@ -9,10 +9,11 @@
 //! does. Nested repositories and submodules are not aggregated; a nested repository is shown the
 //! way git shows it, as one changed path.
 //!
-//! Commands that touch the disk are declared `#[tauri::command(async)]`. A blocking command runs
-//! on the main thread, so a single `statuses()` walk over a large work tree freezes the window for
-//! as long as it takes — and a folder holding dozens of repositories is exactly where that walk is
-//! slowest. Network commands are `async fn` around `spawn_blocking` for the same reason.
+//! Commands that touch the disk run their work on the blocking pool (see [`blocking`]): a walk
+//! over a large work tree is CPU- and IO-bound, and a plain `#[tauri::command(async)]` only moves
+//! it off the main thread into an async worker, where it would hold that worker — and on a folder
+//! with dozens of repositories, every worker — for its whole run. A command declared without
+//! `async` runs on the main thread and freezes the window outright.
 
 pub mod auth;
 pub mod branch;
@@ -78,6 +79,24 @@ impl Drop for GitGuard {
       busy.remove(&self.key);
     }
   }
+}
+
+/// Run one repository walk on the blocking pool.
+///
+/// Reading a work tree is blocking IO and CPU, and there is no point in it where the runtime
+/// could switch to something else. The panel asks for a status, a branch list, a log page and a
+/// summary of the same repository within the same moment — and switching repository asks for all
+/// of them again — so those calls must not each hold an async worker, or every other command in
+/// the window queues behind them. The blocking pool grows to a size that a handful of walks
+/// cannot exhaust.
+pub(crate) async fn blocking<T, F>(label: &str, work: F) -> Result<T, String>
+where
+  F: FnOnce() -> Result<T, String> + Send + 'static,
+  T: Send + 'static,
+{
+  tauri::async_runtime::spawn_blocking(work)
+    .await
+    .map_err(|e| format!("git_{label}:{e}"))?
 }
 
 /// An open work tree: the repository, where its files are, and the spelling of that folder the

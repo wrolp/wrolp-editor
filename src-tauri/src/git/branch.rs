@@ -24,9 +24,9 @@ pub struct BranchInfo {
   pub upstream: Option<String>,
 }
 
-#[tauri::command(async)]
-pub fn git_branches(root: String) -> Result<Vec<BranchInfo>, String> {
-  branches_of(&root)
+#[tauri::command]
+pub async fn git_branches(root: String) -> Result<Vec<BranchInfo>, String> {
+  super::blocking("branches", move || branches_of(&root)).await
 }
 
 pub(crate) fn branches_of(root: &str) -> Result<Vec<BranchInfo>, String> {

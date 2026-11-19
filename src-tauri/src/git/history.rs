@@ -46,14 +46,16 @@ pub struct CommitFile {
   pub abs: String,
 }
 
-#[tauri::command(async)]
-pub fn git_log(
+#[tauri::command]
+pub async fn git_log(
   root: String,
   limit: Option<u32>,
   skip: Option<u32>,
   all: Option<bool>,
 ) -> Result<Vec<LogEntry>, String> {
-  log_page(&root, limit, skip, all.unwrap_or(false))
+  // A topological walk is laid out over everything the refs reach before the first row comes
+  // back, so this is the heaviest read the panel makes and the one that must not hold a worker.
+  super::blocking("log", move || log_page(&root, limit, skip, all.unwrap_or(false))).await
 }
 
 /// One page of the log.
@@ -204,9 +206,9 @@ fn rank(kind: &str) -> u8 {
 
 /// The paths a commit changed against its first parent. A root commit has no parent to be
 /// compared with, so every path it holds is shown as added.
-#[tauri::command(async)]
-pub fn git_commit_files(root: String, rev: String) -> Result<Vec<CommitFile>, String> {
-  commit_files(&root, &rev)
+#[tauri::command]
+pub async fn git_commit_files(root: String, rev: String) -> Result<Vec<CommitFile>, String> {
+  super::blocking("commit_files", move || commit_files(&root, &rev)).await
 }
 
 pub(crate) fn commit_files(root: &str, rev: &str) -> Result<Vec<CommitFile>, String> {
@@ -258,8 +260,8 @@ pub struct HeadCommit {
 }
 
 #[tauri::command]
-pub fn git_head_commit(root: String) -> Result<Option<HeadCommit>, String> {
-  head_commit(&root)
+pub async fn git_head_commit(root: String) -> Result<Option<HeadCommit>, String> {
+  super::blocking("head", move || head_commit(&root)).await
 }
 
 pub(crate) fn head_commit(root: &str) -> Result<Option<HeadCommit>, String> {
