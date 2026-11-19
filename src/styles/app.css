@@ -645,11 +645,15 @@ body {
   margin: 0 2px 0 6px;
 }
 .tab-dropdown {
-  position: absolute;
-  top: 100%;
-  left: 0;
+  /* Pinned by the component, not anchored here: the panel is as wide as the longest name it
+     lists, and a long one used to push its right half — close buttons and all — past the
+     window's edge. `useMenuPlacement` puts it under the button and pulls it back inside the
+     window, and the cap below keeps a name from making it wider than the window in the first
+     place; a name that still does not fit is cut inside the row. */
+  position: fixed;
   z-index: 50;
   min-width: 220px;
+  max-width: min(420px, calc(100vw - 16px));
   max-height: 320px;
   overflow-y: auto;
   background: var(--surface);
@@ -678,6 +682,9 @@ body {
 }
 .tab-dropdown .dd-name {
   flex: 1 1 auto;
+  /* A name longer than the panel is cut here, in the row, rather than widening it past the
+     window: the flex item's automatic minimum would otherwise be the text's own width. */
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

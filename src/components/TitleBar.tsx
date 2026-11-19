@@ -19,6 +19,7 @@ import {
 } from "./icons";
 import type { Tab } from "../lib/types";
 import type { NameEllipsis } from "../lib/nameEllipsis";
+import { useMenuPlacement } from "../hooks/useMenuPlacement";
 
 /** How the editor and the markdown preview share the space. */
 export type PreviewMode = "text" | "split" | "preview";
@@ -66,6 +67,17 @@ export default function TitleBar(props: Props) {
   const { tabs, activeId, sidebarVisible } = props;
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
+  /**
+   * Where the panel is pinned: the button's bottom-left corner while it is open.
+   *
+   * The panel is measured rather than anchored in CSS because its width follows the longest
+   * name it lists, and a long one put its right half outside the window — off the edge, with
+   * the close buttons on it. The hook pulls it back from the edge, and the stylesheet caps the
+   * width so the name is cut inside the panel instead.
+   */
+  const [dropdownAt, setDropdownAt] = useState<{ x: number; y: number } | null>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const dropdownPlace = useMenuPlacement(dropdownAt, dropdownRef);
   const appWindow = useRef(getCurrentWindow());
   /**
    * Whether the window is maximized, which decides whether the middle button offers
@@ -141,13 +153,23 @@ export default function TitleBar(props: Props) {
           className="tab-list-btn"
           ref={btnRef}
           title={t("title.openFiles")}
-          onClick={() => setDropdownOpen((v) => !v)}
+          onClick={() => {
+            if (!dropdownOpen) {
+              const r = btnRef.current?.getBoundingClientRect();
+              if (r) setDropdownAt({ x: r.left, y: r.bottom + 4 });
+            }
+            setDropdownOpen((v) => !v);
+          }}
         >
           <IconChevron />
         </button>
 
         {dropdownOpen && (
-          <div className="tab-dropdown">
+          <div
+            className="tab-dropdown"
+            ref={dropdownRef}
+            style={{ left: dropdownPlace.left, top: dropdownPlace.top }}
+          >
             {tabs.length === 0 ? (
               <div className="dd-empty">{t("tab.empty")}</div>
             ) : (
