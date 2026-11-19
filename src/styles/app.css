@@ -1371,6 +1371,10 @@ body.resizing .editor-host {
   /* The anchor decides where the bubble hangs; this is only the breath between the two.
      A bubble flush with its anchor reads as part of it instead of as a note about it. */
   transform: translateY(3px);
+  /* Sized by its text, not by the room left of the window: anchored near the right edge the
+     available width would be a sliver, and a one-line hint would wrap into a column. The
+     cap still makes a long path wrap. */
+  width: max-content;
   max-width: 420px;
   padding: 6px 9px;
   border: 1px solid var(--border);
