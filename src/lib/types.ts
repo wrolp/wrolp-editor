@@ -36,6 +36,12 @@ export interface Tab {
    */
   unopenable?: { error: string };
   /**
+   * The archive this file came out of, when the tab was opened from an unpacked copy. The copy
+   * is a view: the tab is read-only, saving is refused with a word about why, and the way to
+   * change the file is to export it somewhere first.
+   */
+  archiveSource?: { archive: string; entry: string };
+  /**
    * A read-only side-by-side diff. The text is a snapshot taken when the comparison was
    * started: the pair has no model of its own, so it is never dirty and never carries a draft.
    */

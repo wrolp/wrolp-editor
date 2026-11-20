@@ -3,6 +3,7 @@ import { getVersion } from "@tauri-apps/api/app";
 import { check, type Update } from "@tauri-apps/plugin-updater";
 import logoUrl from "../../branding/logo.svg";
 import { formatWhen, LANGUAGES, t } from "../lib/i18n";
+import ArchivePasswordSettings from "./ArchivePasswordSettings";
 import { parseExtensionList } from "../lib/path";
 import { LINE_ENDINGS } from "../lib/types";
 import SettingCheck from "./SettingCheck";
@@ -1035,6 +1036,21 @@ export default function SettingsPanel({
                 />
               </SettingField>
               <p className="muted">{t("settings.imageBackdropDesc")}</p>
+              <SettingField label={t("settings.archiveCache")}>
+                <select
+                  className="select"
+                  value={settings.archiveKeepDays > 0 ? "days" : "exit"}
+                  onChange={(e) =>
+                    onSaveSettings({
+                      archiveKeepDays: e.target.value === "days" ? 7 : 0,
+                    })
+                  }
+                >
+                  <option value="exit">{t("settings.archiveCacheExit")}</option>
+                  <option value="days">{t("settings.archiveCacheDays", { n: 7 })}</option>
+                </select>
+              </SettingField>
+              <p className="muted">{t("settings.archiveCacheDesc")}</p>
             </div>
             <p className="muted">{t("settings.persisted")}</p>
           </div>
@@ -1303,6 +1319,7 @@ export default function SettingsPanel({
               </p>
               {rememberedError && <p className="setting-warn">{rememberedError}</p>}
             </div>
+            <ArchivePasswordSettings onNotice={onToast} />
           </div>
         )}
 

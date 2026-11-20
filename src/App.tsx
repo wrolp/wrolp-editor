@@ -292,6 +292,13 @@ const DEFAULT_SETTINGS: Settings = {
   // short enough to feel like a show, and looping is what a slideshow is expected to do.
   galleryInterval: 5,
   galleryLoop: true,
+  // The stack until somebody picks another layout; from then on the toolbar's choice is what
+  // the next gallery opens in.
+  galleryMode: "stack",
+  // Unpacked archives and the thumbnails made from them are deleted when the app closes: an
+  // archive that asked for a password must not leave readable copies on disk after the fact.
+  // A positive number keeps them that many days instead, swept on the next unpack.
+  archiveKeepDays: 0,
   // The checkerboard rather than a colour: it is the one backdrop that stays readable whatever
   // is in the picture, because it is drawn from the theme the picture is being judged against.
   imageBackdrop: "checker",
@@ -679,6 +686,18 @@ export default function App() {
     autoSave: { enabled: settings.autoSave, intervalSec: settings.autoSaveInterval },
     versions: versions.recorder,
     autoSaveVersions: settings.autoSaveVersions,
+    // Only the copy on screen, whose digest folder is the one the tab's path sits in: a tab
+    // opened from an archive that has since been closed is not read-only any more — the folder
+    // is gone, and its backend writes fail on their own.
+    archiveSourceOf: (path) =>
+      archiveView &&
+      pathKey(path) !== pathKey(archiveView.dir) &&
+      isUnder(path, archiveView.dir)
+        ? {
+            archive: archiveView.source,
+            entry: path.slice(archiveView.dir.length).replace(/^[\\/]+/, ""),
+          }
+        : null,
   });
   const groups = useGroups({ onError: toast });
   const activeGroup = useMemo(
@@ -1471,6 +1490,63 @@ export default function App() {
     [refreshFolderHistory]
   );
 
+  /** The archive password question, if one is on screen. */
+  const [archiveAsk, setArchiveAsk] = useState<{
+    name: string;
+    error: string | null;
+    resolve: (answer: { password: string } | null) => void;
+  } | null>(null);
+
+  const askArchivePassword = useCallback(
+    (path: string, error: string | null) =>
+      new Promise<{ password: string } | null>((resolve) => {
+        setArchiveAsk({ name: basename(path), error, resolve });
+      }),
+    []
+  );
+
+  /**
+   * Run one archive call, asking for a password when the candidates in Rust could not open it.
+   *
+   * The automatic chain (this session, remembered, rule, default) is tried in Rust first; the
+   * question appears only after all of it failed, and a wrong answer reopens it with the reason.
+   * Cancelling rethrows the original error, so the caller's message is the one that was true
+   * before the question was asked.
+   */
+  const withArchivePassword = useCallback(
+    async <T,>(
+      path: string,
+      run: (password?: string) => Promise<T>
+    ): Promise<T> => {
+      try {
+        return await run();
+      } catch (first) {
+        const code = String(first);
+        if (
+          !code.includes("archive_password_required") &&
+          !code.includes("archive_bad_password")
+        ) {
+          throw first;
+        }
+        let error = code.includes("archive_bad_password")
+          ? errorMessage(first)
+          : null;
+        for (let attempt = 0; attempt < 5; attempt += 1) {
+          const answer = await askArchivePassword(path, error);
+          if (answer === null) throw first;
+          try {
+            return await run(answer.password);
+          } catch (next) {
+            if (!String(next).includes("archive_bad_password")) throw next;
+            error = errorMessage(next);
+          }
+        }
+        throw first;
+      }
+    },
+    [askArchivePassword]
+  );
+
   /**
    * Unpack an archive and show the copy in the Explorer.
    *
@@ -1481,7 +1557,9 @@ export default function App() {
   const browseArchive = useCallback(
     async (path: string) => {
       try {
-        const out = await api.extractArchive(path);
+        const out = await withArchivePassword(path, (password) =>
+          api.extractArchive(path, password)
+        );
         setArchiveView({
           dir: out.dir,
           source: path,
@@ -1500,7 +1578,62 @@ export default function App() {
         toast(errorMessage(e));
       }
     },
-    [toast]
+    [toast, withArchivePassword]
+  );
+
+  /**
+   * Show the pictures inside an archive without unpacking it.
+   *
+   * The probe decides the opening mode: a zip whose pictures are all in subfolders would open
+   * an empty grid otherwise, so the second attempt asks with subfolders and the tab starts in
+   * that mode. A format that cannot be read in place answers `archive_stream_only`, which is
+   * shown as it is — the way out is "browse the archive" beside this entry.
+   */
+  const browseArchiveImages = useCallback(
+    async (path: string) => {
+      try {
+        await withArchivePassword(path, async (password) => {
+          let recursive = false;
+          try {
+            await api.archiveListImages(path, "", false, password);
+          } catch (e) {
+            if (!String(e).includes("archive_no_images")) throw e;
+            await api.archiveListImages(path, "", true, password);
+            recursive = true;
+          }
+          await tabs.openGalleryArchive(path, "", undefined, recursive);
+        });
+      } catch (e) {
+        toast(errorMessage(e));
+      }
+    },
+    [tabs, toast, withArchivePassword]
+  );
+
+  /**
+   * Copy one file out of the archive's copy to a folder the user picks, then open that copy.
+   *
+   * The export is the only way a file leaves the read-only folder in an editable form, so it
+   * is also where the tab becomes ordinary: what opens afterwards has no archive source and
+   * saves like any other file.
+   */
+  const exportFromArchive = useCallback(
+    async (path: string) => {
+      const start = archiveView ? parentOf(archiveView.source) : parentOf(path);
+      const dir = await pickFolder(start || undefined).catch((e) => {
+        toast(errorMessage(e));
+        return null;
+      });
+      if (!dir) return;
+      try {
+        const out = await api.exportFromArchive(path, dir);
+        toast(t("side.exported", { name: out.name }));
+        await tabs.openPath(out.path);
+      } catch (e) {
+        toast(errorMessage(e));
+      }
+    },
+    [archiveView, tabs, toast]
   );
 
   /** Leave the unpacked copy: go back beside the archive and delete the copy. */
@@ -3408,8 +3541,10 @@ const defaultModeFor = useCallback(
             setSidebarVisible(true);
             setSidebarRoot(dir);
           }}
-          onBrowseImages={(dir) => void tabs.openGallery(dir)}
+          onBrowseImages={(dir, startPath) => void tabs.openGallery(dir, startPath)}
           onBrowseArchive={(path) => void browseArchive(path)}
+          onBrowseArchiveImages={(path) => void browseArchiveImages(path)}
+          onExportFromArchive={(path) => void exportFromArchive(path)}
           archive={archiveView}
           onCloseArchive={closeArchive}
           onShowArchive={(path) => {
@@ -3517,6 +3652,8 @@ const defaultModeFor = useCallback(
               path={tabs.fileTab.path}
               error={tabs.fileTab.unopenable.error}
               onNotice={toast}
+              onBrowseArchive={(path) => void browseArchive(path)}
+              onBrowseImages={(path) => void browseArchiveImages(path)}
             />
           )}
 
@@ -4488,6 +4625,29 @@ const defaultModeFor = useCallback(
             void tabs.submitPassword(password, remember, previous)
           }
           onCancel={tabs.cancelPassword}
+        />
+      )}
+
+      {/* An archive asks outside the tab queue: unpacking and the in-archive gallery are not
+          tied to a tab, so the question lives here and the action that asked resumes when it
+          is answered. */}
+      {archiveAsk && (
+        <PasswordDialog
+          mode="archive"
+          name={archiveAsk.name}
+          count={1}
+          error={archiveAsk.error}
+          busy={false}
+          onSubmit={(password) => {
+            const resolve = archiveAsk.resolve;
+            setArchiveAsk(null);
+            resolve({ password });
+          }}
+          onCancel={() => {
+            const resolve = archiveAsk.resolve;
+            setArchiveAsk(null);
+            resolve(null);
+          }}
         />
       )}
 

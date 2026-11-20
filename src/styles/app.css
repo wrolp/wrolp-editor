@@ -5418,6 +5418,47 @@ select {
   color: var(--warn-code);
 }
 
+/* Archive password rules: a compact list, each rule a card, the editor opening in place. */
+.arc-inline {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.arc-inline .grp-input {
+  flex: 1 1 220px;
+}
+.arc-rule {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-raised);
+}
+.arc-rule p {
+  margin: 4px 0 0;
+  font-size: 12px;
+}
+.arc-rule-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  cursor: default;
+}
+.arc-rule-head code {
+  font-size: 12px;
+}
+.arc-rule-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.arc-editor {
+  border-style: dashed;
+}
+
 /* ---------- Status bar ---------- */
 .sb-git {
   display: inline-flex;

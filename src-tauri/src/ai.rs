@@ -62,7 +62,7 @@ const ENTROPY: &[u8] = b"wrolp-ai-key";
 
 /// Encrypt a secret for this Windows account.
 #[cfg(windows)]
-fn protect(plain: &str) -> Result<String, String> {
+pub(crate) fn protect(plain: &str) -> Result<String, String> {
   use windows_sys::Win32::Foundation::LocalFree;
   use windows_sys::Win32::Security::Cryptography::{
     CryptProtectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,
@@ -106,7 +106,7 @@ fn protect(plain: &str) -> Result<String, String> {
 /// The plaintext behind a blob written by [`protect`]. An error here means this account cannot
 /// read it: another machine, another user, or a blob that is not ours.
 #[cfg(windows)]
-fn unprotect(blob: &str) -> Result<String, String> {
+pub(crate) fn unprotect(blob: &str) -> Result<String, String> {
   use windows_sys::Win32::Foundation::LocalFree;
   use windows_sys::Win32::Security::Cryptography::{
     CryptUnprotectData, CRYPTPROTECT_UI_FORBIDDEN, CRYPT_INTEGER_BLOB,

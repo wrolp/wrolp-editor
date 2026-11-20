@@ -126,13 +126,57 @@ export interface ArchiveEntry {
 
 /** What an archive holds, listed without unpacking any of it. */
 export interface ArchiveListing {
-  /** `zip`, `tar` or `tarGz`. */
+  /** `zip`, `7z`, `tar` or `tarGz`. */
   format: string;
   entries: ArchiveEntry[];
   totalBytes: number;
   encrypted: boolean;
   /** The listing stopped at its cap: the extract would refuse this archive. */
   truncated: boolean;
+}
+
+/** One picture inside an archive, addressed by its entry name. */
+export interface ArchiveImageEntry {
+  /** Relative path inside the archive; what the picture URL is built from. */
+  entry: string;
+  /** Last segment, for a card's title. */
+  name: string;
+  bytes: number;
+}
+
+/** The pictures under one folder inside an archive. */
+export interface ArchiveImageList {
+  items: ArchiveImageEntry[];
+  /** More than the gallery's cap: the list is a prefix. */
+  truncated: boolean;
+  /** File entries examined to build the list. */
+  scanned: number;
+}
+
+/** One archive password rule, as the settings panel sees it: metadata only, never a secret. */
+export interface ArchiveRuleView {
+  id: string;
+  pattern: string;
+  flags: string;
+  enabled: boolean;
+  /** `name` or `path`: what the pattern is matched against. */
+  target: string;
+  note: string;
+}
+
+/** A rule being saved. An empty `id` adds; an empty `password` keeps the existing secret. */
+export interface ArchiveRuleInput extends ArchiveRuleView {
+  password?: string;
+}
+
+export interface ArchivePasswordState {
+  defaultSet: boolean;
+  rules: ArchiveRuleView[];
+}
+
+export interface ArchiveRuleTest {
+  rule: ArchiveRuleView | null;
+  defaultSet: boolean;
 }
 
 /** Why one entry was left out of an unpacked copy. `reason` is a code, not a sentence. */
@@ -325,6 +369,14 @@ export interface Settings {
   galleryInterval: number;
   /** After the last picture, the slideshow starts over instead of stopping. */
   galleryLoop: boolean;
+  /** The gallery layout last picked in the toolbar: `stack`, `single`, `slideshow` or `grid`. */
+  galleryMode: string;
+  /**
+   * How long an archive unpacked for browsing survives: 0 deletes it together with its
+   * thumbnails when the app closes (the default), any other value keeps it that many days and
+   * sweeps it on the next unpack. 0 is a choice, not a missing value.
+   */
+  archiveKeepDays: number;
   /**
    * What sits behind a picture's transparent pixels: `checker` for the theme's checkerboard, or
    * a lowercase `#rrggbb` colour. It is a colour rather than a swatch name because the picker is
@@ -1075,17 +1127,71 @@ export const api = {
    * when it is not an archive this build can open.
    */
   archiveDetect: (path: string) => invoke<string | null>("archive_detect", { path }),
-  /** What is inside an archive, read from its index without unpacking anything. */
-  listArchive: (path: string) => invoke<ArchiveListing>("list_archive", { path }),
+  /**
+   * What is inside an archive, read from its index without unpacking anything. `password` is
+   * only ever the answer the user just typed: the automatic candidates are tried in Rust.
+   */
+  listArchive: (path: string, password?: string) =>
+    invoke<ArchiveListing>("list_archive", { path, password: password ?? null }),
   /**
    * Unpack an archive into the app's own cache and return where it landed. The copy is
    * read-only in the editor: it is a view of the archive, not a second place to edit it.
    * Asking twice for the same unchanged archive returns the same folder.
    */
-  extractArchive: (path: string) => invoke<ArchiveExtract>("extract_archive", { path }),
+  extractArchive: (path: string, password?: string) =>
+    invoke<ArchiveExtract>("extract_archive", { path, password: password ?? null }),
   /** Delete one unpacked archive (the folder the Explorer is showing), or all of them. */
   clearArchiveCache: (dir?: string | null) =>
     invoke<void>("clear_archive_cache", { dir: dir ?? null }),
+  /**
+   * Copy one unpacked file out to `targetDir`, under a name no file there has yet. This is the
+   * way a file leaves an archive in an editable form; the copy itself stays untouched.
+   */
+  exportFromArchive: (path: string, targetDir: string) =>
+    invoke<Renamed>("export_from_archive", { path, targetDir }),
+  /** The pictures inside one zip, read from its central directory without unpacking it. */
+  archiveListImages: (
+    archive: string,
+    inner: string,
+    recursive: boolean,
+    password?: string
+  ) =>
+    invoke<ArchiveImageList>("archive_list_images", {
+      archive,
+      inner,
+      recursive,
+      password: password ?? null,
+    }),
+  /** Take one picture out of an archive into a folder the user chose. */
+  archiveExportImage: (
+    archive: string,
+    entry: string,
+    targetDir: string,
+    password?: string
+  ) =>
+    invoke<Renamed>("archive_export_image", {
+      archive,
+      entry,
+      targetDir,
+      password: password ?? null,
+    }),
+  // ---- Archive password chain -------------------------------------------------------------
+  /** Whether a default password is set, and the rule shapes. Never a password itself. */
+  archivePasswordState: () =>
+    invoke<ArchivePasswordState>("archive_password_state"),
+  archiveSetDefaultPassword: (password: string) =>
+    invoke<void>("archive_set_default_password", { password }),
+  archiveClearDefaultPassword: () =>
+    invoke<void>("archive_clear_default_password"),
+  archiveSavePasswordRule: (rule: ArchiveRuleInput) =>
+    invoke<ArchiveRuleView>("archive_save_password_rule", { rule }),
+  archiveDeletePasswordRule: (id: string) =>
+    invoke<void>("archive_delete_password_rule", { id }),
+  archiveMovePasswordRule: (id: string, delta: number) =>
+    invoke<void>("archive_move_password_rule", { id, delta }),
+  /** Which rule a name would hit, for the settings panel's test box. */
+  archiveTestPasswordRule: (name: string, path: string) =>
+    invoke<ArchiveRuleTest>("archive_test_password_rule", { name, path }),
   fileSettingsView: (path: string) => invoke<FileSettingsView>("file_settings_view", { path }),
   saveFileSettings: (path: string, settings: FileSettings) =>
     invoke<FileSettings>("save_file_settings", { path, settings }),

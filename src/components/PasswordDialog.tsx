@@ -10,7 +10,7 @@ import SettingCheck from "./SettingCheck";
  * invent a password, which is the difference that shapes the rest: a wrong unlock fails and can
  * be retried, while a weak or mistyped new one is written into the file and stays there.
  */
-export type PasswordMode = "unlock" | "create" | "change" | "remove";
+export type PasswordMode = "unlock" | "create" | "change" | "remove" | "archive";
 
 interface Props {
   mode: PasswordMode;
@@ -146,7 +146,9 @@ export default function PasswordDialog({
         ? t("enc.changeTitle", { name })
         : mode === "remove"
           ? t("enc.removeTitle", { name })
-          : t("enc.unlockTitle", { name });
+          : mode === "archive"
+            ? t("arc.promptTitle", { name })
+            : t("enc.unlockTitle", { name });
   const action =
     mode === "create"
       ? t("enc.create")
@@ -154,7 +156,9 @@ export default function PasswordDialog({
         ? t("enc.change")
         : mode === "remove"
           ? t("enc.remove")
-          : t("enc.unlock");
+          : mode === "archive"
+            ? t("arc.unlock")
+            : t("enc.unlock");
 
   return (
     <div className="modal-overlay">
@@ -169,7 +173,9 @@ export default function PasswordDialog({
               ? t("enc.changeHint")
               : mode === "remove"
                 ? t("enc.removeHint")
-                : t("enc.unlockHint")}
+                : mode === "archive"
+                  ? t("arc.promptHint")
+                  : t("enc.unlockHint")}
         </p>
         {mode === "change" && (
           <PasswordField
@@ -217,6 +223,8 @@ export default function PasswordDialog({
         {worthWarning && <p className="pwd-strength is-warn">{t("enc.strengthWeak", { n: String(WARN_PASSWORD) })}</p>}
         {mismatched && <p className="pwd-strength is-block">{t("enc.mismatch")}</p>}
         {error && <p className="modal-error">{error}</p>}
+        {/* An archive has no "remember" to offer: its password is kept for this session only.
+            An encrypted file's is the one the credential store holds. */}
         {(mode === "unlock" || mode === "create") && (
           <SettingCheck
             label={t("enc.remember")}

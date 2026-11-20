@@ -1,5 +1,6 @@
 mod ai;
 mod archive;
+mod archive_passwords;
 mod backup;
 mod commands;
 mod context_menu;
@@ -58,8 +59,19 @@ pub fn run() {
     // Signs nothing itself: it reads the endpoint and public key from tauri.conf.json and
     // verifies every downloaded installer against that key.
     .plugin(tauri_plugin_updater::Builder::new().build())
+    // The pictures inside an archive have no filesystem path, so the asset protocol cannot
+    // serve them. This one does, with a list of archives the user actually opened — see
+    // `archive::ArchiveScope`. Async because decoding a picture must not block the webview.
+    .register_asynchronous_uri_scheme_protocol("wrolp-archive", |context, request, responder| {
+      let app = context.app_handle().clone();
+      std::thread::spawn(move || {
+        responder.respond(archive::serve_archive_image(&app, &request));
+      });
+    })
     .manage(commands::PendingFiles::default())
+    .manage(archive::ArchiveScope::default())
     .manage(unlock::UnlockStore::default())
+    .manage(archive_passwords::ArchivePasswords::default())
     .manage(git::GitLocks::default())
     .manage(git::GitOps::default())
     .manage(ai::AiState::default())
@@ -106,7 +118,17 @@ pub fn run() {
       archive::archive_detect,
       archive::list_archive,
       archive::extract_archive,
+      archive::export_from_archive,
+      archive::archive_list_images,
+      archive::archive_export_image,
       archive::clear_archive_cache,
+      archive_passwords::archive_password_state,
+      archive_passwords::archive_set_default_password,
+      archive_passwords::archive_clear_default_password,
+      archive_passwords::archive_save_password_rule,
+      archive_passwords::archive_delete_password_rule,
+      archive_passwords::archive_move_password_rule,
+      archive_passwords::archive_test_password_rule,
       commands::allow_asset_dir,
       commands::render_diagram,
       commands::get_file_settings,
@@ -226,7 +248,7 @@ pub fn run() {
     }));
   }
 
-  builder
+  let app = builder
     .on_window_event(|window, event| {
       let WindowEvent::DragDrop(drag) = event else {
         return;
@@ -256,6 +278,13 @@ pub fn run() {
         _ => {}
       }
     })
-    .run(tauri::generate_context!())
-    .expect("error while running tauri application");
+    .build(tauri::generate_context!())
+    .expect("error while building tauri application");
+  app.run(|app, event| {
+    // A keep window of 0 means "clear on exit", which is the default: the unpacked copies are
+    // the only plaintext a password-protected archive leaves on this machine.
+    if let tauri::RunEvent::Exit = event {
+      archive::clear_cache_on_exit(app);
+    }
+  });
 }

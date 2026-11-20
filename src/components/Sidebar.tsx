@@ -29,6 +29,7 @@ import {
   IconInfo,
   IconOpenFolder,
   IconPaste,
+  IconMoveTo,
   IconPencil,
   IconReload,
   IconRestore,
@@ -56,7 +57,12 @@ import {
   type VersionEntry,
   type VersionSummary,
 } from "../lib/tauri";
-import { basename, isUnder, isUntitled } from "../lib/path";
+import {
+  basename,
+  isPreviewableImage,
+  isUnder,
+  isUntitled,
+} from "../lib/path";
 import {
   EXPLORER_SORTS,
   sortEntries,
@@ -832,13 +838,20 @@ interface Props extends Omit<
   onReveal: (path: string) => void;
   /** Points the Explorer at a folder, the same action as the tab menu's. */
   onSetRoot: (dir: string) => void;
-  /** Opens the folder's pictures in a gallery tab. */
-  onBrowseImages: (dir: string) => void;
+  /** Opens the folder's pictures in a gallery tab, optionally landing on one of them. */
+  onBrowseImages: (dir: string, startPath?: string) => void;
   /**
    * Unpacks an archive and points the Explorer at the copy. The copy is read-only, so this is
    * how an archive is read without it ever becoming a second place to edit files.
    */
   onBrowseArchive: (path: string) => void;
+  /** Shows the pictures inside an archive without unpacking the rest of it. */
+  onBrowseArchiveImages: (path: string) => void;
+  /**
+   * Copy one file out of the unpacked archive to a folder the user picks: the only way a file
+   * leaves the read-only copy in a form that can be saved over.
+   */
+  onExportFromArchive: (path: string) => void;
   /**
    * The archive whose unpacked copy the Explorer is showing, or null when it shows a folder.
    * `source` is the archive itself, for the two buttons on the note.
@@ -953,6 +966,8 @@ export default function Sidebar(props: Props) {
     onSetRoot,
     onBrowseImages,
     onBrowseArchive,
+    onBrowseArchiveImages,
+    onExportFromArchive,
     archive,
     onCloseArchive,
     onShowArchive,
@@ -1087,6 +1102,15 @@ export default function Sidebar(props: Props) {
       if (localGitFor.current === wanted) setLocalGit(null);
     }
   }, []);
+
+  /**
+   * Whether the tree is showing an unpacked archive: a view of somebody else's bytes, so every
+   * action that would write is left out of the menus rather than offered and refused. The
+   * backend refuses the same actions through `archive::refuse_if_cached`, so this is the
+   * courtesy, not the boundary.
+   */
+  const readOnly =
+    archive !== null && rootDir !== null && pathKey(rootDir) === pathKey(archive.dir);
 
   /** What the local git group would offer for the row under the pointer. */
   const localGitActions = localGit
@@ -1321,6 +1345,10 @@ export default function Sidebar(props: Props) {
    * the folder it came from as well as filling the one it went to.
    */
   const pasteInto = async (dir: string) => {
+    if (readOnly) {
+      onError(t("err.archive_read_only"));
+      return;
+    }
     if (clipboard) {
       const source = clipboard.path;
       const cut = clipboard.cut;
@@ -1454,6 +1482,7 @@ export default function Sidebar(props: Props) {
    * came from, which is what dropping it on its own row has to mean — nothing at all.
    */
   const canMoveTo = (dir: string) =>
+    !readOnly &&
     dragPaths.current.length > 0 &&
     dragPaths.current.every(
       (path) =>
@@ -1590,10 +1619,12 @@ export default function Sidebar(props: Props) {
     onDropFiles: props.onDropFiles,
     onOpenDroppedFiles: props.onOpenDroppedFiles,
     onPasteFiles: props.onPasteFiles,
+    onError: props.onError,
     pasteInto,
     cutRow,
     bumpFolder,
     rootDir,
+    readOnly,
     view,
     visible,
     width,
@@ -1669,6 +1700,12 @@ export default function Sidebar(props: Props) {
     // editor, the other sidebar views, a hidden sidebar — a file dropped on an editor
     // opens as a tab, which is what makes the gesture visible wherever it lands.
     if (overSidebar && state.view === "explorer" && dir) {
+      // Dropping files onto an unpacked archive would copy them into a folder the next
+      // clean-up deletes; the refusal is the one the backend would give anyway.
+      if (state.readOnly) {
+        state.onError(t("err.archive_read_only"));
+        return;
+      }
       void state.onDropFiles(paths, dir).then((ok) => {
         if (ok) state.bumpFolder(dir);
       });
@@ -2646,73 +2683,79 @@ export default function Sidebar(props: Props) {
                   {t("side.menuRefresh")}
                 </div>
                 <div className="ws-sep" />
-                <div
-                  className="ctx-item"
-                  onClick={() => {
-                    setCreating({ dir: rootDir, kind: "file" });
-                    setMenu(null);
-                  }}
-                >
-                  <span className="ctx-icon">
-                    <IconFilePlus size={14} />
-                  </span>
-                  {t("side.menuNewFile")}
-                </div>
-                <div
-                  className="ctx-item"
-                  onClick={() => {
-                    setCreating({ dir: rootDir, kind: "encrypted" });
-                    setMenu(null);
-                  }}
-                >
-                  <span className="ctx-icon">
-                    <IconFileLock size={14} />
-                  </span>
-                  {t("enc.menuNew")}
-                </div>
-                <div
-                  className="ctx-item"
-                  onClick={() => {
-                    setCreating({ dir: rootDir, kind: "dir" });
-                    setMenu(null);
-                  }}
-                >
-                  <span className="ctx-icon">
-                    <IconFolderPlus size={14} />
-                  </span>
-                  {t("side.menuNewFolder")}
-                </div>
-                <div className="ws-sep" />
-                <div
-                  className="ctx-item"
-                  onClick={() => {
-                    const dir = rootDir;
-                    setMenu(null);
-                    void batchFolder(dir);
-                  }}
-                >
-                  <span className="ctx-icon">
-                    <IconPencil size={14} />
-                  </span>
-                  {t("side.menuBatchFolder")}
-                </div>
-                {/* The folder being shown has no row of its own, so this is the only place
-                    a paste into it can be asked for. Always offered: whether the system
-                    clipboard holds files is only knowable at paste time, and a row that appears
-                    and disappears with another program's clipboard would be a menu that changes
-                    under the cursor. */}
-                <div
-                  className="ctx-item"
-                  onClick={() => {
-                    void runPasteAny({ path: "", name: "", isDir: true });
-                    setMenu(null);
-                  }}
-                >
-                  <span className="ctx-icon">
-                    <IconPaste size={14} />
-                  </span>
-                  {t("side.menuPaste")}
-                </div>
+                {/* Everything below writes into the folder, so an unpacked archive offers
+                    none of it: the copy is a view, and "export" is how a file leaves it. */}
+                {!readOnly && (
+                  <>
+                    <div
+                      className="ctx-item"
+                      onClick={() => {
+                        setCreating({ dir: rootDir, kind: "file" });
+                        setMenu(null);
+                      }}
+                    >
+                      <span className="ctx-icon">
+                        <IconFilePlus size={14} />
+                      </span>
+                      {t("side.menuNewFile")}
+                    </div>
+                    <div
+                      className="ctx-item"
+                      onClick={() => {
+                        setCreating({ dir: rootDir, kind: "encrypted" });
+                        setMenu(null);
+                      }}
+                    >
+                      <span className="ctx-icon">
+                        <IconFileLock size={14} />
+                      </span>
+                      {t("enc.menuNew")}
+                    </div>
+                    <div
+                      className="ctx-item"
+                      onClick={() => {
+                        setCreating({ dir: rootDir, kind: "dir" });
+                        setMenu(null);
+                      }}
+                    >
+                      <span className="ctx-icon">
+                        <IconFolderPlus size={14} />
+                      </span>
+                      {t("side.menuNewFolder")}
+                    </div>
+                    <div className="ws-sep" />
+                    <div
+                      className="ctx-item"
+                      onClick={() => {
+                        const dir = rootDir;
+                        setMenu(null);
+                        void batchFolder(dir);
+                      }}
+                    >
+                      <span className="ctx-icon">
+                        <IconPencil size={14} />
+                      </span>
+                      {t("side.menuBatchFolder")}
+                    </div>
+                    {/* The folder being shown has no row of its own, so this is the only place
+                        a paste into it can be asked for. Always offered: whether the system
+                        clipboard holds files is only knowable at paste time, and a row that
+                        appears and disappears with another program's clipboard would be a menu
+                        that changes under the cursor. */}
+                    <div
+                      className="ctx-item"
+                      onClick={() => {
+                        void runPasteAny({ path: "", name: "", isDir: true });
+                        setMenu(null);
+                      }}
+                    >
+                      <span className="ctx-icon">
+                        <IconPaste size={14} />
+                      </span>
+                      {t("side.menuPaste")}
+                    </div>
+                  </>
+                )}
               </>
             )
           ) : (
@@ -2734,22 +2777,69 @@ export default function Sidebar(props: Props) {
                     </span>
                     {t("side.menuOpen")}
                   </div>
-                  {/* Offered only when the bytes say it is one: an archive is read by
-                      unpacking it into the app's cache and showing that copy, and an item
-                      that led to "not an archive" would be a menu lying about the file. */}
-                  {archiveHit && pathKey(archiveHit.path) === pathKey(menu.path) && (
+                  {/* A picture is also an entrance to the folder's pictures: the gallery opens
+                      on the one that was right-clicked rather than at the top of the list. */}
+                  {isPreviewableImage(menu.path) && (
                     <div
                       className="ctx-item"
                       onClick={() => {
-                        onBrowseArchive(menu.path);
+                        onBrowseImages(parentOf(menu.path), menu.path);
                         setMenu(null);
                       }}
                     >
                       <span className="ctx-icon">
-                        <IconFolder size={14} />
+                        <IconImage size={14} />
                       </span>
-                      {t("side.menuBrowseArchive")}
+                      {t("side.menuBrowseFolderImages")}
                     </div>
+                  )}
+                  {readOnly && (
+                    <div
+                      className="ctx-item"
+                      onClick={() => {
+                        onExportFromArchive(menu.path);
+                        setMenu(null);
+                      }}
+                    >
+                      <span className="ctx-icon">
+                        <IconMoveTo size={14} />
+                      </span>
+                      {t("side.menuExport")}
+                    </div>
+                  )}
+                  {/* Offered only when the bytes say it is one: an archive is read by
+                      unpacking it into the app's cache and showing that copy, and an item
+                      that led to "not an archive" would be a menu lying about the file. */}
+                  {archiveHit && pathKey(archiveHit.path) === pathKey(menu.path) && (
+                    <>
+                      <div
+                        className="ctx-item"
+                        onClick={() => {
+                          onBrowseArchive(menu.path);
+                          setMenu(null);
+                        }}
+                      >
+                        <span className="ctx-icon">
+                          <IconFolder size={14} />
+                        </span>
+                        {t("side.menuBrowseArchive")}
+                      </div>
+                      {/* The gallery reads a zip's or a 7z's entries in place; tar and tar.gz
+                          answer with `archive_stream_only` and this entry simply says why when
+                          it is tried. */}
+                      <div
+                        className="ctx-item"
+                        onClick={() => {
+                          onBrowseArchiveImages(menu.path);
+                          setMenu(null);
+                        }}
+                      >
+                        <span className="ctx-icon">
+                          <IconImage size={14} />
+                        </span>
+                        {t("side.menuBrowseArchiveImages")}
+                      </div>
+                    </>
                   )}
                   <div
                     className="ctx-item"
@@ -2837,65 +2927,71 @@ export default function Sidebar(props: Props) {
                     </span>
                     {t("side.menuRefresh")}
                   </div>
-                  <div
-                    className="ctx-item"
-                    onClick={() => {
-                      setCreating({ dir: menu.path, kind: "file" });
-                      setMenu(null);
-                    }}
-                  >
-                    <span className="ctx-icon">
-                      <IconFilePlus size={14} />
-                    </span>
-                    {t("side.menuNewFile")}
-                  </div>
-                  <div
-                    className="ctx-item"
-                    onClick={() => {
-                      setCreating({ dir: menu.path, kind: "encrypted" });
-                      setMenu(null);
-                    }}
-                  >
-                    <span className="ctx-icon">
-                      <IconFileLock size={14} />
-                    </span>
-                    {t("enc.menuNew")}
-                  </div>
-                  <div
-                    className="ctx-item"
-                    onClick={() => {
-                      setCreating({ dir: menu.path, kind: "dir" });
-                      setMenu(null);
-                    }}
-                  >
-                    <span className="ctx-icon">
-                      <IconFolderPlus size={14} />
-                    </span>
-                    {t("side.menuNewFolder")}
-                  </div>
+                  {!readOnly && (
+                    <>
+                      <div
+                        className="ctx-item"
+                        onClick={() => {
+                          setCreating({ dir: menu.path, kind: "file" });
+                          setMenu(null);
+                        }}
+                      >
+                        <span className="ctx-icon">
+                          <IconFilePlus size={14} />
+                        </span>
+                        {t("side.menuNewFile")}
+                      </div>
+                      <div
+                        className="ctx-item"
+                        onClick={() => {
+                          setCreating({ dir: menu.path, kind: "encrypted" });
+                          setMenu(null);
+                        }}
+                      >
+                        <span className="ctx-icon">
+                          <IconFileLock size={14} />
+                        </span>
+                        {t("enc.menuNew")}
+                      </div>
+                      <div
+                        className="ctx-item"
+                        onClick={() => {
+                          setCreating({ dir: menu.path, kind: "dir" });
+                          setMenu(null);
+                        }}
+                      >
+                        <span className="ctx-icon">
+                          <IconFolderPlus size={14} />
+                        </span>
+                        {t("side.menuNewFolder")}
+                      </div>
+                    </>
+                  )}
                   <div className="ws-sep" />
                   {/* The same command as the selection's, aimed at everything the folder
                       holds: a folder is a unit of work, and picking its rows one by one to
                       say "all of them" is busywork. */}
-                  <div
-                    className="ctx-item"
-                    onClick={() => {
-                      const dir = menu.path;
-                      setMenu(null);
-                      void batchFolder(dir);
-                    }}
-                  >
-                    <span className="ctx-icon">
-                      <IconPencil size={14} />
-                    </span>
-                    {t("side.menuBatchFolder")}
-                  </div>
+                  {!readOnly && (
+                    <div
+                      className="ctx-item"
+                      onClick={() => {
+                        const dir = menu.path;
+                        setMenu(null);
+                        void batchFolder(dir);
+                      }}
+                    >
+                      <span className="ctx-icon">
+                        <IconPencil size={14} />
+                      </span>
+                      {t("side.menuBatchFolder")}
+                    </div>
+                  )}
                 </>
               )}
               {/* Two or more rows are a different question from one: one pattern applied to
                   each, previewed first. Offered only while the row under the pointer is part
                   of the selection, so the count and the target cannot disagree. */}
-              {selected.size >= 2 && selected.has(pathKey(menu.path)) && (
+              {!readOnly && selected.size >= 2 && selected.has(pathKey(menu.path)) && (
                 <div
                   className="ctx-item"
                   onClick={() => {
@@ -2909,22 +3005,24 @@ export default function Sidebar(props: Props) {
                   {t("side.menuBatchRename", { count: selected.size })}
                 </div>
               )}
-              <div
-                className="ctx-item"
-                onClick={() => {
-                  setRenaming(pathKey(menu.path));
-                  setMenu(null);
-                }}
-              >
-                <span className="ctx-icon">
-                  <IconPencil size={14} />
-                </span>
-                {t("side.menuRename")}
-              </div>
+              {!readOnly && (
+                <div
+                  className="ctx-item"
+                  onClick={() => {
+                    setRenaming(pathKey(menu.path));
+                    setMenu(null);
+                  }}
+                >
+                  <span className="ctx-icon">
+                    <IconPencil size={14} />
+                  </span>
+                  {t("side.menuRename")}
+                </div>
+              )}
               {/* A file still belongs to a folder, and "all of them" is a question about that
                   folder: the same command its own row offers, aimed at the one holding this
                   file. A folder's menu already has it for the folder itself. */}
-              {!menu.isDir && (
+              {!readOnly && !menu.isDir && (
                 <div
                   className="ctx-item"
                   onClick={() => {
@@ -2958,33 +3056,37 @@ export default function Sidebar(props: Props) {
                 </span>
                 {t("side.menuCopy")}
               </div>
-              {/* A cut is the same clipboard with a different paste: the entry is taken from
-                  where it is rather than duplicated, so the word about it says so. */}
-              <div
-                className="ctx-item"
-                onClick={() => {
-                  setClipboard({ path: menu.path, name: menu.name, isDir: menu.isDir, cut: true });
-                  onError(t("side.cutReady", { name: menu.name.replace(/\/$/, "") }));
-                  setMenu(null);
-                }}
-              >
-                <span className="ctx-icon">
-                  <IconCut size={14} />
-                </span>
-                {t("side.menuCut")}
-              </div>
-              <div
-                className="ctx-item"
-                onClick={() => {
-                  void runPasteAny(menu);
-                  setMenu(null);
-                }}
-              >
-                <span className="ctx-icon">
-                  <IconPaste size={14} />
-                </span>
-                {t("side.menuPaste")}
-              </div>
+              {!readOnly && (
+                <>
+                  {/* A cut is the same clipboard with a different paste: the entry is taken
+                      from where it is rather than duplicated, so the word about it says so. */}
+                  <div
+                    className="ctx-item"
+                    onClick={() => {
+                      setClipboard({ path: menu.path, name: menu.name, isDir: menu.isDir, cut: true });
+                      onError(t("side.cutReady", { name: menu.name.replace(/\/$/, "") }));
+                      setMenu(null);
+                    }}
+                  >
+                    <span className="ctx-icon">
+                      <IconCut size={14} />
+                    </span>
+                    {t("side.menuCut")}
+                  </div>
+                  <div
+                    className="ctx-item"
+                    onClick={() => {
+                      void runPasteAny(menu);
+                      setMenu(null);
+                    }}
+                  >
+                    <span className="ctx-icon">
+                      <IconPaste size={14} />
+                    </span>
+                    {t("side.menuPaste")}
+                  </div>
+                </>
+              )}
               <div className="ws-sep" />
               {/* All four put text on the clipboard, so all four carry the same shape:
                   what differs is the text, and that is what the label says. */}
@@ -3095,18 +3197,20 @@ export default function Sidebar(props: Props) {
               <div className="ws-sep" />
               {/* Delete opens a prompt rather than acting, so the target is handed over
                   whole: it is the prompt that shows the name and calls the delete. */}
-              <div
-                className="ctx-item ctx-danger"
-                onClick={() => {
-                  setDeleting({ path: menu.path, name: menu.name, isDir: menu.isDir });
-                  setMenu(null);
-                }}
-              >
-                <span className="ctx-icon">
-                  <IconTrash size={14} />
-                </span>
-                {t("side.menuDelete")}
-              </div>
+              {!readOnly && (
+                <div
+                  className="ctx-item ctx-danger"
+                  onClick={() => {
+                    setDeleting({ path: menu.path, name: menu.name, isDir: menu.isDir });
+                    setMenu(null);
+                  }}
+                >
+                  <span className="ctx-icon">
+                    <IconTrash size={14} />
+                  </span>
+                  {t("side.menuDelete")}
+                </div>
+              )}
             </>
           )}
         </div>

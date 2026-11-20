@@ -45,9 +45,23 @@ futures-util = "0.3"
 # Archive browsing: `zip` reads the central directory (so a listing costs no unpacking) and
 # deflate entries; `tar` + `flate2` cover `.tar` and `.tar.gz`. All three are pure Rust, so the
 # build keeps the same Windows story as the rest of the tree.
-zip = { version = "2", default-features = false, features = ["deflate"] }
+# `aes-crypto` is what lets an encrypted zip be tried against a password: the archive password
+# chain in `archive_passwords.rs` would otherwise have to refuse every WinZip AES archive.
+zip = { version = "2", default-features = false, features = ["deflate", "aes-crypto"] }
 tar = "0.4"
 flate2 = "1"
+# Archive password rules are regular expressions. `regex` runs in linear time, so a hostile or
+# accidental catastrophically-backtracking pattern cannot stall the listing.
+regex = "1"
+# 7z reads through the decoder only: the `compress` feature (the writer) is left off the build
+# and switched back on for tests, which need it to produce a sample.
+sevenz-rust = { version = "0.6", default-features = false }
+# Thumbnails for archive pictures: the grid decodes a 256-pixel copy instead of a dozen
+# full-size photographs at once. Only the decoders the gallery can show are compiled in.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp", "tiff", "ico"] }
+
+[dev-dependencies]
+sevenz-rust = { version = "0.6", default-features = false, features = ["compress"] }
 
 [target.'cfg(windows)'.dependencies]
 tauri-plugin-single-instance = "2"

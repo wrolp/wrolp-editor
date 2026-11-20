@@ -375,7 +375,8 @@ pub struct Settings {
   /// writing, so a header that lies cannot get past it.
   pub archive_max_total_bytes: u64,
   /// Days an unpacked archive's folder survives without being looked at before the next
-  /// extract sweeps it.
+  /// extract sweeps it. 0 means the copies are deleted when the app closes instead, which is
+  /// the default: an archive that needed a password must not leave readable files behind.
   pub archive_keep_days: u32,
   /// Point the Explorer at the unpacked copy as soon as it is ready.
   pub archive_open_after_extract: bool,
@@ -487,7 +488,7 @@ impl Default for Settings {
       ai_key: String::new(),
       ai_timeout_ms: 90_000,
       archive_max_total_bytes: 2 * 1024 * 1024 * 1024,
-      archive_keep_days: 7,
+      archive_keep_days: 0,
       archive_open_after_extract: true,
     }
   }
@@ -1943,6 +1944,12 @@ pub fn get_history(app: AppHandle) -> Result<Vec<HistoryEntry>, String> {
 }
 
 pub(crate) fn push_history_entry(app: &AppHandle, path: &str) -> Result<(), String> {
+  // A file opened out of an unpacked archive lives in a folder the next clean-up deletes, so
+  // listing it would leave a recent row that opens nothing. Skipped here rather than at each
+  // caller: this is the only writer, and opening, saving and the command line all land here.
+  if crate::archive::in_cache(app, path) {
+    return Ok(());
+  }
   let mut history = read_json::<Vec<HistoryEntry>>(app, "history.json")?.unwrap_or_default();
   history.retain(|h| h.path != path);
   // The name a person reads keeps the case the file has, while the stored path stays the

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+﻿import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { t } from "../lib/i18n";
 import {
   api,
@@ -73,7 +73,11 @@ const UNOPENABLE_CODES = new Set([
  * out of the saved group and out of the next session, so a refusal for one of them builds
  * this tab instead — no text buffer, nothing to save, and a path the group store can keep.
  */
-function drawnTab(id: number, path: string): Tab {
+function drawnTab(
+  id: number,
+  path: string,
+  archiveSource?: { archive: string; entry: string }
+): Tab {
   return {
     id,
     path,
@@ -82,6 +86,7 @@ function drawnTab(id: number, path: string): Tab {
     original: "",
     dirty: false,
     isBinary: true,
+    archiveSource,
     encoding: "",
     bom: false,
     bytes: null,
@@ -253,6 +258,12 @@ interface Options {
    * stale value here can skip a recording but never invent one.
    */
   autoSaveVersions?: boolean;
+  /**
+   * Where a path came from, when it is a file inside an unpacked archive. Such a tab is a view
+   * of a copy that the next clean-up deletes: it never saves, never auto-saves, and never comes
+   * back with the group.
+   */
+  archiveSourceOf?: (path: string) => { archive: string; entry: string } | null;
 }
 
 export function useEditorTabs({
@@ -268,7 +279,13 @@ export function useEditorTabs({
   autoSave,
   versions,
   autoSaveVersions,
+  archiveSourceOf,
 }: Options) {
+  /** Read through a ref: the callback compares against the archive on screen, which changes. */
+  const archiveSourceRef = useRef(archiveSourceOf);
+  archiveSourceRef.current = archiveSourceOf;
+  /** Where this path came from, or undefined for a file that lives on its own. */
+  const archiveOf = (path: string) => archiveSourceRef.current?.(path) ?? undefined;
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [activeId, setActiveId] = useState<number | null>(null);
   const [restoreQueue, setRestoreQueue] = useState<PendingRestore[]>([]);
@@ -691,7 +708,7 @@ export function useEditorTabs({
             await activate(existing.id);
             return true;
           }
-          const target = drawnTab(nextId(), raw);
+          const target = drawnTab(nextId(), raw, archiveOf(raw));
           setTabs((prev) => [...prev, target]);
           await activate(target.id);
           return true;
@@ -719,6 +736,7 @@ export function useEditorTabs({
           original: "",
           dirty: false,
           unopenable: { error: err },
+          archiveSource: archiveOf(raw),
           encoding: "",
           bom: false,
           bytes: null,
@@ -773,6 +791,7 @@ export function useEditorTabs({
           bytes: disk.bytes,
           encrypted: disk.encrypted,
           locked: disk.locked,
+          archiveSource: archiveOf(disk.path),
           fileSettings: EMPTY_FILE_SETTINGS,
         };
         setTabs((prev) => [...prev, target]);
@@ -1254,7 +1273,7 @@ export function useEditorTabs({
     // whatever the text reader thought — so it is saved even when it was opened by a build
     // that called it unreadable.
     const live = tabsRef.current.filter(
-      (t) => isFileTab(t) && (!t.unopenable || isDrawnDoc(t.path))
+      (t) => isFileTab(t) && (!t.unopenable || isDrawnDoc(t.path)) && !t.archiveSource
     );
     const tabs = live.map((tab) => {
       // Only an untitled tab's text is worth copying here: `toStoredTab` drops the value for
@@ -1906,6 +1925,13 @@ export function useEditorTabs({
     // A picture has no buffer to write. Saving one would write the empty text that stands
     // in for it and destroy the file, so this is refused rather than merely discouraged.
     if (!tab || !isFileTab(tab) || tab.isBinary || tab.unopenable || !h) return false;
+    // A tab opened from an unpacked archive holds a view of somebody else's bytes: writing it
+    // would be lost at the next clean-up, and would look like the archive had been edited.
+    // "Export to…" is the way such a file is taken out and made savable.
+    if (tab.archiveSource) {
+      toast(t("tab.archiveReadOnly"));
+      return false;
+    }
     // An encrypted file with no key behind it cannot be written: the backend refuses it, and
     // for a tab that was never unlocked the buffer is empty, so writing it would be writing
     // nothing over a document. Ask for the password and run the save again once it is
@@ -2089,7 +2115,17 @@ export function useEditorTabs({
     (tab: Tab): boolean => {
       // A picture has no buffer, a lock has no key, and an untitled buffer has no file: the first
       // two cannot be written and the third would have to be asked for a name.
-      if (!isFileTab(tab) || !tab.dirty || tab.isBinary || tab.unopenable || tab.locked || isUntitled(tab.path))
+      if (
+        !isFileTab(tab) ||
+        !tab.dirty ||
+        tab.isBinary ||
+        tab.unopenable ||
+        tab.locked ||
+        // A copy inside an archive is never written by a timer: the refusal in `saveTab` says
+        // why, and a quiet one would interrupt the reading with a message nobody asked for.
+        tab.archiveSource !== undefined ||
+        isUntitled(tab.path)
+      )
         return true;
       // A file another program has changed, or one that is gone from the disk, already has a
       // question in front of the user. Answering it by writing is their call, not a timer's — and
