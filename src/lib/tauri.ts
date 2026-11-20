@@ -391,6 +391,12 @@ export interface Settings {
    */
   pdfPaper: string;
   /**
+   * The paper a Word page is drawn on: a lowercase `#rrggbb` colour, white by default. A colour
+   * rather than a mode because a document may carry its own colours, which an inverted page
+   * would distort rather than tone down.
+   */
+  wordPaper: string;
+  /**
    * Minutes an encrypted file stays unlocked without being touched. 0 means never lock
    * automatically, and is a choice rather than a missing value: the backend keeps it as
    * written, so the frontend has to carry it back or a save would reset it to the default.

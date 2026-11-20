@@ -7043,8 +7043,100 @@ select {
   padding: 0;
 }
 .office-word .docx-wrapper > section.docx {
-  background: #fff;
+  background: var(--word-paper, #fff);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+}
+/* The page options live behind one floating button: the page is the reading surface, and a
+   permanent toolbar spends width on controls that are set once and then left alone. */
+.office-word-tools {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+.office-word-fab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  cursor: pointer;
+}
+.office-word-fab:hover,
+.office-word-fab.open {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.office-word-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 250px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+.office-word-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.office-word-label {
+  flex: 1 1 auto;
+  font-size: 12px;
+  color: var(--muted);
+}
+/* Where the reader is in the document: out of the page's way, and unclickable, so it never
+   steals a drag or a click meant for the text underneath. */
+.office-word-page {
+  position: absolute;
+  left: 16px;
+  bottom: 16px;
+  z-index: 3;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  pointer-events: none;
+}
+/* Pages touch: the renderer draws a 30px strip under each one, and that is the only space
+   between them once the wrapper's own padding is already gone. */
+.office-word .office-doc.tight .docx-wrapper > section.docx {
+  margin-bottom: 0;
+}
+/* A running header and footer mark where a sheet begins and ends. With the gaps hidden the
+   document is read as one continuous page, so those marks have nothing left to mark. */
+.office-word .office-doc.tight .docx-wrapper > section.docx > header,
+.office-word .office-doc.tight .docx-wrapper > section.docx > footer {
+  display: none;
+}
+/* At a join, the blank a short page leaves at its bottom and the top margin the next page
+   starts with read as one long emptiness in the middle of the text. Neither carries meaning in
+   a continuous read, so both are dropped there — the last page keeps its paper, since that
+   blank is the end of the document rather than a join. The heights live in inline styles the
+   renderer wrote, hence the important. */
+.office-word .office-doc.tight .docx-wrapper > section.docx:not(:last-child) {
+  min-height: 0 !important;
+  padding-bottom: 0 !important;
+}
+.office-word .office-doc.tight .docx-wrapper > section.docx + section.docx {
+  padding-top: 0 !important;
 }
 /* Slides are laid out at a fixed 16:9 canvas by the renderer; the shadow separates one slide
    from the next the way it does a page. */

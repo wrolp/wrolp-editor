@@ -306,6 +306,9 @@ const DEFAULT_SETTINGS: Settings = {
   // White paper: a document is written for a white sheet, and the tint is something a reader
   // asks for rather than something an update turns on.
   pdfPaper: "#ffffff",
+  // Word pages take a tint of their own: a document's colours are its author's, so the paper
+  // behind them is the one thing this viewer can tone down without changing what was written.
+  wordPaper: "#ffffff",
   // An encrypted file is left unlocked for as long as it is being used, then locked: long
   // enough to read and edit without being asked again, short enough that walking away from
   // the machine does not leave the key sitting in memory indefinitely.
@@ -3701,6 +3704,8 @@ const defaultModeFor = useCallback(
                   path={tabs.fileTab.path}
                   kind={officeView ?? "sheet"}
                   csvText={csvTable ? csvText : undefined}
+                  paper={settings.wordPaper}
+                  onSavePaper={(value) => void saveSettings({ wordPaper: value })}
                 />
               </Suspense>
             </PaneErrorBoundary>

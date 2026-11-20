@@ -296,6 +296,10 @@ pub struct Settings {
   /// since a colour it cannot parse would be dropped by the stylesheet and leave the page
   /// reading as it did before.
   pub pdf_paper: String,
+  /// The paper a Word page is drawn on: a `#rrggbb` colour, white by default. There is no night
+  /// mode here — a Word document may carry its own colours and pictures, which a page-wide
+  /// inversion would turn inside out rather than tone down.
+  pub word_paper: String,
   /// Which side the PDF's bookmark column takes: left | right. Kept apart from the markdown
   /// outline's side because the two are read in different panes — a reader may want the one
   /// against the Explorer and the other away from it.
@@ -792,6 +796,7 @@ impl Settings {
       } else {
         as_hex_color(&self.pdf_paper).unwrap_or_else(|| PDF_PAPER_WHITE.into())
       },
+      word_paper: as_hex_color(&self.word_paper).unwrap_or_else(|| PDF_PAPER_WHITE.into()),
       // An entry is an explicit choice, so anything this build cannot show is dropped rather
       // than carried around forever — the file then falls back to `preview_layout`.
       preview_modes: {
@@ -3021,6 +3026,33 @@ mod tests {
         "#ffffff"
       );
     }
+  }
+
+  /// A Word page takes a tint but not the night mode: this key is a colour or white, never a
+  /// mode, because a page-wide inversion would turn a document's own colours inside out.
+  #[test]
+  fn word_paper_keeps_only_colours() {
+    assert_eq!(Settings::default().word_paper, "#ffffff");
+    let s: Settings = serde_json::from_str("{\"fontSize\":16.0}").expect("parse partial settings");
+    assert_eq!(s.filled().word_paper, "#ffffff");
+    assert_eq!(
+      Settings {
+        word_paper: "#F4ECD8".into(),
+        ..Default::default()
+      }
+      .filled()
+      .word_paper,
+      "#f4ecd8"
+    );
+    assert_eq!(
+      Settings {
+        word_paper: "night".into(),
+        ..Default::default()
+      }
+      .filled()
+      .word_paper,
+      "#ffffff"
+    );
   }
 
   /// A column that cannot be placed would sit nowhere. Both sides default to the right, the edge

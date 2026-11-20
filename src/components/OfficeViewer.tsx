@@ -1,8 +1,8 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { t } from "../lib/i18n";
 import { api, errorMessage } from "../lib/tauri";
 import type { OfficeKind } from "../lib/path";
-import { IconChevron } from "./icons";
+import { IconChevron, IconSliders } from "./icons";
 import {
   EMU_PER_PX,
   readSheetImages,
@@ -69,21 +69,160 @@ const SLIDE_HEIGHT = 540;
 const SLIDE_MIN_WIDTH = 480;
 
 /**
- * Shrink Word pages to the pane when it is narrower than the paper.
+ * Shrink or grow Word pages to the pane.
  *
- * The renderer lays a page out at 96dpi — about 816px — and an editor pane can easily be
- * narrower than that. Scaling the wrapper keeps a page readable as one piece; the
- * alternative is a document that has to be scrolled sideways to read a line.
+ * The renderer lays a page out at 96dpi — about 816px — and an editor pane is usually a
+ * different width. The page is measured once, unzoomed, and the wrapper is then scaled with
+ * CSS zoom: `fit` means "as wide as the pane, within reason", and a number is the reader's
+ * own choice of size.
  */
-function fitWordPage(box: HTMLElement) {
-  const page = box.querySelector<HTMLElement>(".docx-wrapper > section.docx");
-  if (!page) return;
-  const paper = page.offsetWidth;
-  const room = box.clientWidth;
-  if (paper <= 0 || room <= 0) return;
-  const scale = Math.min(1, (room - 8) / paper);
-  if (scale >= 0.99) return;
-  box.style.zoom = String(Math.max(scale, 0.5));
+const WORD_MIN_ZOOM = 25;
+const WORD_MAX_ZOOM = 400;
+/** The sizes the minus and plus buttons walk through, in percent. */
+const WORD_STEPS = [25, 33, 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200, 250, 300, 400];
+
+const wordClamp = (percent: number) =>
+  Math.min(WORD_MAX_ZOOM, Math.max(WORD_MIN_ZOOM, percent));
+
+/**
+ * The colours a Word page can take. The same sheet colours the PDF reader offers, named with
+ * the same keys: it is paper either way, and a reader who tints one document usually wants the
+ * other toned down too. There is no night here — a document's own colours are not inverted by
+ * a page tint.
+ */
+const WORD_PAPERS = [
+  { value: "#ffffff", label: "pdf.paperWhite" },
+  { value: "#f4ecd8", label: "pdf.paperSepia" },
+  { value: "#c7edcc", label: "pdf.paperGreen" },
+];
+
+/** The row that picks the colour of a Word page, mirroring the PDF toolbar's. */
+function WordPaperPicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const preset = WORD_PAPERS.some((item) => item.value === value);
+  return (
+    <div className="pdf-papers" role="group" aria-label={t("pdf.paper")}>
+      {WORD_PAPERS.map((item) => (
+        <button
+          key={item.value}
+          type="button"
+          className={`pdf-paper${value === item.value ? " active" : ""}`}
+          style={{ background: item.value }}
+          title={t(item.label)}
+          aria-label={t(item.label)}
+          aria-pressed={value === item.value}
+          onClick={() => onChange(item.value)}
+        />
+      ))}
+      <label
+        className={`pdf-paper is-custom${preset ? "" : " active"}`}
+        style={preset ? undefined : { background: value }}
+        title={t("pdf.paperCustom")}
+      >
+        <input
+          type="color"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          aria-label={t("pdf.paperCustom")}
+        />
+      </label>
+    </div>
+  );
+}
+
+/**
+ * Wait for the pictures and the fonts the renderer has just inserted: pagination measures
+ * blocks by their laid-out height, and an image that has not arrived yet measures zero.
+ */
+async function settleWordLayout(box: HTMLElement) {
+  await document.fonts.ready.catch(() => undefined);
+  await Promise.all(
+    [...box.querySelectorAll("img")].map((img) =>
+      img.complete
+        ? Promise.resolve()
+        : new Promise<void>((resolve) => {
+            img.addEventListener("load", () => resolve(), { once: true });
+            img.addEventListener("error", () => resolve(), { once: true });
+          })
+    )
+  );
+}
+
+/**
+ * Split a sheet the renderer left running on for several pages.
+ *
+ * The renderer only breaks where the document says it broke — an explicit page break or a
+ * `lastRenderedPageBreak` Word saved — and documents written by other tools carry neither,
+ * which leaves a whole chapter on one long sheet. Nothing in the file says where those breaks
+ * belong, so they are worked out from the layout instead: blocks are stacked until a sheet is
+ * full, and the remainder moves to a fresh sheet with the same paper, margins, header and
+ * footer. A table taller than a sheet stays whole and overflows it, because splitting one
+ * would cut a row in half.
+ */
+function paginateWord(box: HTMLElement) {
+  const wrapper = box.querySelector<HTMLElement>(".docx-wrapper");
+  if (!wrapper) return;
+  const sheets = [...wrapper.querySelectorAll<HTMLElement>(":scope > section.docx")];
+  for (const sheet of sheets) {
+    const article = sheet.querySelector<HTMLElement>(":scope > article");
+    if (!article) continue;
+    const blocks = [...article.children] as HTMLElement[];
+    if (blocks.length < 2) continue;
+    const style = getComputedStyle(sheet);
+    // The paper height is the inline minimum the renderer computed from the section
+    // properties; a sheet that has grown past it still reports the minimum here.
+    const sheetHeight = parseFloat(sheet.style.minHeight) || sheet.clientHeight;
+    const bottom = parseFloat(style.paddingBottom) || 0;
+    const footer = sheet.querySelector<HTMLElement>(":scope > footer");
+    const room = sheetHeight - bottom - (footer?.offsetHeight ?? 0) - article.offsetTop;
+    if (room <= 0) continue;
+    const endOf = (block: HTMLElement) => block.offsetTop + block.offsetHeight;
+    if (endOf(blocks[blocks.length - 1]) <= article.offsetTop + room + 1) continue;
+
+    // Measured while every block is still in place, so no decision depends on a block that
+    // has already been moved away.
+    const pages: HTMLElement[][] = [];
+    let group: HTMLElement[] = [];
+    let base = blocks[0].offsetTop;
+    for (const block of blocks) {
+      if (group.length > 0 && endOf(block) - base > room + 1) {
+        pages.push(group);
+        group = [];
+        base = block.offsetTop;
+      }
+      group.push(block);
+    }
+    if (group.length > 0) pages.push(group);
+    if (pages.length < 2) continue;
+
+    // The first page keeps its blocks; every later page gets its own sheet, cloned from this
+    // one so it inherits the paper size, the margins and the header and footer.
+    const emptyArticle = article.cloneNode(false) as HTMLElement;
+    let anchor = sheet;
+    for (const page of pages.slice(1)) {
+      const next = sheet.cloneNode(false) as HTMLElement;
+      next.removeAttribute("id");
+      for (const child of [...sheet.children]) {
+        if (child === article) {
+          const body = emptyArticle.cloneNode(false) as HTMLElement;
+          body.removeAttribute("id");
+          body.append(...page);
+          next.appendChild(body);
+        } else {
+          const copy = child.cloneNode(true) as HTMLElement;
+          copy.removeAttribute("id");
+          next.appendChild(copy);
+        }
+      }
+      anchor.after(next);
+      anchor = next;
+    }
+  }
 }
 
 interface Props {
@@ -94,6 +233,9 @@ interface Props {
    * CSV: there are no bytes to read and no pictures to place, only rows to split.
    */
   csvText?: string;
+  /** The colour of the paper a Word page is drawn on, kept in settings with the PDF's. */
+  paper: string;
+  onSavePaper: (value: string) => void;
 }
 
 /**
@@ -249,7 +391,7 @@ function readCsv(text: string): SheetView {
  * `ArrayBuffer`, the same channel the PDF reader uses, because a `fetch` against the asset
  * protocol would need CORS.
  */
-export default function OfficeViewer({ path, kind, csvText }: Props) {
+export default function OfficeViewer({ path, kind, csvText, paper, onSavePaper }: Props) {
   const host = useRef<HTMLDivElement>(null);
   /** The deck's previewer, which owns DOM outside React's knowledge and has to be torn down. */
   const deck = useRef<{ destroy: () => void } | null>(null);
@@ -276,6 +418,26 @@ export default function OfficeViewer({ path, kind, csvText }: Props) {
   const [titleRows, setTitleRows] = useState(1);
   const recordsRef = useRef<HTMLDivElement>(null);
 
+  /** The Word page's own width in CSS pixels, measured once before any zoom is applied. */
+  const [paperWidth, setPaperWidth] = useState(0);
+  /** How much horizontal room the pane gives a page. Tracked so fit follows a resized window. */
+  const [roomWidth, setRoomWidth] = useState(0);
+  /** `null` fits the page to the pane; a number is the reader's own size in percent. */
+  const [wordZoom, setWordZoom] = useState<number | null>(null);
+  /** What the zoom box shows; kept as text so a half-typed number is not rewritten. */
+  const [wordDraft, setWordDraft] = useState("100");
+  /** Whether the light strip the renderer draws between pages is kept. Off by default: a long
+   *  document reads as one continuous page, which is what most people open a Word file to do. */
+  const [wordGaps, setWordGaps] = useState(false);
+  /** The page options stay folded behind one floating button until they are asked for. */
+  const [wordTools, setWordTools] = useState(false);
+  const wordToolsRef = useRef<HTMLDivElement>(null);
+  /** The page the reader is on, counted from the pages the renderer laid out. */
+  const [wordPage, setWordPage] = useState({ index: 0, total: 0 });
+  const scrollRef = useRef<HTMLDivElement>(null);
+  /** Scroll fires far more often than a page count can be read; one frame is enough. */
+  const pageFrame = useRef(0);
+
   useEffect(() => {
     let alive = true;
     const box = host.current;
@@ -296,6 +458,11 @@ export default function OfficeViewer({ path, kind, csvText }: Props) {
     setTitleRow(1);
     setTitleRows(1);
     setLabelWidth(null);
+    setWordZoom(null);
+    setWordGaps(false);
+    setPaperWidth(0);
+    setWordTools(false);
+    setWordPage({ index: 0, total: 0 });
 
     // A CSV is text, and the text is already here: decoded for the editor, and the very
     // buffer behind this pane. Nothing to fetch, nothing to release.
@@ -327,10 +494,27 @@ export default function OfficeViewer({ path, kind, csvText }: Props) {
           await renderAsync(raw, box, undefined, {
             inWrapper: true,
             breakPages: true,
+            // The renderer's default is to ignore the page boundaries Word itself recorded
+            // when it last laid the document out, which leaves a whole chapter on one sheet:
+            // those marks are the only pagination a document carries, so they are honoured.
+            ignoreLastRenderedPageBreak: false,
             renderHeaders: true,
             renderFooters: true,
           });
-          fitWordPage(box);
+          // Pagination is measured, so the fonts and pictures have to be in place first.
+          await settleWordLayout(box);
+          if (!alive) return;
+          paginateWord(box);
+          // Measured before any zoom: `offsetWidth` is the paper's own width, and every later
+          // scale is computed against it rather than against the currently zoomed rendering.
+          const page = box.querySelector<HTMLElement>(".docx-wrapper > section.docx");
+          setPaperWidth(page?.offsetWidth ?? 0);
+          setRoomWidth(box.clientWidth);
+          // The renderer has just written the pages in, so the count is final here.
+          setWordPage({
+            index: 1,
+            total: box.querySelectorAll(".docx-wrapper > section.docx").length,
+          });
         } else if (kind === "sheet" && stat.bytes > MAX_BYTES) {
           // Too big to hand to a whole-file parser: read the shape now, and one sheet at a
           // time as it is shown. A file this size that is not an OOXML zip has no reader
@@ -697,8 +881,129 @@ export default function OfficeViewer({ path, kind, csvText }: Props) {
     return () => observer.disconnect();
   }, [pictures, drawnRow, drawn.cols, mode]);
 
+  /**
+   * The page under the reading mark — a third of the way down the pane, so the indicator
+   * changes when the next page really has the eye, not when its edge appears at the bottom.
+   */
+  const readWordPage = () => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const pages = scroller.querySelectorAll<HTMLElement>(".docx-wrapper > section.docx");
+    const total = pages.length;
+    if (total === 0) {
+      setWordPage((current) => (current.total === 0 ? current : { index: 0, total: 0 }));
+      return;
+    }
+    const mark = scroller.getBoundingClientRect().top + scroller.clientHeight * 0.35;
+    let index = total;
+    for (let i = 0; i < total; i += 1) {
+      if (pages[i].getBoundingClientRect().bottom > mark) {
+        index = i + 1;
+        break;
+      }
+    }
+    setWordPage((current) =>
+      current.index === index && current.total === total ? current : { index, total }
+    );
+  };
+
+  /** Keep the page chip in step with the scroll, at most once a frame. */
+  const trackWordPage = () => {
+    if (pageFrame.current !== 0) return;
+    pageFrame.current = window.requestAnimationFrame(() => {
+      pageFrame.current = 0;
+      readWordPage();
+    });
+  };
+
+  useEffect(() => () => window.cancelAnimationFrame(pageFrame.current), []);
+
+  /**
+   * The page width that fills the pane.
+   *
+   * Capped at 2×: a page is a fixed piece of paper, and blowing it up to fill an ultrawide
+   * window would make a document out of a paragraph. The floor keeps a very narrow pane from
+   * shrinking a page to something unreadable — sideways scrolling is the better trade there.
+   */
+  const wordFit =
+    paperWidth > 0 && roomWidth > 0
+      ? Math.min(2, Math.max(0.25, roomWidth / paperWidth))
+      : 1;
+  /** What the reader is actually looking at, in percent: their choice, or what fit comes to. */
+  const wordShown = wordZoom ?? Math.round(wordFit * 100);
+
+  useEffect(() => {
+    setWordDraft(String(wordShown));
+  }, [wordShown]);
+
+  /** A resized window changes what "fit" means, so the pane's width is tracked while it shows. */
+  useEffect(() => {
+    if (kind !== "word") return;
+    const box = host.current;
+    if (!box) return;
+    const update = () => {
+      setRoomWidth(box.clientWidth);
+      // A wider pane means a different reading mark, so the page may have changed.
+      readWordPage();
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, [kind, path]);
+
+  /** The floating panel is dismissed the way a menu is: a click elsewhere, or Escape. */
+  useEffect(() => {
+    if (!wordTools) return;
+    const dismiss = (event: PointerEvent) => {
+      if (!wordToolsRef.current?.contains(event.target as Node)) setWordTools(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setWordTools(false);
+    };
+    window.addEventListener("pointerdown", dismiss);
+    window.addEventListener("keydown", escape);
+    return () => {
+      window.removeEventListener("pointerdown", dismiss);
+      window.removeEventListener("keydown", escape);
+    };
+  }, [wordTools]);
+
+  // Zoom is applied to the renderer's own wrapper rather than to the pane: the pane keeps the
+  // full width, so a page magnified past the window scrolls sideways instead of being clipped,
+  // and the pages stay centred while they are smaller than it.
+  useLayoutEffect(() => {
+    const box = host.current;
+    if (!box || kind !== "word" || paperWidth <= 0) return;
+    const target = box.querySelector<HTMLElement>(".docx-wrapper") ?? box;
+    target.style.zoom = String(wordZoom === null ? wordFit : wordZoom / 100);
+    // Scaling moves every page under the reading mark; re-read once layout has settled.
+    trackWordPage();
+  }, [kind, paperWidth, wordFit, wordZoom]);
+
+  /** Walk the steps; from a fit size the first click lands on the next step either way. */
+  const stepWordZoom = (delta: number) => {
+    const next = WORD_STEPS.find((step) =>
+      delta > 0 ? step > wordShown : step < wordShown
+    );
+    setWordZoom(next ?? (delta > 0 ? WORD_MAX_ZOOM : WORD_MIN_ZOOM));
+  };
+
+  /** A typed size; an empty box goes back to fit, the way clearing the PDF box does. */
+  const applyWordDraft = (value: string) => {
+    const parsed = Math.round(Number(value.replace("%", "").trim()));
+    if (value.trim() === "" || !Number.isFinite(parsed) || parsed <= 0) {
+      setWordZoom(null);
+      return;
+    }
+    setWordZoom(wordClamp(parsed));
+  };
+
   return (
-    <div className={`office-view office-${kind}`}>
+    <div
+      className={`office-view office-${kind}`}
+      style={{ "--word-paper": paper } as CSSProperties}
+    >
       {kind === "sheet" && sheetTabs && sheetTabs.length > 0 && (
         <div className="office-sheet-bar">
           {mode === "records" && (
@@ -761,7 +1066,107 @@ export default function OfficeViewer({ path, kind, csvText }: Props) {
           </div>
         </div>
       )}
-      <div className="office-scroll">
+      {kind === "word" && !loading && !error && (
+        <div className="office-word-tools" ref={wordToolsRef}>
+          {wordTools && (
+            <div
+              className="office-word-panel"
+              role="dialog"
+              aria-label={t("office.viewOptions")}
+            >
+              <div className="office-word-row">
+                <span className="office-word-label">{t("office.zoom")}</span>
+                <button
+                  type="button"
+                  className="pdf-tool"
+                  title={t("img.zoomOut")}
+                  onClick={() => stepWordZoom(-1)}
+                  disabled={wordShown <= WORD_MIN_ZOOM}
+                >
+                  −
+                </button>
+                {/* A plain number, like the PDF viewer's: a reader who knows the size they
+                    want should be able to type it, and while fitted the box reports what fit
+                    comes to. */}
+                <span className="zoom-box">
+                  <input
+                    className="zoom-input"
+                    type="text"
+                    inputMode="numeric"
+                    title={t("office.zoom")}
+                    aria-label={t("office.zoom")}
+                    placeholder={t("office.fitWidth")}
+                    value={wordDraft}
+                    onChange={(event) => setWordDraft(event.target.value)}
+                    onBlur={(event) => applyWordDraft(event.currentTarget.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") event.currentTarget.blur();
+                    }}
+                  />
+                  <span className="zoom-unit">%</span>
+                </span>
+                <button
+                  type="button"
+                  className="pdf-tool"
+                  title={t("img.zoomIn")}
+                  onClick={() => stepWordZoom(1)}
+                  disabled={wordShown >= WORD_MAX_ZOOM}
+                >
+                  +
+                </button>
+              </div>
+              <div className="office-word-row">
+                <button
+                  type="button"
+                  className={`pdf-tool zoom-fit${wordZoom === null ? " on" : ""}`}
+                  title={t("office.fitWidth")}
+                  aria-pressed={wordZoom === null}
+                  onClick={() => setWordZoom(null)}
+                >
+                  {t("office.fitWidth")}
+                </button>
+                <button
+                  type="button"
+                  className={`pdf-tool zoom-fit${wordGaps ? "" : " on"}`}
+                  title={t("office.hideGaps")}
+                  aria-pressed={!wordGaps}
+                  onClick={() => setWordGaps((show) => !show)}
+                >
+                  {t("office.hideGaps")}
+                </button>
+              </div>
+              <div className="office-word-row">
+                <span className="office-word-label">{t("pdf.paper")}</span>
+                <WordPaperPicker value={paper} onChange={onSavePaper} />
+              </div>
+            </div>
+          )}
+          <button
+            type="button"
+            className={`office-word-fab${wordTools ? " open" : ""}`}
+            title={t("office.viewOptions")}
+            aria-label={t("office.viewOptions")}
+            aria-expanded={wordTools}
+            aria-haspopup="dialog"
+            onClick={() => setWordTools((open) => !open)}
+          >
+            <IconSliders size={17} />
+          </button>
+        </div>
+      )}
+      {kind === "word" && wordPage.total > 0 && (
+        <div
+          className="office-word-page"
+          title={t("office.pageOf", { n: wordPage.index, total: wordPage.total })}
+        >
+          {wordPage.index} / {wordPage.total}
+        </div>
+      )}
+      <div
+        className="office-scroll"
+        ref={scrollRef}
+        onScroll={kind === "word" ? trackWordPage : undefined}
+      >
         {kind === "sheet" && sheet && mode === "records" ? (
           <div
             className="office-records"
@@ -933,7 +1338,10 @@ export default function OfficeViewer({ path, kind, csvText }: Props) {
           </div>
         ) : (
           // The renderers write their own markup into this element: React must not own it.
-          <div className="office-doc" ref={host} />
+          <div
+            className={`office-doc${kind === "word" && !wordGaps ? " tight" : ""}`}
+            ref={host}
+          />
         )}
         {kind === "sheet" && sheetTabs && sheetTabs.length === 0 && (
           <div className="office-empty">{t("office.noSheets")}</div>
