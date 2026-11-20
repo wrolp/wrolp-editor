@@ -4,6 +4,36 @@
 
 ---
 
+## v0.0.4 — 2026-11-20
+
+The fourth release: archives open inside the Explorer, Office documents get readers of their own, entries move through the tree by drag or cut and paste, and the PDF reader's pages can be selected and copied.
+
+### Features
+
+- **Archives** — zip, tar, tar.gz and 7z archives are browsed in the Explorer without unpacking first: the listing is read, then the archive is safely unpacked into a read-only cache root that behaves like any other folder, so every existing viewer works on the files inside. Pictures inside an archive open in the gallery straight from the archive; an encrypted archive is asked for a password in turn from the session, the rules matched on its name, the default password, and a prompt, with Chinese passwords tried as UTF-8 and then GBK. The cache is deleted on exit or kept for a set number of days, and *Close and clean* removes it at once.
+- **Office documents** — Word, spreadsheet and slide files open in the app instead of the default program. The Word preview pages by the breaks the document saved and by measured page height, and offers zoom, fit width, hidden page gaps, a paper colour and a page indicator from a floating button in the corner.
+- **PDF reader** — pages can be selected as text and copied, with a right-click menu for copy, the current page and select all; the bookmark column can be dragged to a width of its own, and its scrollbar matches the Markdown preview.
+- **Pictures** — a folder's pictures open in a gallery tab that remembers its last mode: one by one, stacked (continuous scrolling like a PDF), slideshow or grid. Stacked pages scroll on their own at a speed set as a number, and a double-click or the wheel stops it.
+- **Explorer** — entries move within the tree by dragging or by cut and paste; the tree sorts by name, date, type or size; a tab can be saved from its menu; hover hints are drawn once for the whole app; and the two paste rows were folded into one *Paste* entry.
+- **Source control** — clone from the panel with areas that resize; long file and folder names are cut in the middle; the history refreshes on demand; a self-signed HTTPS certificate is accepted after a prompt.
+- **AI** — a commit message is written from the staged changes, the key is kept encrypted in settings with the model list fetched from the endpoint, and several endpoints can be kept with one in use.
+- **Smaller additions** — the titlebar drags from the whole bar, the editor language can be chosen, a cut tab names itself on hover, and the select list is drawn in the app's own theme.
+
+### Fixes
+
+- A file keeps the case its name was given when it is created, renamed or pasted.
+- The open-files panel stays inside the window, and its next and previous arrows wrap around the list.
+- A hover bubble sizes to its text and keeps clear of the arrow it sits beside.
+- The PDF reader hides while a comparison owns the pane.
+- The HTML preview no longer scrolls itself while the wheel turns.
+
+### Internal
+
+- Version bumped to 0.0.4
+- Explorer labels are read and written in one batch, and the git walks run on the blocking pool
+
+---
+
 ## v0.0.3 — 2026-11-07
 
 The third release: PDFs get a reader of their own, the tab menu grows a flyout for the per-file settings, and files can be pasted or dropped into the Explorer from Windows.
