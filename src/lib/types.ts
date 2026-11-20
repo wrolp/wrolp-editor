@@ -58,6 +58,13 @@ export interface Tab {
     dir: string;
     /** The picture the gallery was opened from, so "browse this folder" lands on it. */
     startPath?: string;
+    /**
+     * The zip the pictures live in, when they are read in place rather than from a folder.
+     * `dir` is then the folder inside the archive, and `path` names both.
+     */
+    archive?: string;
+    /** Whether the first listing should include subfolders. */
+    recursive?: boolean;
   };
   /**
    * A commit's changed files and their diffs, read-only. The tab keeps the repository root

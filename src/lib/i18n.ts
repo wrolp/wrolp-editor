@@ -964,6 +964,7 @@ const EN: Table = {
   "gal.truncated":
     "The folder holds more than {n} pictures; only the first {n} are shown (looked at {scanned} entries).",
   "gal.empty": "This folder has no pictures.",
+  "gal.location": "Location inside the archive",
   "gal.loading": "Reading the folder…",
   "gal.retry": "Try again",
   "gal.refresh": "Refresh the list",
@@ -972,6 +973,12 @@ const EN: Table = {
   "gal.unsupported":
     "WebView2 cannot draw this format here. The file is a picture; open it in another program to view it.",
   "gal.unsupportedShort": "No preview",
+  "gal.exportImage": "Export this picture…",
+  "gal.openSingle": "Open in one by one",
+  "gal.autoScroll": "Scroll automatically",
+  "gal.scrollSpeed": "Scroll speed",
+  "gal.slower": "Slower",
+  "gal.faster": "Faster",
   "office.noSheets": "This workbook has no sheets",
   "office.truncated": "Showing the first {rows} rows and {cols} columns",
   "office.picturesHidden": "{n} picture(s) in this sheet are not shown",
@@ -2224,6 +2231,7 @@ const ZH: Table = {
   "gal.truncated":
     "文件夹里的图片超过 {n} 张，这里只显示前 {n} 张（共查看 {scanned} 个条目）。",
   "gal.empty": "这个文件夹没有图片。",
+  "gal.location": "压缩包内的位置",
   "gal.loading": "正在读取文件夹…",
   "gal.retry": "重试",
   "gal.refresh": "刷新列表",
@@ -2232,6 +2240,12 @@ const ZH: Table = {
   "gal.unsupported":
     "WebView2 无法在此绘制这种格式。文件本身是图片，可用其他程序打开查看。",
   "gal.unsupportedShort": "无法预览",
+  "gal.exportImage": "导出此图…",
+  "gal.openSingle": "用「一张张」打开",
+  "gal.autoScroll": "自动滚动",
+  "gal.scrollSpeed": "滚动速度",
+  "gal.slower": "更慢",
+  "gal.faster": "更快",
   "office.noSheets": "这个工作簿里没有工作表",
   "office.truncated": "只显示前 {rows} 行、{cols} 列",
   "office.picturesHidden": "此工作表有 {n} 张图片未显示",

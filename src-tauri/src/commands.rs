@@ -283,6 +283,10 @@ pub struct Settings {
   pub gallery_interval: u32,
   /// Start the gallery slideshow over after the last picture instead of stopping on it.
   pub gallery_loop: bool,
+  /// The gallery layout last picked in the toolbar: `stack`, `single`, `slideshow` or `grid`.
+  /// Remembered so browsing a folder again opens in the view that was left, instead of always
+  /// starting from the stack.
+  pub gallery_mode: String,
   /// What sits behind a picture's transparent pixels: `checker` for the theme's checkerboard,
   /// or a `#rrggbb` colour picked by hand. Only the frontend draws it — this decides which
   /// values are worth handing on, since an unusable one would leave the picture on nothing.
@@ -458,8 +462,10 @@ impl Default for Settings {
       toc_width: 216.0,
       gallery_interval: GALLERY_INTERVAL_DEFAULT_SECONDS,
       gallery_loop: true,
+      gallery_mode: GALLERY_MODE_DEFAULT.into(),
       image_backdrop: IMAGE_BACKDROP_CHECKER.into(),
       pdf_paper: PDF_PAPER_WHITE.into(),
+      word_paper: PDF_PAPER_WHITE.into(),
       pdf_outline_side: "right".into(),
       pdf_outline_open: false,
       pdf_outline_width: 220.0,
@@ -547,6 +553,10 @@ const SIDES: [&str; 2] = ["left", "right"];
 /// A slideshow interval: long enough to look at the picture, short enough to feel like motion.
 const GALLERY_INTERVAL_DEFAULT_SECONDS: u32 = 5;
 const GALLERY_INTERVAL_MAX_SECONDS: u32 = 60;
+/// The gallery layouts the toolbar offers. A stale or hand-edited value reads as the stack,
+/// rather than leaving the gallery in a mode name the frontend does not render.
+const GALLERY_MODES: [&str; 4] = ["stack", "single", "slideshow", "grid"];
+const GALLERY_MODE_DEFAULT: &str = "stack";
 /// The picture backdrop that comes from the theme instead of a colour.
 const IMAGE_BACKDROP_CHECKER: &str = "checker";
 /// White paper: the sheet a PDF is written for, and what "no tint" comes to.
@@ -766,6 +776,11 @@ impl Settings {
       },
       gallery_interval: self.gallery_interval.clamp(1, GALLERY_INTERVAL_MAX_SECONDS),
       gallery_loop: self.gallery_loop,
+      gallery_mode: if GALLERY_MODES.contains(&self.gallery_mode.as_str()) {
+        self.gallery_mode.clone()
+      } else {
+        GALLERY_MODE_DEFAULT.into()
+      },
       // The checkerboard or a colour. Anything else is a stale or hand-edited key, and a value
       // the stylesheet cannot use would leave a transparent picture on no backdrop at all.
       image_backdrop: as_hex_color(&self.image_backdrop)

@@ -4762,6 +4762,39 @@ button.pdf-outline-twist:hover {
 .gal-check input {
   margin: 0;
 }
+/* The speed of the stacked view's automatic scroll: a number that can be typed, with the
+   unit beside it, rather than a slider that can only be felt out. */
+.gal-speed {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.gal-speed-input {
+  width: 52px;
+  height: 22px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.gal-speed-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+/* The spin buttons would only crowd a 52px box; the arrow keys still step the number. */
+.gal-speed-input::-webkit-inner-spin-button,
+.gal-speed-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.gal-speed-unit {
+  color: var(--muted);
+}
 /* A small select in a toolbar. The shared `.select` is sized for dialogs — its 5px padding and
    13px font inside a 22px row leave a 12px content box, which cuts the seconds off at the
    bottom. The compound selector is what wins over `.select` wherever either rule sits in this
@@ -4785,49 +4818,59 @@ button.pdf-outline-twist:hover {
   color: var(--muted);
 }
 
-/* Stacked view: pictures one after another, at most as wide as they are, never stretched. */
+/* Stacked view: a run of pages, the way a PDF reader shows one sheet after another. Each
+   picture is paper on the sunken backdrop — full width, no card, no title bar — and the gap
+   between pages is what separates them. */
 .gal-stack {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 10px 16px 40px;
+  padding: 6px 8px 8px;
+  background: var(--sunken);
 }
 .gal-item {
-  margin: 0 auto 14px;
-  max-width: min(100%, 1200px);
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  position: relative;
+  margin: 0 auto 6px;
   overflow: hidden;
   background: var(--surface);
-  cursor: pointer;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.32);
 }
-.gal-item.active {
-  border-color: var(--accent-soft);
-}
-.gal-item figcaption {
+/* Number and name ride on the page and appear only while the pointer is over it, so the
+   reading column is pictures and gaps rather than a stack of captions. */
+.gal-item-tag {
+  position: absolute;
+  /* Above the picture: the lazy host is positioned too and comes later in the DOM, so without
+     a z-index the sheet is painted over the tag and a white picture hides its own name. */
+  z-index: 2;
+  top: 8px;
+  left: 8px;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 5px 10px;
-  border-bottom: 1px solid var(--border-soft);
-  background: var(--titlebar);
-  color: var(--muted);
+  gap: 7px;
+  max-width: calc(100% - 16px);
+  padding: 3px 8px;
+  border-radius: 5px;
+  /* Dark enough to read white text on, even where it sits over a white photograph. */
+  background: rgba(8, 9, 11, 0.8);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
+  color: #ffffff;
   font-size: 11px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s ease-out;
+}
+.gal-item:hover .gal-item-tag {
+  opacity: 1;
 }
 .gal-item-index {
-  min-width: 2.2em;
-  color: var(--text-faint);
+  color: #ffffff;
   font-variant-numeric: tabular-nums;
 }
 .gal-item-name {
   overflow: hidden;
-  color: var(--text-dim);
+  color: #ffffff;
   text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.gal-item-size {
-  margin-left: auto;
   white-space: nowrap;
 }
 /* The host is what stays behind when the image is removed: its measured height keeps the
@@ -4838,7 +4881,8 @@ button.pdf-outline-twist:hover {
   align-items: center;
   justify-content: center;
   min-height: 30vh;
-  background: var(--sunken-2);
+  /* The page supplies the colour; a loader inside a page must not paint a darker band. */
+  background: transparent;
 }
 /* While a mounted picture decodes, a soft sweep says the space is working rather than
    empty. An unmounted one keeps its measured height with a flat block and no animation:
@@ -4903,6 +4947,56 @@ button.pdf-outline-twist:hover {
 }
 .gal-grid.large {
   grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+}
+
+/* Breadcrumb: which folder inside the archive is on screen. It sits above the pictures rather
+   than in the toolbar, so moving between folders is not a control that disappears on a click. */
+.gal-crumbs {
+  flex: 0 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 12px 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.gal-crumb {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 5px;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.gal-crumb:hover {
+  background: rgba(127, 127, 127, 0.18);
+  color: var(--text);
+}
+.gal-crumb.current {
+  color: var(--text);
+  font-weight: 600;
+  cursor: default;
+}
+.gal-crumb.current:hover {
+  background: none;
+}
+.gal-crumb-sep {
+  color: var(--text-faint);
+}
+
+/* A folder heading, shown only when an archive's pictures span more than one folder. */
+.gal-group-head {
+  grid-column: 1 / -1;
+  padding: 6px 2px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
 }
 .gal-cell {
   position: relative;
@@ -4970,10 +5064,13 @@ button.pdf-outline-twist:hover {
   flex: 0 0 auto;
   width: 64px;
   height: 64px;
-  padding: 0;
   overflow: hidden;
-  border: 1px solid transparent;
-  border-radius: 4px;
+  /* The border is this wide even when nothing is selected, so choosing a picture colours the
+     ring instead of moving the thumbnails beside it by two pixels. The padding keeps a strip
+     of the card's own background between the ring and the picture. */
+  border: 3px solid transparent;
+  padding: 3px;
+  border-radius: 5px;
   background: var(--sunken-2);
   cursor: pointer;
 }
@@ -6161,6 +6258,11 @@ select {
    the record list both scroll in it, and the platform bar would be the one heavy line in a
    pane otherwise drawn in hairlines. */
 .office-scroll,
+/* The gallery's three scroll panes — the stacked column, the grid and the filmstrip — are
+   read the same way as the rest of the app, rather than with the platform's heavy bar. */
+.gal-stack,
+.gal-grid,
+.gal-strip,
 .commit-list {
   scrollbar-width: thin;
   scrollbar-color: var(--scroll-thumb) transparent;
@@ -6180,6 +6282,9 @@ select {
 .pdf-outline::-webkit-scrollbar,
 .office-scroll::-webkit-scrollbar,
 .pick-list::-webkit-scrollbar,
+.gal-stack::-webkit-scrollbar,
+.gal-grid::-webkit-scrollbar,
+.gal-strip::-webkit-scrollbar,
 .commit-list::-webkit-scrollbar {
   width: var(--scroll-size);
   height: var(--scroll-size);
@@ -6204,6 +6309,9 @@ select {
    meet is a visible square unless it is told to be transparent too. */
 .pdf-scroll::-webkit-scrollbar-corner,
 .office-scroll::-webkit-scrollbar-corner,
+.gal-stack::-webkit-scrollbar-track,
+.gal-grid::-webkit-scrollbar-track,
+.gal-strip::-webkit-scrollbar-track,
 .commit-list::-webkit-scrollbar-track {
   background: transparent;
 }
@@ -6222,6 +6330,9 @@ select {
 .pdf-outline::-webkit-scrollbar-thumb,
 .office-scroll::-webkit-scrollbar-thumb,
 .pick-list::-webkit-scrollbar-thumb,
+.gal-stack::-webkit-scrollbar-thumb,
+.gal-grid::-webkit-scrollbar-thumb,
+.gal-strip::-webkit-scrollbar-thumb,
 .commit-list::-webkit-scrollbar-thumb {
   background: var(--scroll-thumb);
   border: 2px solid transparent;
@@ -6245,6 +6356,9 @@ select {
 .pdf-outline:hover::-webkit-scrollbar-thumb,
 .office-scroll:hover::-webkit-scrollbar-thumb,
 .pick-list:hover::-webkit-scrollbar-thumb,
+.gal-stack:hover::-webkit-scrollbar-thumb,
+.gal-grid:hover::-webkit-scrollbar-thumb,
+.gal-strip:hover::-webkit-scrollbar-thumb,
 .commit-list:hover::-webkit-scrollbar-thumb {
   background-color: var(--scroll-thumb-hover);
 }

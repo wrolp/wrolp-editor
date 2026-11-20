@@ -9,6 +9,16 @@ import { IconCollapse, IconSliders } from "./icons";
 interface Props {
   path: string;
   /**
+   * A URL the caller already prepared — an archive entry's blob URL. When given, the preview
+   * draws it directly instead of going through the asset protocol.
+   */
+  src?: string | null;
+  /**
+   * True when the picture has no path on disk. There is then nothing to grant, nothing to
+   * reveal and nothing to hand to another program; the pane draws, and that is all.
+   */
+  external?: boolean;
+  /**
    * The buffer, for SVG only. An SVG is text, so it is already in memory and can be handed
    * to the image as a data URL — which sidesteps both the asset scope (a picture in a
    * refused folder stays unreachable that way) and whatever MIME the webview infers for
@@ -75,6 +85,8 @@ function xmlIsWellFormed(svg: string): boolean {
  */
 export default function ImagePreview({
   path,
+  src: prepared,
+  external,
   text,
   backdrop,
   onSaveBackdrop,
@@ -217,6 +229,13 @@ export default function ImagePreview({
     setStep(null);
     setDims({ width: 0, height: 0 });
     setViaAsset(false);
+    if (external) {
+      // The caller owns the URL (a blob from inside an archive) and the bytes behind it; this
+      // pane neither fetches nor grants anything.
+      setMalformed(false);
+      setSrc(prepared ?? null);
+      return;
+    }
     if (inlineSvg !== null) {
       // Checked before rendering rather than after failing: a file a browser will reject
       // outright should say so, not keep asking for it.
@@ -240,7 +259,7 @@ export default function ImagePreview({
     return () => {
       live = false;
     };
-  }, [assetSrc, inlineSvg]);
+  }, [assetSrc, inlineSvg, external, prepared]);
 
   return (
     <div className="img-preview">
@@ -350,7 +369,7 @@ export default function ImagePreview({
           <div className="editor-empty">
             <div>{malformed ? t("img.malformed") : src ? t("img.failed") : t("app.loading")}</div>
             <div className="img-actions">
-              {failed && !viaAsset && !malformed && (
+              {failed && !viaAsset && !malformed && !external && (
                 <button
                   className="btn"
                   onClick={() => {
@@ -364,7 +383,7 @@ export default function ImagePreview({
               )}
               {/* A picture this pane cannot draw may still open in whatever handles it
                   properly, which beats leaving the user with a dead pane. */}
-              {malformed && (
+              {malformed && !external && (
                 <button
                   className="btn primary"
                   onClick={() => void revealItemInDir(path).catch(() => {})}

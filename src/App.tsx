@@ -148,6 +148,7 @@ import {
   type VersionState,
   type VersionSummary,
 } from "./lib/tauri";
+import type { GallerySource } from "./lib/gallerySource";
 
 /**
  * The reader pulls in pdf.js, which is larger than everything else the previews load put
@@ -2609,6 +2610,17 @@ export default function App() {
 
   const showSettings = tabs.activeTab?.isSettings === true;
   const showGallery = tabs.activeTab?.gallery !== undefined;
+  /**
+   * Where the gallery's pictures come from. Memoized on the tab so the gallery's listing
+   * effect does not re-read the folder on every render of this component.
+   */
+  const gallerySource: GallerySource = useMemo(() => {
+    const gallery = tabs.activeTab?.gallery;
+    if (gallery?.archive !== undefined) {
+      return { kind: "archive", archive: gallery.archive, inner: gallery.dir };
+    }
+    return { kind: "dir", dir: gallery?.dir ?? "" };
+  }, [tabs.activeTab?.gallery]);
   const sidebarShown = sidebarVisible && !showSettings;
   const editorTab = tabs.editorTab;
   /** The line ending the tab on screen would be saved with; "" for one that has none to speak of. */
@@ -3834,12 +3846,15 @@ const defaultModeFor = useCallback(
           {showGallery && tabs.activeTab?.gallery && (
             <ImageGallery
               key={`${tabs.activeTab.id}:${tabs.activeTab.gallery.startPath ?? ""}`}
-              dir={tabs.activeTab.gallery.dir}
+              source={gallerySource}
               startPath={tabs.activeTab.gallery.startPath}
+              initialRecursive={tabs.activeTab.gallery.recursive}
               interval={settings.galleryInterval}
               loop={settings.galleryLoop}
+              initialMode={settings.galleryMode}
               backdrop={settings.imageBackdrop}
               onSaveSettings={saveSettings}
+              onNotice={toast}
             />
           )}
 

@@ -1554,7 +1554,7 @@ export function useEditorTabs({
   const openGallery = useCallback(
     async (dir: string, startPath?: string) => {
       const existing = tabsRef.current.find(
-        (t) => t.gallery && pathKey(t.gallery.dir) === pathKey(dir)
+        (t) => t.gallery && !t.gallery.archive && pathKey(t.gallery.dir) === pathKey(dir)
       );
       if (existing) {
         setTabs((prev) =>
@@ -1573,6 +1573,57 @@ export function useEditorTabs({
         original: "",
         dirty: false,
         gallery: { dir, startPath },
+        encoding: "UTF-8",
+        bom: false,
+        bytes: null,
+        fileSettings: EMPTY_FILE_SETTINGS,
+      };
+      setTabs((prev) => [...prev, tab]);
+      await activate(tab.id);
+    },
+    [activate]
+  );
+
+  /**
+   * Show the pictures inside a zip, read in place rather than unpacked first.
+   *
+   * The tab is keyed by the archive and the folder inside it, so asking for the same pair
+   * again returns to the tab that is already open. `path` spells both out to keep the
+   * gallery tabs of two different archives apart.
+   */
+  const openGalleryArchive = useCallback(
+    async (
+      archive: string,
+      inner: string,
+      startPath?: string,
+      recursive?: boolean
+    ) => {
+      const existing = tabsRef.current.find(
+        (t) =>
+          t.gallery?.archive !== undefined &&
+          pathKey(t.gallery.archive) === pathKey(archive) &&
+          pathKey(t.gallery.dir) === pathKey(inner)
+      );
+      if (existing) {
+        setTabs((prev) =>
+          prev.map((t) =>
+            t.id === existing.id
+              ? { ...t, gallery: { dir: inner, startPath, archive, recursive } }
+              : t
+          )
+        );
+        await activate(existing.id);
+        return;
+      }
+      const inside = inner ? `${basename(archive)} / ${inner}` : basename(archive);
+      const tab: Tab = {
+        id: nextId(),
+        path: `gallery://${archive}!/${inner}`,
+        name: inside || archive,
+        language: "plaintext",
+        original: "",
+        dirty: false,
+        gallery: { dir: inner, startPath, archive, recursive },
         encoding: "UTF-8",
         bom: false,
         bytes: null,
@@ -2999,6 +3050,7 @@ export function useEditorTabs({
       openUntitled,
       openSettings,
       openGallery,
+      openGalleryArchive,
       openMerge,
       openCommitTab,
       setMergeDirty,
@@ -3059,6 +3111,7 @@ export function useEditorTabs({
       openUntitled,
       openSettings,
       openGallery,
+      openGalleryArchive,
       openMerge,
       openCommitTab,
       setMergeDirty,

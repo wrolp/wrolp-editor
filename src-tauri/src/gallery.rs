@@ -11,9 +11,9 @@ use std::path::Path;
 
 /// Enough pictures for any album a person scrolls through, and the first guard against a
 /// recursive walk that reaches a photo library's tens of thousands of files.
-const MAX_GALLERY_IMAGES: usize = 2000;
+pub(crate) const MAX_GALLERY_IMAGES: usize = 2000;
 /// Deep enough to catch `photos/2026/10/24` without turning `\\server\share` into a long walk.
-const MAX_GALLERY_DEPTH: usize = 4;
+pub(crate) const MAX_GALLERY_DEPTH: usize = 4;
 /// Same folders the Explorer's own listing skips: none of them are albums, and walking
 /// `node_modules` can surface thousands of placeholder images.
 const IGNORED: [&str; 4] = ["node_modules", "target", "dist", ".git"];
@@ -43,7 +43,7 @@ pub struct ImageEntry {
 /// Pictures a gallery can list. Raster types come from the editor's own table, so the
 /// gallery and "this file is binary" cannot drift apart; `svg` is added because it draws
 /// through an `<img>` even though the editor also treats it as text.
-fn has_image_ext(name: &str) -> bool {
+pub(crate) fn has_image_ext(name: &str) -> bool {
   match name.rsplit_once('.') {
     Some((_, ext)) => {
       let ext = ext.to_ascii_lowercase();
@@ -53,7 +53,7 @@ fn has_image_ext(name: &str) -> bool {
   }
 }
 
-fn is_ignored(name: &str) -> bool {
+pub(crate) fn is_ignored(name: &str) -> bool {
   IGNORED.iter().any(|i| name.eq_ignore_ascii_case(i))
 }
 
