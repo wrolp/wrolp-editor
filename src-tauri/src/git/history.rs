@@ -55,7 +55,10 @@ pub async fn git_log(
 ) -> Result<Vec<LogEntry>, String> {
   // A topological walk is laid out over everything the refs reach before the first row comes
   // back, so this is the heaviest read the panel makes and the one that must not hold a worker.
-  super::blocking("log", move || log_page(&root, limit, skip, all.unwrap_or(false))).await
+  super::blocking("log", move || {
+    log_page(&root, limit, skip, all.unwrap_or(false))
+  })
+  .await
 }
 
 /// One page of the log.

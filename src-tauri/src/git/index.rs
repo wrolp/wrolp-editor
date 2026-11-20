@@ -257,11 +257,7 @@ fn commit_impl(
   }
 
   let head = match repo.head() {
-    Ok(reference) => Some(
-      reference
-        .peel_to_commit()
-        .map_err(|e| fail("head", e))?,
-    ),
+    Ok(reference) => Some(reference.peel_to_commit().map_err(|e| fail("head", e))?),
     Err(e) if e.code() == git2::ErrorCode::UnbornBranch => None,
     Err(e) => return Err(fail("head", e)),
   };
@@ -303,9 +299,7 @@ fn commit_impl(
       .commit(None, &author, &committer, message, &tree, &parents)
       .map_err(|e| fail("commit", e))?;
     if repo.head_detached().map_err(|e| fail("head", e))? {
-      repo
-        .set_head_detached(oid)
-        .map_err(|e| fail("head", e))?;
+      repo.set_head_detached(oid).map_err(|e| fail("head", e))?;
     } else {
       let name = repo
         .head()

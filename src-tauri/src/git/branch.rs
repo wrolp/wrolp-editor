@@ -175,9 +175,7 @@ fn checkout_remote(repo: &Repository, name: &str) -> Result<(), String> {
   if is_dirty(repo)? {
     return Err("git_dirty".into());
   }
-  let commit = reference
-    .peel_to_commit()
-    .map_err(|e| fail("rev", e))?;
+  let commit = reference.peel_to_commit().map_err(|e| fail("rev", e))?;
   let mut branch = repo
     .branch(&short, &commit, false)
     .map_err(|e| fail("branch", e))?;
@@ -251,7 +249,10 @@ fn is_merged(repo: &Repository, branch: &git2::Branch<'_>) -> bool {
 /// whose files are not on disk.
 fn switch_to(repo: &Repository, name: &str) -> Result<(), String> {
   let refname = format!("refs/heads/{name}");
-  let old = repo.head().ok().and_then(|h| h.name().ok().map(str::to_string));
+  let old = repo
+    .head()
+    .ok()
+    .and_then(|h| h.name().ok().map(str::to_string));
   repo.set_head(&refname).map_err(|e| fail("switch", e))?;
   let mut checkout = CheckoutBuilder::new();
   checkout.safe();

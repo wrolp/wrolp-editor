@@ -104,7 +104,11 @@ pub(crate) fn new_entry_path(
 /// The file starts empty: it is a file the user asked to exist, not one with anything in it,
 /// and an editor that invented content would be writing text nobody typed.
 #[tauri::command(async, rename = "create_file")]
-pub fn create_file_command(app: AppHandle, parent: String, name: String) -> Result<FsEntry, String> {
+pub fn create_file_command(
+  app: AppHandle,
+  parent: String,
+  name: String,
+) -> Result<FsEntry, String> {
   crate::archive::refuse_if_cached(&app, &parent)?;
   create_file(parent, name)
 }
@@ -228,7 +232,11 @@ fn copy_tree(from: &Path, to: &Path) -> Result<(), String> {
 /// name it ends up with is the answer this returns: the caller shows the real name, so a
 /// paste that had to be numbered is not a surprise found later.
 #[tauri::command(async, rename = "copy_entry")]
-pub fn copy_entry_command(app: AppHandle, source: String, target: String) -> Result<FsEntry, String> {
+pub fn copy_entry_command(
+  app: AppHandle,
+  source: String,
+  target: String,
+) -> Result<FsEntry, String> {
   // An unpacked archive is a view of somebody else's bytes: copying into it would edit a copy
   // that the next clean-up deletes, so the refusal is the same one every write makes.
   crate::archive::refuse_if_cached(&app, &target)?;
@@ -469,7 +477,10 @@ fn copy_sources(sources: Vec<PathBuf>, target: String) -> Result<ClipboardPaste,
 
 /// Copy every file the system clipboard lists into `target`.
 #[tauri::command(async, rename = "paste_clipboard_files")]
-pub fn paste_clipboard_files_command(app: AppHandle, target: String) -> Result<ClipboardPaste, String> {
+pub fn paste_clipboard_files_command(
+  app: AppHandle,
+  target: String,
+) -> Result<ClipboardPaste, String> {
   crate::archive::refuse_if_cached(&app, &target)?;
   paste_clipboard_files(target)
 }

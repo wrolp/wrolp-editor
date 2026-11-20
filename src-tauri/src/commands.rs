@@ -590,10 +590,13 @@ impl Settings {
         model: self.ai_model.trim().to_string(),
         key: self.ai_key.clone(),
       };
-      let has_legacy = !legacy.base_url.is_empty()
-        || !legacy.model.is_empty()
-        || !legacy.key.trim().is_empty();
-      endpoints.push(if has_legacy { legacy } else { AiEndpoint::default() });
+      let has_legacy =
+        !legacy.base_url.is_empty() || !legacy.model.is_empty() || !legacy.key.trim().is_empty();
+      endpoints.push(if has_legacy {
+        legacy
+      } else {
+        AiEndpoint::default()
+      });
     }
     // Each endpoint gets the same rules a lone one used to have: an id that can be named, a URL
     // a key may travel over, and a model name rather than an empty box.
@@ -1153,10 +1156,14 @@ fn read_range(path: &str, begin: u64, end: u64) -> Result<Vec<u8>, String> {
   let begin = begin.min(len);
   let end = end.min(len).max(begin);
   if begin > 0 {
-    file.seek(SeekFrom::Start(begin)).map_err(|e| format!("fs_read:{e}"))?;
+    file
+      .seek(SeekFrom::Start(begin))
+      .map_err(|e| format!("fs_read:{e}"))?;
   }
   let mut bytes = vec![0u8; (end - begin) as usize];
-  file.read_exact(&mut bytes).map_err(|e| format!("fs_read:{e}"))?;
+  file
+    .read_exact(&mut bytes)
+    .map_err(|e| format!("fs_read:{e}"))?;
   Ok(bytes)
 }
 
@@ -2413,10 +2420,16 @@ mod tests {
     .expect("legacy settings");
     let filled = legacy.filled();
     assert_eq!(filled.ai_endpoints.len(), 1);
-    assert_eq!(filled.ai_endpoints[0].base_url, "https://api.deepseek.com/v1");
+    assert_eq!(
+      filled.ai_endpoints[0].base_url,
+      "https://api.deepseek.com/v1"
+    );
     assert_eq!(filled.ai_endpoints[0].model, "deepseek-chat");
     assert_eq!(filled.ai_endpoints[0].key, "ciphertext");
-    assert!(filled.ai_base_url.is_empty(), "the legacy copy must not be written again");
+    assert!(
+      filled.ai_base_url.is_empty(),
+      "the legacy copy must not be written again"
+    );
 
     // A file that names an endpoint no longer in the list falls back to the first one.
     let missing = Settings {
@@ -2565,7 +2578,10 @@ mod tests {
       r"C:\docs\a.pdf",
       r"C:\docs\a.PDF",
     ] {
-      assert!(is_binary_ext(name), "{name} should be opened for its metadata only");
+      assert!(
+        is_binary_ext(name),
+        "{name} should be opened for its metadata only"
+      );
     }
   }
 
@@ -2597,7 +2613,10 @@ mod tests {
     assert_eq!(props.bytes, 5);
     assert_eq!(props.entries, None);
     assert_eq!(props.name, "wrolp-properties-test.txt");
-    assert!(props.modified.is_some(), "a written file has a modification time");
+    assert!(
+      props.modified.is_some(),
+      "a written file has a modification time"
+    );
     assert!(
       !props.path.starts_with(r"\\?\"),
       "the verbatim prefix canonicalize adds is not part of the path shown"
@@ -3366,7 +3385,10 @@ mod tests {
 
     // A folder that is not there answers 0 rather than failing the whole call.
     let gone = dir.join("gone");
-    assert_eq!(dir_stamps(vec![gone.to_string_lossy().to_string()])[0].mtime, 0);
+    assert_eq!(
+      dir_stamps(vec![gone.to_string_lossy().to_string()])[0].mtime,
+      0
+    );
     std::fs::remove_dir_all(&dir).ok();
   }
 

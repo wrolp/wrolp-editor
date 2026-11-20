@@ -20,10 +20,10 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::path::Path;
-use std::sync::mpsc;
-use std::time::Duration;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tauri::ipc::Channel;
 use tauri::{AppHandle, State};
 
@@ -35,8 +35,8 @@ use super::{
   RepoInfo, MAX_DIFF_BYTES,
 };
 use crate::commands::{self, SavedFile};
-use crate::file_settings;
 use crate::encoding;
+use crate::file_settings;
 
 pub(crate) type Sink = Arc<dyn Fn(GitProgress) + Send + Sync>;
 
@@ -423,10 +423,7 @@ pub(crate) fn clone_core(
       return Err("git_clone_exists".into());
     }
     Err(error) => {
-      return Err(format!(
-        "git_clone_create:{} — {error}",
-        target.display()
-      ));
+      return Err(format!("git_clone_create:{} — {error}", target.display()));
     }
   }
 
@@ -480,7 +477,13 @@ pub(crate) fn fetch_core(
   let _guard = locks.acquire(&opened.workdir)?;
   let name = remote_name(&opened.repo, remote)?;
   sink(starting());
-  fetch_into(&opened.repo, &name, auth, Arc::clone(&cancel), Arc::clone(&sink))?;
+  fetch_into(
+    &opened.repo,
+    &name,
+    auth,
+    Arc::clone(&cancel),
+    Arc::clone(&sink),
+  )?;
   sink(done());
   let _ = cancel;
   Ok(repo_info(&opened, root))
@@ -509,7 +512,13 @@ pub(crate) fn pull_core(
   }
   let name = remote_name(&opened.repo, remote)?;
   sink(starting());
-  fetch_into(&opened.repo, &name, auth, Arc::clone(&cancel), Arc::clone(&sink))?;
+  fetch_into(
+    &opened.repo,
+    &name,
+    auth,
+    Arc::clone(&cancel),
+    Arc::clone(&sink),
+  )?;
   if cancel.load(Ordering::Relaxed) {
     return Err("git_canceled".into());
   }
@@ -543,9 +552,7 @@ pub(crate) fn pull_core(
   if analysis.is_fast_forward() {
     sink(phase("writing"));
     let target = annotated.id();
-    let object = repo
-      .find_object(target, None)
-      .map_err(|e| fail("rev", e))?;
+    let object = repo.find_object(target, None).map_err(|e| fail("rev", e))?;
     let mut checkout = CheckoutBuilder::new();
     checkout.safe();
     repo
@@ -945,10 +952,12 @@ fn callbacks(
       };
       let fingerprint: String = hash.iter().map(|byte| format!("{byte:02x}")).collect();
       let key = host.to_ascii_lowercase();
-      let trusted = auth
-        .known_hosts
-        .get(&key)
-        .or_else(|| key.split(':').next().and_then(|bare| auth.known_hosts.get(bare)));
+      let trusted = auth.known_hosts.get(&key).or_else(|| {
+        key
+          .split(':')
+          .next()
+          .and_then(|bare| auth.known_hosts.get(bare))
+      });
       match trusted {
         Some(trusted) if trusted.eq_ignore_ascii_case(&fingerprint) => {
           Ok(CertificateCheckStatus::CertificateOk)
@@ -1124,8 +1133,8 @@ fn preflight(url: &str, cancel: &AtomicBool) -> Result<(), String> {
     return Ok(());
   };
   // A configured system proxy only carries HTTP(S); SSH still needs a direct socket.
-  let proxied_http = (url.starts_with("http://") || url.starts_with("https://"))
-    && system_proxy_configured();
+  let proxied_http =
+    (url.starts_with("http://") || url.starts_with("https://")) && system_proxy_configured();
   if proxied_http {
     return Ok(());
   }
@@ -1179,7 +1188,10 @@ fn resolve(target: &str) -> Result<Vec<SocketAddr>, String> {
     Ok(Ok(addresses)) if !addresses.is_empty() => Ok(addresses),
     _ => Err(format!(
       "git_network:{}",
-      target.rsplit_once(':').map(|(host, _)| host).unwrap_or(target)
+      target
+        .rsplit_once(':')
+        .map(|(host, _)| host)
+        .unwrap_or(target)
     )),
   }
 }
@@ -1212,10 +1224,19 @@ fn host_port(rest: &str, default_port: u16) -> (String, u16) {
   let host = authority.rsplit('@').next().unwrap_or(authority);
   match host.rsplit_once(':') {
     Some((name, port)) if port.parse::<u16>().is_ok() => (
-      name.trim_start_matches('[').trim_end_matches(']').to_string(),
+      name
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_string(),
       port.parse().unwrap_or(default_port),
     ),
-    _ => (host.trim_start_matches('[').trim_end_matches(']').to_string(), default_port),
+    _ => (
+      host
+        .trim_start_matches('[')
+        .trim_end_matches(']')
+        .to_string(),
+      default_port,
+    ),
   }
 }
 
@@ -1326,11 +1347,8 @@ pub fn git_conflict_sides(
   path: String,
 ) -> Result<ConflictSides, String> {
   let normalized = crate::draft::normalize_path(&path);
-  let preference = file_settings::encoding_for(
-    &app,
-    &normalized,
-    &crate::commands::stored_encoding(&app),
-  );
+  let preference =
+    file_settings::encoding_for(&app, &normalized, &crate::commands::stored_encoding(&app));
   let default_eol = commands::settings_of(&app).line_ending;
   conflict_sides_of(&root, &path, &preference, &default_eol)
 }
@@ -1374,11 +1392,9 @@ pub(crate) fn conflict_sides_of(
       continue;
     }
     found = true;
-    let (base, base_binary) =
-      decode_blob(&opened.repo, conflict.ancestor.as_ref(), preference)?;
+    let (base, base_binary) = decode_blob(&opened.repo, conflict.ancestor.as_ref(), preference)?;
     let (ours, ours_binary) = decode_blob(&opened.repo, conflict.our.as_ref(), preference)?;
-    let (theirs, theirs_binary) =
-      decode_blob(&opened.repo, conflict.their.as_ref(), preference)?;
+    let (theirs, theirs_binary) = decode_blob(&opened.repo, conflict.their.as_ref(), preference)?;
     sides.base = base;
     sides.ours = ours;
     sides.theirs = theirs;
@@ -1523,11 +1539,7 @@ pub fn git_write_resolution(
   locks: State<'_, GitLocks>,
 ) -> Result<SavedFile, String> {
   let normalized = crate::draft::normalize_path(&path);
-  let preference = file_settings::encoding_for(
-    &app,
-    &normalized,
-    &commands::stored_encoding(&app),
-  );
+  let preference = file_settings::encoding_for(&app, &normalized, &commands::stored_encoding(&app));
   let default_eol = commands::settings_of(&app).line_ending;
   write_resolution(&root, &path, &content, &preference, &default_eol, &locks)
 }
@@ -1603,7 +1615,9 @@ pub(crate) fn write_resolution(
     path: crate::draft::normalize_path(&abs.to_string_lossy()),
     name: crate::draft::display_name(&abs.to_string_lossy()),
     mtime,
-    encoding: encoding::resolve_for_write(&encoding_name)?.name().to_string(),
+    encoding: encoding::resolve_for_write(&encoding_name)?
+      .name()
+      .to_string(),
     bytes: bytes.len() as u64,
   })
 }
@@ -1618,11 +1632,7 @@ pub fn git_delete_resolution(
   delete_resolution(&root, &path, &locks)
 }
 
-pub(crate) fn delete_resolution(
-  root: &str,
-  path: &str,
-  locks: &GitLocks,
-) -> Result<(), String> {
+pub(crate) fn delete_resolution(root: &str, path: &str, locks: &GitLocks) -> Result<(), String> {
   let opened = discover(root)?;
   let _guard = locks.acquire(&opened.workdir)?;
   let rel = rel_of(&opened.workdir, path)?;
@@ -1941,11 +1951,23 @@ mod tests {
 
   #[test]
   fn only_remote_urls_get_a_socket_preflight() {
-    assert_eq!(socket_target("https://github.com/a/b.git"), Some(("github.com".into(), 443)));
-    assert_eq!(socket_target("https://host:8443/a"), Some(("host".into(), 8443)));
+    assert_eq!(
+      socket_target("https://github.com/a/b.git"),
+      Some(("github.com".into(), 443))
+    );
+    assert_eq!(
+      socket_target("https://host:8443/a"),
+      Some(("host".into(), 8443))
+    );
     assert_eq!(socket_target("ssh://git@host/a"), Some(("host".into(), 22)));
-    assert_eq!(socket_target("git@host:owner/repo.git"), Some(("host".into(), 22)));
-    assert_eq!(socket_target("https://[::1]:8443/x"), Some(("::1".into(), 8443)));
+    assert_eq!(
+      socket_target("git@host:owner/repo.git"),
+      Some(("host".into(), 22))
+    );
+    assert_eq!(
+      socket_target("https://[::1]:8443/x"),
+      Some(("::1".into(), 8443))
+    );
     assert_eq!(socket_address("::1", 443), "[::1]:443");
     assert_eq!(socket_address("github.com", 22), "github.com:22");
     assert_eq!(socket_target("D:/wrolp/remote.git"), None);

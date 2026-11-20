@@ -442,7 +442,8 @@ mod tests {
   }
 
   #[test]
-  fn empty_store_is_not_an_error() {    let filled = GroupStore::default().filled();
+  fn empty_store_is_not_an_error() {
+    let filled = GroupStore::default().filled();
     assert_eq!(filled.version, STORE_VERSION);
     assert_eq!(filled.active, "");
     assert!(filled.items.is_empty());
@@ -557,11 +558,7 @@ mod tests {
   #[test]
   fn hand_added_repositories_are_normalized_deduped_and_capped() {
     let group = Group {
-      git_roots: vec![
-        "C:/repos/a".into(),
-        "c:/REPOS/A".into(),
-        String::new(),
-      ],
+      git_roots: vec!["C:/repos/a".into(), "c:/REPOS/A".into(), String::new()],
       git_selected: "C:/repos/pick".into(),
       ..grp("a", "notes", vec![])
     };

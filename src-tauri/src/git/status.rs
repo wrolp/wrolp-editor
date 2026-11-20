@@ -5,9 +5,7 @@ use git2::{FileMode, Status as GitStatus, StatusOptions};
 use serde::Serialize;
 use std::path::PathBuf;
 
-use super::{
-  abs_of, discover, fail, git_path, repo_info, RepoInfo, MAX_STATUS_ENTRIES,
-};
+use super::{abs_of, discover, fail, git_path, repo_info, RepoInfo, MAX_STATUS_ENTRIES};
 
 /// How many ignored paths are reported. They are decoration for the Explorer rather than a list to
 /// act on, and a project with a hand-written ignore file can have thousands; the changed paths
@@ -126,7 +124,8 @@ pub async fn git_status(root: String) -> Result<StatusView, String> {
 /// the ignored paths and that difference is worth money on a large work tree.
 fn status_options() -> StatusOptions {
   let mut opts = StatusOptions::new();
-  opts.include_untracked(true)
+  opts
+    .include_untracked(true)
     .recurse_untracked_dirs(true)
     // Ignored paths are wanted for the Explorer's decoration, not for the panel's two lists, and
     // they are reported one entry per ignored *directory* rather than one per file inside it —
@@ -150,7 +149,8 @@ fn status_options() -> StatusOptions {
 /// asks for one summary per repository, so this is the option list that matters most.
 fn summary_options() -> StatusOptions {
   let mut opts = StatusOptions::new();
-  opts.include_untracked(true)
+  opts
+    .include_untracked(true)
     .recurse_untracked_dirs(true)
     .include_ignored(false)
     .renames_head_to_index(true)

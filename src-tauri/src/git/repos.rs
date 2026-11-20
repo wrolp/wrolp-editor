@@ -153,7 +153,10 @@ pub(crate) fn scan_repos(root: &str, depth: u32) -> Result<GitScanView, String> 
     let mut children: Vec<PathBuf> = Vec::new();
     for item in read.flatten() {
       let name = item.file_name().to_string_lossy().to_string();
-      if IGNORED.iter().any(|ignored| name.eq_ignore_ascii_case(ignored)) {
+      if IGNORED
+        .iter()
+        .any(|ignored| name.eq_ignore_ascii_case(ignored))
+      {
         continue;
       }
       let path = item.path();

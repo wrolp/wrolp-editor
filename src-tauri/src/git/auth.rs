@@ -61,8 +61,7 @@ impl fmt::Debug for AuthStore {
 
 impl AuthStore {
   pub fn load(app: &AppHandle) -> Result<Self, String> {
-    let mut store =
-      crate::commands::read_json::<AuthStore>(app, AUTH_FILE)?.unwrap_or_default();
+    let mut store = crate::commands::read_json::<AuthStore>(app, AUTH_FILE)?.unwrap_or_default();
     store.keyring = crate::unlock::system_store();
     store.migrate_secrets(app);
     Ok(store)
@@ -470,14 +469,26 @@ mod tests {
 
   #[test]
   fn hosts_come_out_of_both_url_shapes() {
-    assert_eq!(host_of("https://github.com/a/b.git").as_deref(), Some("github.com"));
+    assert_eq!(
+      host_of("https://github.com/a/b.git").as_deref(),
+      Some("github.com")
+    );
     assert_eq!(
       host_of("https://user:token@github.com:8443/a/b.git").as_deref(),
       Some("github.com:8443")
     );
-    assert_eq!(host_of("ssh://git@github.com/a/b.git").as_deref(), Some("github.com"));
-    assert_eq!(host_of("git@github.com:owner/repo.git").as_deref(), Some("github.com"));
-    assert_eq!(host_of("git@example.com:/srv/repo.git").as_deref(), Some("example.com"));
+    assert_eq!(
+      host_of("ssh://git@github.com/a/b.git").as_deref(),
+      Some("github.com")
+    );
+    assert_eq!(
+      host_of("git@github.com:owner/repo.git").as_deref(),
+      Some("github.com")
+    );
+    assert_eq!(
+      host_of("git@example.com:/srv/repo.git").as_deref(),
+      Some("example.com")
+    );
     assert_eq!(host_of("not a url"), None);
     assert_eq!(host_of("D:/wrolp/remote.git"), None);
     assert_eq!(host_of("/srv/repo.git"), None);

@@ -369,10 +369,7 @@ fn apply_batch(planned: &mut [Planned]) -> Result<(), String> {
   // vacated by the time it lands.
   let mut landed: Vec<usize> = Vec::new();
   for index in 0..planned.len() {
-    if planned[index].waits
-      || !planned[index].moves()
-      || planned[index].new == planned[index].old
-    {
+    if planned[index].waits || !planned[index].moves() || planned[index].new == planned[index].old {
       continue;
     }
     if let Err(e) = std::fs::rename(&planned[index].from, &planned[index].to) {
@@ -693,7 +690,10 @@ mod tests {
     let dir = sandbox("same-target");
     std::fs::write(dir.join("a.txt"), "a").unwrap();
     std::fs::write(dir.join("b.txt"), "b").unwrap();
-    let items = [ask(&dir, "a.txt", "same.txt"), ask(&dir, "b.txt", "same.txt")];
+    let items = [
+      ask(&dir, "a.txt", "same.txt"),
+      ask(&dir, "b.txt", "same.txt"),
+    ];
     assert!(matches!(plan_batch(&items), Err(code) if code == "rename_batch_duplicate"));
     let _ = std::fs::remove_dir_all(&dir);
   }
@@ -713,10 +713,7 @@ mod tests {
     let dir = sandbox("nested");
     std::fs::create_dir_all(dir.join("sub")).unwrap();
     std::fs::write(dir.join("sub").join("x.txt"), "x").unwrap();
-    let items = [
-      ask(&dir, "sub", "renamed"),
-      ask(&dir, "sub/x.txt", "y.txt"),
-    ];
+    let items = [ask(&dir, "sub", "renamed"), ask(&dir, "sub/x.txt", "y.txt")];
     assert!(matches!(plan_batch(&items), Err(code) if code == "rename_batch_nested"));
     let _ = std::fs::remove_dir_all(&dir);
   }
@@ -732,7 +729,10 @@ mod tests {
     let mut planned = plan_batch(&items).unwrap();
     if cfg!(windows) {
       // The key is lowercased there, so only the spelling moved.
-      assert_eq!(planned[0].old, planned[0].new, "the identity does not change");
+      assert_eq!(
+        planned[0].old, planned[0].new,
+        "the identity does not change"
+      );
     }
     assert!(planned[0].moves(), "the spelling does");
     apply_batch(&mut planned).unwrap();
@@ -749,7 +749,10 @@ mod tests {
     let source = dir.join("report.txt");
     rename_spelling(&source, &dir, &dir.join("Report.TXT")).unwrap();
     assert_eq!(names(&dir), vec!["Report.TXT".to_string()]);
-    assert_eq!(std::fs::read_to_string(dir.join("Report.TXT")).unwrap(), "text");
+    assert_eq!(
+      std::fs::read_to_string(dir.join("Report.TXT")).unwrap(),
+      "text"
+    );
     let _ = std::fs::remove_dir_all(&dir);
   }
 

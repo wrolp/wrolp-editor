@@ -273,7 +273,12 @@ pub fn ai_clear_key(app: AppHandle, endpoint_id: String) -> Result<(), String> {
 
 #[tauri::command(async)]
 pub fn ai_cancel(state: State<'_, AiState>, op_id: String) {
-  if let Some(flag) = state.cancels.lock().expect("ai cancel lock poisoned").get(&op_id) {
+  if let Some(flag) = state
+    .cancels
+    .lock()
+    .expect("ai cancel lock poisoned")
+    .get(&op_id)
+  {
     flag.store(true, Ordering::SeqCst);
   }
 }
@@ -328,7 +333,16 @@ pub async fn ai_commit_message(
     .expect("ai state lock poisoned")
     .insert(op_id.clone(), cancel.clone());
 
-  let result = stream_message(&base_url, &model, key.as_deref(), &patch, timeout_ms, &cancel, &on_event).await;
+  let result = stream_message(
+    &base_url,
+    &model,
+    key.as_deref(),
+    &patch,
+    timeout_ms,
+    &cancel,
+    &on_event,
+  )
+  .await;
 
   state
     .cancels
@@ -364,7 +378,9 @@ pub async fn ai_models(app: AppHandle, endpoint_id: String) -> Result<Vec<String
   let client = reqwest::Client::builder()
     // A list is a short answer; waiting the commit timeout for it would leave the button busy
     // for a minute and a half over a typo in the endpoint.
-    .timeout(Duration::from_millis(u64::from(settings.ai_timeout_ms.min(30_000))))
+    .timeout(Duration::from_millis(u64::from(
+      settings.ai_timeout_ms.min(30_000),
+    )))
     .build()
     .map_err(|e| format!("ai_network:{e}"))?;
   let mut request = client.get(format!("{base_url}/models"));
@@ -501,7 +517,9 @@ async fn stream_message(
         if let Some(text) = value["choices"][0]["delta"]["content"].as_str() {
           if !text.is_empty() {
             full.push_str(text);
-            let _ = on_event.send(AiCommitEvent::Delta { text: text.to_string() });
+            let _ = on_event.send(AiCommitEvent::Delta {
+              text: text.to_string(),
+            });
           }
         }
       }
@@ -584,9 +602,18 @@ mod tests {
         .base_url
         .clone()
     };
-    assert_eq!(base("https://api.deepseek.com/v1"), "https://api.deepseek.com/v1");
-    assert_eq!(base("http://localhost:11434/v1"), "http://localhost:11434/v1");
-    assert_eq!(base("http://evil.example.com/v1"), "https://api.openai.com/v1");
+    assert_eq!(
+      base("https://api.deepseek.com/v1"),
+      "https://api.deepseek.com/v1"
+    );
+    assert_eq!(
+      base("http://localhost:11434/v1"),
+      "http://localhost:11434/v1"
+    );
+    assert_eq!(
+      base("http://evil.example.com/v1"),
+      "https://api.openai.com/v1"
+    );
     assert_eq!(base("ftp://x"), "https://api.openai.com/v1");
     assert_eq!(base(""), "https://api.openai.com/v1");
   }

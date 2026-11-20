@@ -504,8 +504,7 @@ fn write_new_container(
     }
     // The file is written at the spelling the filesystem knows; the cache is filed under the
     // identity, which `put` derives itself.
-    commands::write_atomic(Path::new(&draft::io_path(path)), &bytes)
-      .map(|()| bytes.len() as u64)
+    commands::write_atomic(Path::new(&draft::io_path(path)), &bytes).map(|()| bytes.len() as u64)
   });
   // Only a key that is on disk somewhere is worth caching: caching one whose write failed would
   // leave the session believing it can save a file that was never created.
@@ -587,7 +586,13 @@ pub fn create_encrypted(
   let normalized = draft::normalize_path(&target.to_string_lossy());
   // The reserved file is at `target`; the lowercased identity would not name the same file in
   // a case-sensitive directory.
-  if let Err(e) = write_new_container(&state, &target.to_string_lossy(), &[], &password, idle_limit(&app)) {
+  if let Err(e) = write_new_container(
+    &state,
+    &target.to_string_lossy(),
+    &[],
+    &password,
+    idle_limit(&app),
+  ) {
     let _ = std::fs::remove_file(&target);
     return Err(e);
   }

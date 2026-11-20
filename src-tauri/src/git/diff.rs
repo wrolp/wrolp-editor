@@ -48,11 +48,7 @@ pub fn git_diff(
   rev: Option<String>,
 ) -> Result<DiffText, String> {
   let normalized = crate::draft::normalize_path(&path);
-  let preference = file_settings::encoding_for(
-    &app,
-    &normalized,
-    &commands::stored_encoding(&app),
-  );
+  let preference = file_settings::encoding_for(&app, &normalized, &commands::stored_encoding(&app));
   diff_of(
     &root,
     &path,

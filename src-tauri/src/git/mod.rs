@@ -171,10 +171,7 @@ pub(crate) fn rel_of(workdir: &Path, path: &str) -> Result<PathBuf, String> {
   }
   let rel: PathBuf = all[base.len()..].iter().collect();
   // `.` and `..` are not file names; a path carrying one is not a repository path.
-  if rel
-    .components()
-    .any(|c| !matches!(c, Component::Normal(_)))
-  {
+  if rel.components().any(|c| !matches!(c, Component::Normal(_))) {
     return Err("git_path_outside".into());
   }
   Ok(rel)
@@ -249,7 +246,9 @@ pub(crate) fn conflict_paths(index: &git2::Index) -> Result<Vec<String>, String>
 /// Network operations in flight, so the panel's Cancel button can reach the transfer callback.
 /// Keyed by an id the frontend generates per invocation.
 #[derive(Clone, Default)]
-pub struct GitOps(Arc<Mutex<std::collections::HashMap<String, Arc<std::sync::atomic::AtomicBool>>>>);
+pub struct GitOps(
+  Arc<Mutex<std::collections::HashMap<String, Arc<std::sync::atomic::AtomicBool>>>>,
+);
 
 impl GitOps {
   pub fn begin(&self, id: &str) -> Result<Arc<std::sync::atomic::AtomicBool>, String> {
@@ -283,7 +282,8 @@ pub fn git_cancel(ops: tauri::State<'_, GitOps>, op_id: String) {
 }
 
 pub(crate) fn iso_time(seconds: i64) -> String {
-  Utc.timestamp_opt(seconds, 0)
+  Utc
+    .timestamp_opt(seconds, 0)
     .single()
     .map(|t| t.to_rfc3339_opts(chrono::SecondsFormat::Secs, true))
     .unwrap_or_default()

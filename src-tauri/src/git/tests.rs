@@ -122,11 +122,20 @@ fn empty_message_and_nothing_staged_are_refused() {
   let fixture = fixture("empty");
   let _repo = init(&fixture);
   let file = write(&fixture, "a.txt", "one\n");
-  assert_eq!(commit(&root(&fixture), "  ", None, &locks()).unwrap_err(), "git_empty_message");
-  assert_eq!(commit(&root(&fixture), "first", None, &locks()).unwrap_err(), "git_nothing_staged");
+  assert_eq!(
+    commit(&root(&fixture), "  ", None, &locks()).unwrap_err(),
+    "git_empty_message"
+  );
+  assert_eq!(
+    commit(&root(&fixture), "first", None, &locks()).unwrap_err(),
+    "git_nothing_staged"
+  );
   stage(&root(&fixture), &[file], &locks()).unwrap();
   commit(&root(&fixture), "first", None, &locks()).unwrap();
-  assert_eq!(commit(&root(&fixture), "again", None, &locks()).unwrap_err(), "git_nothing_staged");
+  assert_eq!(
+    commit(&root(&fixture), "again", None, &locks()).unwrap_err(),
+    "git_nothing_staged"
+  );
 }
 
 #[test]
@@ -200,8 +209,14 @@ fn log_lists_a_linear_history_newest_first() {
   let fixture = fixture("log-order");
   let repo = init(&fixture);
   for index in 1..=5 {
-    write(&fixture, "a.txt", &format!("{index}
-"));
+    write(
+      &fixture,
+      "a.txt",
+      &format!(
+        "{index}
+"
+      ),
+    );
     commit_all(&repo, &format!("c{index}"));
   }
   let log = log_page(&root(&fixture), None, None, false).unwrap();
@@ -413,8 +428,10 @@ fn a_merge_keeps_both_parents_and_tags_name_their_tip() {
 fn unstaging_a_rename_restores_both_paths() {
   let fixture = fixture("rename-unstage");
   let _repo = init(&fixture);
-  let old = write(&fixture, "a.txt", "one
-");
+  let old = write(
+    &fixture, "a.txt", "one
+",
+  );
   stage(&root(&fixture), &[old.clone()], &locks()).unwrap();
   commit(&root(&fixture), "first", None, &locks()).unwrap();
 
@@ -433,11 +450,20 @@ fn unstaging_a_rename_restores_both_paths() {
   let paths: Vec<(&str, &str, Option<&str>)> = status
     .files
     .iter()
-    .map(|file| (file.path.as_str(), file.kind.as_str(), file.workdir.as_deref()))
+    .map(|file| {
+      (
+        file.path.as_str(),
+        file.kind.as_str(),
+        file.workdir.as_deref(),
+      )
+    })
     .collect();
   assert_eq!(
     paths,
-    vec![("a.txt", "tracked", Some("D")), ("b.txt", "untracked", Some("?"))]
+    vec![
+      ("a.txt", "tracked", Some("D")),
+      ("b.txt", "untracked", Some("?"))
+    ]
   );
 }
 
@@ -457,7 +483,12 @@ fn branching_switches_and_refuses_to_lose_changes() {
 
   create_branch(&root(&fixture), "feature", true, &locks()).unwrap();
   assert_eq!(
-    status_of(&root(&fixture)).unwrap().repo.head.branch.as_deref(),
+    status_of(&root(&fixture))
+      .unwrap()
+      .repo
+      .head
+      .branch
+      .as_deref(),
     Some("feature")
   );
   assert!(branches_of(&root(&fixture))
@@ -473,7 +504,12 @@ fn branching_switches_and_refuses_to_lose_changes() {
   discard(&root(&fixture), &[file], &locks()).unwrap();
   switch_branch(&root(&fixture), &base, &locks()).unwrap();
   assert_eq!(
-    status_of(&root(&fixture)).unwrap().repo.head.branch.as_deref(),
+    status_of(&root(&fixture))
+      .unwrap()
+      .repo
+      .head
+      .branch
+      .as_deref(),
     Some(base.as_str())
   );
 
@@ -493,8 +529,12 @@ fn branching_switches_and_refuses_to_lose_changes() {
 
   // A branch with work of its own is not deleted on the ordinary confirmation.
   create_branch(&root(&fixture), "unmerged", true, &locks()).unwrap();
-  let extra = write(&fixture, "u.txt", "unmerged work
-");
+  let extra = write(
+    &fixture,
+    "u.txt",
+    "unmerged work
+",
+  );
   stage(&root(&fixture), &[extra], &locks()).unwrap();
   commit(&root(&fixture), "unmerged work", None, &locks()).unwrap();
   switch_branch(&root(&fixture), &base, &locks()).unwrap();
@@ -526,8 +566,10 @@ fn a_canceled_fetch_reports_cancellation() {
   let repo_a = Repository::init(&a.dir).unwrap();
   set_identity(&repo_a);
   add_remote(&repo_a, "origin", &url);
-  write(&a, "a.txt", "one
-");
+  write(
+    &a, "a.txt", "one
+",
+  );
   commit_all(&repo_a, "base");
   push_now(&root(&a));
   let branch = repo_a.head().unwrap().shorthand().unwrap().to_string();
@@ -539,8 +581,10 @@ fn a_canceled_fetch_reports_cancellation() {
   let b = fixture("cancel-b");
   let repo_b = Repository::clone(&url, &b.dir).unwrap();
   set_identity(&repo_b);
-  write(&b, "a.txt", "two
-");
+  write(
+    &b, "a.txt", "two
+",
+  );
   commit_all(&repo_b, "second");
   push_now(&root(&b));
 
@@ -567,8 +611,10 @@ fn a_canceled_fetch_reports_cancellation() {
 fn a_remote_tracking_branch_checks_out_as_a_local_one() {
   let fixture = fixture("remote-checkout");
   let _repo = init(&fixture);
-  let file = write(&fixture, "a.txt", "one
-");
+  let file = write(
+    &fixture, "a.txt", "one
+",
+  );
   stage(&root(&fixture), &[file], &locks()).unwrap();
   commit(&root(&fixture), "first", None, &locks()).unwrap();
   let base = status_of(&root(&fixture))
@@ -588,10 +634,7 @@ fn a_remote_tracking_branch_checks_out_as_a_local_one() {
   switch_branch(&root(&fixture), "origin/feature", &locks()).unwrap();
   let status = status_of(&root(&fixture)).unwrap();
   assert_eq!(status.repo.head.branch.as_deref(), Some("feature"));
-  assert_eq!(
-    status.repo.head.upstream.as_deref(),
-    Some("origin/feature")
-  );
+  assert_eq!(status.repo.head.upstream.as_deref(), Some("origin/feature"));
 
   // The local branch now exists; asking again is a name clash, not a second checkout.
   assert_eq!(
@@ -601,7 +644,12 @@ fn a_remote_tracking_branch_checks_out_as_a_local_one() {
 
   switch_branch(&root(&fixture), &base, &locks()).unwrap();
   assert_eq!(
-    status_of(&root(&fixture)).unwrap().repo.head.branch.as_deref(),
+    status_of(&root(&fixture))
+      .unwrap()
+      .repo
+      .head
+      .branch
+      .as_deref(),
     Some(base.as_str())
   );
 }
@@ -613,10 +661,7 @@ fn paths_outside_the_work_tree_are_refused() {
   let workdir = fixture.dir.clone();
   let outside = fixture.dir.parent().unwrap().join("elsewhere.txt");
   let outside = outside.to_string_lossy().into_owned();
-  assert_eq!(
-    rel_of(&workdir, &outside).unwrap_err(),
-    "git_path_outside"
-  );
+  assert_eq!(rel_of(&workdir, &outside).unwrap_err(), "git_path_outside");
   assert_eq!(
     stage(&root(&fixture), &[outside], &locks()).unwrap_err(),
     "git_path_outside"
@@ -655,10 +700,7 @@ fn commit_all(repo: &Repository, message: &str) {
   drop(index);
   let tree = repo.find_tree(tree_id).unwrap();
   let signature = repo.signature().unwrap();
-  let head = repo
-    .head()
-    .ok()
-    .and_then(|head| head.peel_to_commit().ok());
+  let head = repo.head().ok().and_then(|head| head.peel_to_commit().ok());
   let parents: Vec<&git2::Commit<'_>> = head.iter().collect();
   repo
     .commit(
@@ -720,16 +762,15 @@ fn local_remote_fetch_fast_forward_merge_conflict_and_push() {
   let repo_a = Repository::init(&a.dir).unwrap();
   set_identity(&repo_a);
   add_remote(&repo_a, "origin", &url);
-  write(&a, "shared.txt", "base
-");
+  write(
+    &a,
+    "shared.txt",
+    "base
+",
+  );
   commit_all(&repo_a, "base");
   push_now(&root(&a));
-  let branch = repo_a
-    .head()
-    .unwrap()
-    .shorthand()
-    .unwrap()
-    .to_string();
+  let branch = repo_a.head().unwrap().shorthand().unwrap().to_string();
   Repository::open_bare(&remote.dir)
     .unwrap()
     .set_head(&format!("refs/heads/{branch}"))
@@ -738,8 +779,12 @@ fn local_remote_fetch_fast_forward_merge_conflict_and_push() {
   let b = fixture("work-b");
   let repo_b = Repository::clone(&url, &b.dir).unwrap();
   set_identity(&repo_b);
-  write(&b, "shared.txt", "theirs
-");
+  write(
+    &b,
+    "shared.txt",
+    "theirs
+",
+  );
   commit_all(&repo_b, "theirs");
   push_now(&root(&b));
 
@@ -762,11 +807,19 @@ fn local_remote_fetch_fast_forward_merge_conflict_and_push() {
   );
   assert!(phases.lock().unwrap().iter().any(|phase| phase == "done"));
 
-  write(&a, "shared.txt", "ours
-");
+  write(
+    &a,
+    "shared.txt",
+    "ours
+",
+  );
   commit_all(&repo_a, "ours");
-  write(&b, "shared.txt", "theirs again
-");
+  write(
+    &b,
+    "shared.txt",
+    "theirs again
+",
+  );
   commit_all(&repo_b, "theirs again");
   push_now(&root(&b));
 
@@ -792,15 +845,28 @@ fn local_remote_fetch_fast_forward_merge_conflict_and_push() {
   assert_eq!(sides.eol, "lf");
   assert!(!sides.binary);
   assert!(sides.merged.as_deref().unwrap().contains("<<<<<<<"));
-  assert_eq!(sides.ours.as_deref(), Some("ours
-"));
-  assert_eq!(sides.theirs.as_deref(), Some("theirs again
-"));
+  assert_eq!(
+    sides.ours.as_deref(),
+    Some(
+      "ours
+"
+    )
+  );
+  assert_eq!(
+    sides.theirs.as_deref(),
+    Some(
+      "theirs again
+"
+    )
+  );
 
   merge_abort(&root(&a), &GitLocks::default()).unwrap();
   assert_eq!(status_of(&root(&a)).unwrap().repo.state, "clean");
-  assert_eq!(fs::read_to_string(&abs).unwrap(), "ours
-");
+  assert_eq!(
+    fs::read_to_string(&abs).unwrap(),
+    "ours
+"
+  );
 
   let (sink, _) = quiet();
   let outcome = pull_core(
@@ -856,13 +922,21 @@ fn local_remote_fetch_fast_forward_merge_conflict_and_push() {
     sink,
   )
   .unwrap();
-  write(&b, "other.txt", "b side
-");
+  write(
+    &b,
+    "other.txt",
+    "b side
+",
+  );
   commit_all(&repo_b, "b side");
   push_now(&root(&b));
 
-  write(&a, "other.txt", "a side
-");
+  write(
+    &a,
+    "other.txt",
+    "a side
+",
+  );
   commit_all(&repo_a, "a side");
   let (sink, _) = quiet();
   let error = match push_core(
@@ -927,7 +1001,11 @@ fn a_parent_repository_comes_before_nested_ones() {
   repo_in(&workspace.join("inner"));
 
   let scan = scan_repos(&workspace.to_string_lossy(), 2).unwrap();
-  let sources: Vec<&str> = scan.repos.iter().map(|entry| entry.source.as_str()).collect();
+  let sources: Vec<&str> = scan
+    .repos
+    .iter()
+    .map(|entry| entry.source.as_str())
+    .collect();
   assert_eq!(sources, vec!["parent", "scan"]);
   assert!(scan.repos[0].relative.starts_with("../"));
   assert_eq!(scan.repos[1].relative, "inner");
@@ -942,8 +1020,12 @@ fn ignored_bare_and_git_file_folders_are_not_listed() {
   Repository::init_bare(workspace.dir.join("bare.git")).unwrap();
   let linked = workspace.dir.join("linked");
   fs::create_dir_all(linked.join("inside")).unwrap();
-  fs::write(linked.join(".git"), "gitdir: elsewhere
-").unwrap();
+  fs::write(
+    linked.join(".git"),
+    "gitdir: elsewhere
+",
+  )
+  .unwrap();
   repo_in(&linked.join("inside"));
 
   let scan = scan_repos(&workspace.dir.to_string_lossy(), 2).unwrap();
@@ -969,18 +1051,37 @@ fn a_found_repository_is_a_boundary() {
 fn the_summary_counts_the_same_changes_as_status() {
   let fixture = fixture("summary-counts");
   let _repo = init(&fixture);
-  let tracked = write(&fixture, "a.txt", "one
-");
+  let tracked = write(
+    &fixture, "a.txt", "one
+",
+  );
   stage(&root(&fixture), &[tracked.clone()], &locks()).unwrap();
   commit(&root(&fixture), "first", None, &locks()).unwrap();
-  write(&fixture, "a.txt", "two
-");
-  write(&fixture, "staged.txt", "staged
-");
-  stage(&root(&fixture), &[write(&fixture, "staged.txt", "staged
-")], &locks()).unwrap();
-  write(&fixture, "new.txt", "new
-");
+  write(
+    &fixture, "a.txt", "two
+",
+  );
+  write(
+    &fixture,
+    "staged.txt",
+    "staged
+",
+  );
+  stage(
+    &root(&fixture),
+    &[write(
+      &fixture,
+      "staged.txt",
+      "staged
+",
+    )],
+    &locks(),
+  )
+  .unwrap();
+  write(
+    &fixture, "new.txt", "new
+",
+  );
   // An ignored path is not a change. The panel carries it so the Explorer can grey it out; the
   // summary neither reports it nor asks libgit2 to resolve the ignore rules for it.
   write(&fixture, ".gitignore", "*.log\n");
@@ -1007,13 +1108,13 @@ fn the_summary_counts_the_same_changes_as_status() {
 }
 
 fn merge_branch(repo: &Repository, name: &str) {
-  let reference = repo
-    .find_reference(&format!("refs/heads/{name}"))
-    .unwrap();
+  let reference = repo.find_reference(&format!("refs/heads/{name}")).unwrap();
   let annotated = repo.reference_to_annotated_commit(&reference).unwrap();
   let mut checkout = CheckoutBuilder::new();
   checkout.conflict_style_merge(true);
-  repo.merge(&[&annotated], None, Some(&mut checkout)).unwrap();
+  repo
+    .merge(&[&annotated], None, Some(&mut checkout))
+    .unwrap();
 }
 
 fn commit_path(root: &str, path: &str, message: &str) {
@@ -1055,11 +1156,17 @@ fn a_merge_result_is_written_in_the_files_own_encoding_and_crlf() {
   let sides = conflict_sides_of(&root, &abs, "gbk", "lf").unwrap();
   assert!(!sides.binary);
   assert_eq!(sides.eol, "crlf");
-  assert_eq!(sides.encoding, encoding::resolve_for_write("gbk").unwrap().name());
+  assert_eq!(
+    sides.encoding,
+    encoding::resolve_for_write("gbk").unwrap().name()
+  );
   assert!(sides.merged.as_deref().unwrap().contains("<<<<<<<"));
 
   let saved = write_resolution(&root, &abs, "first\nours\nthird\n", "gbk", "lf", &locks()).unwrap();
-  assert_eq!(saved.encoding, encoding::resolve_for_write("gbk").unwrap().name());
+  assert_eq!(
+    saved.encoding,
+    encoding::resolve_for_write("gbk").unwrap().name()
+  );
   assert_eq!(
     fs::read(&abs).unwrap(),
     encoding::encode("first\r\nours\r\nthird\r\n", "gbk", false).unwrap()
@@ -1610,10 +1717,16 @@ fn remotes_can_be_added_edited_and_removed() {
 fn adding_a_path_to_gitignore_writes_one_anchored_line() {
   let fixture = fixture("repo-ignore");
   let _repo = init(&fixture);
-  let file = write(&fixture, "build.log", "noise
-");
-  let tracked = write(&fixture, "a.txt", "one
-");
+  let file = write(
+    &fixture,
+    "build.log",
+    "noise
+",
+  );
+  let tracked = write(
+    &fixture, "a.txt", "one
+",
+  );
   stage(&root(&fixture), &[tracked.clone()], &locks()).unwrap();
   let ignore_file = fixture.dir.join(".gitignore");
 
@@ -1627,18 +1740,19 @@ fn adding_a_path_to_gitignore_writes_one_anchored_line() {
   assert_eq!(again.matches("/build.log").count(), 1, "{again}");
 
   // A path in the index belongs to the repository, not to an ignore file.
-  assert_eq!(
-    repo_ignore(&tracked, &locks()).unwrap_err(),
-    "git_tracked"
-  );
+  assert_eq!(repo_ignore(&tracked, &locks()).unwrap_err(), "git_tracked");
 }
 
 #[test]
 fn a_clone_lands_in_the_named_folder_and_refuses_an_existing_one() {
   let origin = fixture("clone-origin");
   let _repo = init(&origin);
-  let file = write(&origin, "a.txt", "from the remote
-");
+  let file = write(
+    &origin,
+    "a.txt",
+    "from the remote
+",
+  );
   stage(&root(&origin), &[file], &locks()).unwrap();
   commit(&root(&origin), "first", None, &locks()).unwrap();
 
