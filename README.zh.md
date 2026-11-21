@@ -58,7 +58,7 @@ npm run upload        # 把该提交对应的版本发布出去
 
 ## 文档
 
-每个功能的行为、数据文件、构建与发布流程都写在 **https://wrolp.github.io/wrolp-editor-docs**。逐版本的变更见 [RELEASE_NOTES.zh.md](RELEASE_NOTES.zh.md)。
+每个功能的行为、数据文件、构建与发布流程都写在 **<https://wrolp.github.io/wrolp-editor-docs>**。逐版本的变更见 [RELEASE_NOTES.zh.md](RELEASE_NOTES.zh.md)。
 
 ## 许可证
 
