@@ -1042,10 +1042,33 @@ export const api = {
    * Copy the files on the system clipboard (what Explorer put there) into `target`.
    *
    * Each one lands by the same rules as `copyEntry`. A source that cannot be taken does not
-   * stop the rest; nothing landing at all is an error carrying the first reason.
+   * stop the rest; nothing landing at all is an error carrying the first reason. A clipboard
+   * holding a picture instead of a file list becomes one PNG in the folder.
    */
   pasteClipboardFiles: (target: string) =>
     invoke<ClipboardPaste>("paste_clipboard_files", { target }),
+  /**
+   * What a paste would take from the system clipboard: a file list, a picture, or nothing.
+   * The caller asks before opening the picture-name dialog; file lists keep the old path.
+   */
+  clipboardPasteKind: () => invoke<"files" | "image" | "empty">("clipboard_paste_kind"),
+  /**
+   * The stem a pasted picture's dialog should start with. The backend adds the timestamp and
+   * numbers it until `<stem>.png` is free.
+   */
+  pastedImageName: (dir: string) => invoke<string>("pasted_image_name", { dir }),
+  /**
+   * Save the picture on the system clipboard into `dir` as a PNG. `name` is the stem the
+   * dialog collected; without one the backend chooses a timestamped name.
+   */
+  pasteClipboardImage: (dir: string, name?: string) =>
+    invoke<FsEntry>("paste_clipboard_image", { dir, name: name ?? null }),
+  /**
+   * Save a picture the WebView already has — Ctrl+V's paste event — as a PNG in `dir`.
+   * `data` is the base64 body of the image; `name` is the dialog's stem.
+   */
+  savePastedImage: (dir: string, data: string, name?: string) =>
+    invoke<FsEntry>("save_pasted_image", { dir, data, name: name ?? null }),
   /**
    * Copy the paths Windows Explorer dropped on the window into `target`. The same naming and
    * refusal rules as a clipboard paste, with the same per-source report.

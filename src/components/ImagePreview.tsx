@@ -94,8 +94,8 @@ export default function ImagePreview({
 }: Props) {
   const [src, setSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
-  /** null means "fit the pane"; a number is a percentage of the image's own size. */
-  const [step, setStep] = useState<number | null>(null);
+  /** How the picture is scaled: both sides to the pane, width only, or a pinned percentage. */
+  const [zoom, setZoom] = useState<"fit" | "width" | number>("fit");
   const [dims, setDims] = useState({ width: 0, height: 0 });
   /** The room the picture is fitted into, watched rather than assumed. */
   const stageRef = useRef<HTMLDivElement>(null);
@@ -132,48 +132,59 @@ export default function ImagePreview({
         )
       : 0;
   const fitPercent = fitScale > 0 ? Math.round(fitScale * 100) : 0;
-  /** What the pane is showing, whether the reader pinned it or the fit chose it. */
-  const shownZoom = step ?? fitPercent;
-  /** The picture's width in pixels: its own pixels times the scale, fitted or pinned. */
-  const pictureWidth =
-    dims.width > 0 && (step !== null || fitScale > 0)
-      ? Math.round(dims.width * (step !== null ? step / 100 : fitScale))
+  /**
+   * Width-only fit: a tall picture fills the pane across and scrolls down. Capped at 100%
+   * as well, so a small picture is not blown up just because the window is wide.
+   */
+  const fitWidthScale =
+    stage.width > 0 && dims.width > 0
+      ? Math.min(1, (stage.width - STAGE_PAD * 2) / dims.width)
       : 0;
+  const fitWidthPercent = fitWidthScale > 0 ? Math.round(fitWidthScale * 100) : 0;
+  /** The percentage whichever fitting mode is in force follows. */
+  const fittingPercent = zoom === "width" ? fitWidthPercent : fitPercent;
+  /** What the pane is showing, whether the reader pinned it or a fitting mode chose it. */
+  const shownZoom = typeof zoom === "number" ? zoom : fittingPercent;
+  const scale = typeof zoom === "number" ? zoom / 100 : zoom === "width" ? fitWidthScale : fitScale;
+  /** The picture's width in pixels: its own pixels times the scale, fitted or pinned. */
+  const pictureWidth = dims.width > 0 && scale > 0 ? Math.round(dims.width * scale) : 0;
 
   const stepBy = (direction: 1 | -1) => {
-    // Stepping from "fit" starts where the pane already is, so a small first nudge from a photo
-    // fitted at 42% lands on 50 rather than jumping across it.
-    setStep((current) => stepFrom(STEPS, current ?? fitPercent, direction));
+    // Stepping from a fit mode starts where the pane already is, so a small first nudge from a
+    // photo fitted at 42% lands on 50 rather than jumping across it.
+    setZoom((current) =>
+      stepFrom(STEPS, typeof current === "number" ? current : fittingPercent, direction)
+    );
   };
 
   /**
-   * Reads the size box: an empty one means fit, a percentage outside the range is brought back
-   * into it, and anything that is not a number is a slip that only restores the box.
+   * Reads the size box: an empty one means fit the window, a percentage outside the range is
+   * brought back into it, and anything that is not a number is a slip that only restores the box.
    */
   const applyZoomDraft = (text: string) => {
     const typed = text.trim();
     if (typed === "") {
-      setStep(null);
+      setZoom("fit");
       setZoomDraft(zoomText(null, fitPercent));
       return;
     }
     const parsed = Number.parseInt(typed, 10);
     if (Number.isNaN(parsed)) {
-      setZoomDraft(zoomText(step, fitPercent));
+      setZoomDraft(zoomText(typeof zoom === "number" ? zoom : null, fittingPercent));
       return;
     }
     const next = Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, parsed));
-    // Typing the percentage that fitting already gives is fitting: the box keeps following the
-    // pane instead of pinning a size that would stop keeping up with a resize.
-    setStep(next === fitPercent ? null : next);
+    // Typing the percentage the window fit already gives is that fit: the box keeps following
+    // the pane instead of pinning a size that would stop keeping up with a resize.
+    setZoom(next === fitPercent ? "fit" : next);
     setZoomDraft(String(next));
   };
 
-  // The box follows the size whenever it is set from elsewhere — the buttons, the fit button,
-  // a resize — so it always names what is on screen rather than a stale draft.
+  // The box follows the size whenever it is set from elsewhere — the buttons, a fit mode, a
+  // resize — so it always names what is on screen rather than a stale draft.
   useEffect(() => {
-    setZoomDraft(zoomText(step, fitPercent));
-  }, [step, fitPercent]);
+    setZoomDraft(zoomText(typeof zoom === "number" ? zoom : null, fittingPercent));
+  }, [zoom, fittingPercent]);
 
   /**
    * The tools leave a few seconds after the pointer does, rather than the instant it does: a
@@ -226,7 +237,7 @@ export default function ImagePreview({
   useEffect(() => {
     let live = true;
     setFailed(false);
-    setStep(null);
+    setZoom("fit");
     setDims({ width: 0, height: 0 });
     setViaAsset(false);
     if (external) {
@@ -321,14 +332,22 @@ export default function ImagePreview({
           +
         </button>
         <button
-          className={`img-tool zoom-fit${step === null ? " on" : ""}`}
+          className={`img-tool zoom-fit${zoom === "fit" ? " on" : ""}`}
           title={t("img.fit")}
-          aria-pressed={step === null}
-          onClick={() => setStep(null)}
+          aria-pressed={zoom === "fit"}
+          onClick={() => setZoom("fit")}
         >
           {t("img.fit")}
         </button>
-        <button className="img-tool" title={t("img.actual")} onClick={() => setStep(100)}>
+        <button
+          className={`img-tool zoom-fit${zoom === "width" ? " on" : ""}`}
+          title={t("img.fitWidth")}
+          aria-pressed={zoom === "width"}
+          onClick={() => setZoom("width")}
+        >
+          {t("img.fitWidth")}
+        </button>
+        <button className="img-tool" title={t("img.actual")} onClick={() => setZoom(100)}>
           {t("img.actual")}
         </button>
         {dims.width > 0 && (

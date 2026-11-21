@@ -15,6 +15,7 @@ use crate::draft;
 use crate::group::{GroupStore, GroupTab};
 use crate::rename::{check_name, rekey_state, under, NameError, Renamed};
 use serde::Serialize;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use tauri::AppHandle;
 
@@ -420,15 +421,422 @@ pub fn move_entry(app: AppHandle, source: String, target: String) -> Result<Rena
 
 /// The files Windows Explorer put on the clipboard, in the order it listed them.
 ///
-/// A clipboard holding text or a picture answers `ContentNotAvailable`, which is the same
-/// outcome as far as a paste is concerned: there is nothing here to copy.
-fn clipboard_files() -> Result<Vec<PathBuf>, String> {
+/// `None` means the clipboard holds no file list at all — text or a picture. A paste falls
+/// back to the picture in that case, so the distinction is what lets a screenshot arrive
+/// through the same gesture as a copied file.
+fn clipboard_files() -> Result<Option<Vec<PathBuf>>, String> {
   let mut clipboard = arboard::Clipboard::new().map_err(|e| format!("clipboard_read:{e}"))?;
-  clipboard.get().file_list().map_err(|e| match e {
-    arboard::Error::ContentNotAvailable => "clipboard_empty".into(),
-    arboard::Error::ClipboardOccupied => "clipboard_busy".into(),
+  match clipboard.get().file_list() {
+    Ok(files) => Ok(Some(files)),
+    Err(arboard::Error::ContentNotAvailable) => Ok(None),
+    Err(arboard::Error::ClipboardOccupied) => Err("clipboard_busy".into()),
+    Err(other) => Err(format!("clipboard_read:{other}")),
+  }
+}
+
+/// The largest clipboard picture a paste will turn into a file. A 4K screenshot is about
+/// 8 MP, so this leaves room for a wide multi-monitor grab while the RGBA buffer and the
+/// encoder stay bounded.
+const MAX_CLIPBOARD_IMAGE_PIXELS: usize = 40_000_000;
+/// A PNG past this size is refused rather than written. Screenshots compress well; a file
+/// this large is not the one the gesture promised.
+const MAX_CLIPBOARD_IMAGE_BYTES: usize = 64 * 1024 * 1024;
+
+/// Check a clipboard picture's shape before anything is allocated or encoded for it.
+fn clipboard_image_shape(width: usize, height: usize, len: usize) -> Result<(), String> {
+  let pixels = width
+    .checked_mul(height)
+    .ok_or_else(|| "clipboard_image_too_large".to_string())?;
+  if pixels == 0 || len != pixels.saturating_mul(4) {
+    return Err("clipboard_image_invalid".into());
+  }
+  if pixels > MAX_CLIPBOARD_IMAGE_PIXELS {
+    return Err("clipboard_image_too_large".into());
+  }
+  Ok(())
+}
+
+/// The PNG signature and the IHDR size of a byte payload, when it is a PNG at all.
+///
+/// Reading the header rather than decoding lets a screenshot that is already PNG be written
+/// unchanged: re-encoding a full screen in a debug build is slow for no gain, and the bytes
+/// are exactly what the clipboard owner produced.
+fn png_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
+  const SIGNATURE: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a];
+  if bytes.len() < 24 || bytes[..8] != SIGNATURE || &bytes[12..16] != b"IHDR" {
+    return None;
+  }
+  let width = u32::from_be_bytes(bytes[16..20].try_into().ok()?);
+  let height = u32::from_be_bytes(bytes[20..24].try_into().ok()?);
+  Some((width, height))
+}
+
+/// Whether a picture of this shape is one a paste will write.
+fn acceptable_image(width: u32, height: u32) -> bool {
+  let pixels = (width as usize).saturating_mul(height as usize);
+  pixels > 0 && pixels <= MAX_CLIPBOARD_IMAGE_PIXELS
+}
+
+/// Decode a picture from bytes under the same allocation ceiling as the clipboard paths.
+fn decode_image_bytes(bytes: &[u8]) -> Result<image::DynamicImage, String> {
+  if bytes.len() > MAX_CLIPBOARD_IMAGE_BYTES {
+    return Err("clipboard_image_too_large".into());
+  }
+  let mut limits = image::Limits::default();
+  limits.max_image_width = Some(20_000);
+  limits.max_image_height = Some(20_000);
+  // Room for RGBA plus the decoder's own buffers at the pixel ceiling; the exact pixel
+  // check runs after decoding, so this is the coarser of the two guards.
+  limits.max_alloc = Some(256 * 1024 * 1024);
+  let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
+    .with_guessed_format()
+    .map_err(|_| "clipboard_image_invalid".to_string())?;
+  reader.limits(limits);
+  let image = reader
+    .decode()
+    .map_err(|_| "clipboard_image_invalid".to_string())?;
+  if !acceptable_image(image.width(), image.height()) {
+    return Err("clipboard_image_too_large".into());
+  }
+  Ok(image)
+}
+
+/// A PNG published under a format name rather than a file, as some capture tools do.
+///
+/// WeChat's screenshot tool, for one, registers `image/png` and a DeviceIndependentBitmap;
+/// arboard looks for the standard `PNG` registration and CF_DIBV5, so on that clipboard it
+/// fails with a conversion error. Reading the MIME-spelled format first is what makes the
+/// menu's Paste and the Explorer's paste work for the screenshots people actually take.
+/// The standard name is tried too, so a program using either spelling is covered.
+#[cfg(windows)]
+fn clipboard_png_bytes() -> Option<Vec<u8>> {
+  let guard = clipboard_win::Clipboard::new_attempts(5).ok()?;
+  for name in ["PNG", "image/png"] {
+    let Some(format) = clipboard_win::raw::register_format(name) else {
+      continue;
+    };
+    if !clipboard_win::raw::is_format_avail(format.get()) {
+      continue;
+    }
+    let mut bytes = Vec::new();
+    if clipboard_win::raw::get_vec(format.get(), &mut bytes).is_ok() && !bytes.is_empty() {
+      drop(guard);
+      return Some(bytes);
+    }
+  }
+  drop(guard);
+  None
+}
+
+#[cfg(not(windows))]
+fn clipboard_png_bytes() -> Option<Vec<u8>> {
+  None
+}
+
+/// The picture on the clipboard, as RGBA, with the checks a paste needs.
+fn clipboard_image() -> Result<(u32, u32, Vec<u8>), String> {
+  let mut clipboard = arboard::Clipboard::new().map_err(|e| format!("clipboard_read:{e}"))?;
+  let arboard::ImageData {
+    width,
+    height,
+    bytes,
+  } = clipboard.get_image().map_err(|e| match e {
+    arboard::Error::ContentNotAvailable => "clipboard_empty".to_string(),
+    arboard::Error::ClipboardOccupied => "clipboard_busy".to_string(),
     other => format!("clipboard_read:{other}"),
+  })?;
+  let bytes = bytes.into_owned();
+  clipboard_image_shape(width, height, bytes.len())?;
+  Ok((width as u32, height as u32, bytes))
+}
+
+/// Encode an image as PNG. PNG rather than BMP or JPEG: a screenshot is text on flat colour,
+/// and lossless compression keeps the edges the reader is about to read.
+fn png_of_image(image: image::DynamicImage) -> Result<Vec<u8>, String> {
+  let mut png = Vec::new();
+  image
+    .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+    .map_err(|e| format!("clipboard_image_write:{e}"))?;
+  if png.len() > MAX_CLIPBOARD_IMAGE_BYTES {
+    return Err("clipboard_image_too_large".into());
+  }
+  Ok(png)
+}
+
+/// A clipboard picture in the RGBA shape arboard hands over, encoded as PNG.
+fn clipboard_png(width: u32, height: u32, rgba: Vec<u8>) -> Result<Vec<u8>, String> {
+  let image = image::RgbaImage::from_raw(width, height, rgba)
+    .ok_or_else(|| "clipboard_image_invalid".to_string())?;
+  png_of_image(image::DynamicImage::ImageRgba8(image))
+}
+
+/// Where a clipboard picture can land: an existing folder, not the system or profile tree.
+fn paste_dir(dir: &str) -> Result<PathBuf, String> {
+  let dir = draft::io_path(dir);
+  if dir.is_empty() {
+    return Err("path_empty".into());
+  }
+  let dir = PathBuf::from(dir);
+  if !dir.is_dir() {
+    return Err("copy_no_target".into());
+  }
+  if refused_by_scope(&dir, &protected_roots()) {
+    return Err("copy_refused".into());
+  }
+  Ok(dir)
+}
+
+/// The moment a paste happened, in a spelling a file name can carry.
+fn pasted_stamp() -> String {
+  chrono::Local::now().format("%Y%m%d-%H%M%S").to_string()
+}
+
+/// The stem a paste offers as its default: `image-<moment>`, numbered if that name is taken.
+/// The dialog shows this, and the save repeats the check under `create_new`, so a race
+/// between the two still cannot overwrite anything.
+fn free_image_stem(dir: &Path) -> String {
+  let base = format!("image-{}", pasted_stamp());
+  for n in 1..1000 {
+    let stem = if n == 1 {
+      base.clone()
+    } else {
+      format!("{base}-{n}")
+    };
+    if !dir.join(format!("{stem}.png")).exists() {
+      return stem;
+    }
+  }
+  base
+}
+
+/// A user-chosen stem through the same segment rules as a renamed file. A typed `.png` is
+/// folded into the suffix the dialog already shows rather than becoming `.png.png`; a name
+/// that is only the suffix lands on the empty-name error.
+fn explicit_image_stem(raw: &str) -> Result<String, String> {
+  let cleaned = check_name(raw).map_err(name_error)?;
+  let stem = if cleaned.to_ascii_lowercase().ends_with(".png") {
+    cleaned[..cleaned.len() - 4].to_string()
+  } else {
+    cleaned
+  };
+  if stem.is_empty() {
+    return Err("create_name_empty".into());
+  }
+  Ok(stem)
+}
+
+/// Create one named PNG and write it. A name already on disk answers `create_exists` rather
+/// than being overwritten; the sidecar of this is the "never destroy somebody's file" rule
+/// every paste in the app follows.
+fn write_new_png(dir: &Path, name: &str, png: &[u8]) -> Result<PathBuf, String> {
+  let path = dir.join(name);
+  match std::fs::OpenOptions::new()
+    .write(true)
+    .create_new(true)
+    .open(&path)
+  {
+    Ok(mut file) => {
+      if let Err(e) = file.write_all(png) {
+        drop(file);
+        let _ = std::fs::remove_file(&path);
+        return Err(format!("clipboard_image_write:{e}"));
+      }
+      Ok(path)
+    }
+    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err("create_exists".into()),
+    Err(e) => Err(format!("clipboard_image_write:{e}")),
+  }
+}
+
+/// Write the PNG under the chosen stem, with the extension the dialog shows. The name is
+/// exactly what was asked for: a taken one is reported, not silently numbered, because the
+/// reader is in the dialog to choose it.
+fn write_explicit_png(dir: &Path, stem: &str, png: &[u8]) -> Result<(PathBuf, String), String> {
+  let name = format!("{stem}.png");
+  let path = write_new_png(dir, &name, png)?;
+  Ok((path, name))
+}
+
+/// Write the PNG under a name no file in the folder has, refusing to overwrite.
+///
+/// This is the path with no dialog in front of it: the timestamp stem is numbered with
+/// `-2`, `-3` rather than a suffix with a space, because the name is also what a Markdown
+/// link carries.
+fn write_pasted_png(dir: &Path, stem: &str, png: &[u8]) -> Result<(PathBuf, String), String> {
+  for n in 1..1000 {
+    let name = if n == 1 {
+      format!("{stem}.png")
+    } else {
+      format!("{stem}-{n}.png")
+    };
+    match write_new_png(dir, &name, png) {
+      Ok(path) => return Ok((path, name)),
+      Err(e) if e == "create_exists" => continue,
+      Err(e) => return Err(e),
+    }
+  }
+  Err("clipboard_image_write:name_full".into())
+}
+
+/// The entry a just-written PNG lands on, as the tree lists it. A stem is the name the
+/// dialog collected; without one the timestamp and the numbered fallback choose it.
+fn entry_of_png(dir: &Path, png: &[u8], stem: Option<&str>) -> Result<FsEntry, String> {
+  let (path, name) = match stem {
+    Some(raw) => write_explicit_png(dir, &explicit_image_stem(raw)?, png)?,
+    None => {
+      let base = format!("image-{}", pasted_stamp());
+      write_pasted_png(dir, &base, png)?
+    }
+  };
+  let (mtime, bytes) = commands::stat_pair(&path, false);
+  let path = draft::normalize_path(&path.to_string_lossy());
+  Ok(FsEntry {
+    name,
+    path,
+    is_dir: false,
+    mtime,
+    bytes,
   })
+}
+
+/// Save the clipboard's picture into `dir` and return the entry, as the tree lists it.
+///
+/// `name` is the stem the paste dialog collected; without one the timestamp and the
+/// numbered fallback choose it.
+pub fn paste_clipboard_image(dir: String, name: Option<String>) -> Result<FsEntry, String> {
+  let dir = paste_dir(&dir)?;
+  let stem = name.as_deref();
+  // A capture tool that publishes a PNG is the cheap and faithful route: the bytes are
+  // written unchanged, and no RGBA buffer has to exist at all.
+  if let Some(bytes) = clipboard_png_bytes() {
+    if let Some((width, height)) = png_dimensions(&bytes) {
+      if acceptable_image(width, height) && bytes.len() <= MAX_CLIPBOARD_IMAGE_BYTES {
+        return entry_of_png(&dir, &bytes, stem);
+      }
+    }
+    let image = decode_image_bytes(&bytes)?;
+    return entry_of_png(&dir, &png_of_image(image)?, stem);
+  }
+  let (width, height, rgba) = clipboard_image()?;
+  let png = clipboard_png(width, height, rgba)?;
+  entry_of_png(&dir, &png, stem)
+}
+
+/// Save a picture the WebView handed over with the paste event.
+///
+/// Ctrl+V carries the picture's bytes itself, so this path does not read the system clipboard
+/// a second time: the bytes that were pasted are the bytes that land. Decoding is bounded by
+/// the same pixel ceiling as the clipboard path, and the file is re-encoded as PNG so one
+/// extension stands for the one format a Markdown link names.
+pub fn save_pasted_image(
+  dir: String,
+  data: String,
+  name: Option<String>,
+) -> Result<FsEntry, String> {
+  let dir = paste_dir(&dir)?;
+  let stem = name.as_deref();
+  use base64::Engine as _;
+  let bytes = base64::engine::general_purpose::STANDARD
+    .decode(data.trim())
+    .map_err(|_| "clipboard_image_invalid".to_string())?;
+  if bytes.is_empty() {
+    return Err("clipboard_image_invalid".into());
+  }
+  if bytes.len() > MAX_CLIPBOARD_IMAGE_BYTES {
+    return Err("clipboard_image_too_large".into());
+  }
+  // The common screenshot is already a PNG; write those bytes unchanged.
+  if let Some((width, height)) = png_dimensions(&bytes) {
+    if acceptable_image(width, height) {
+      return entry_of_png(&dir, &bytes, stem);
+    }
+  }
+  let image = decode_image_bytes(&bytes)?;
+  let png = png_of_image(image)?;
+  entry_of_png(&dir, &png, stem)
+}
+
+/// Paste a clipboard picture into a folder.
+///
+/// Separate from the file paste so the editor can ask for a picture without first reading
+/// a file list; the Explorer goes through both, files first. `name` is the stem the dialog
+/// collected; without one the timestamp and the numbered fallback choose it.
+#[tauri::command(async, rename = "paste_clipboard_image")]
+pub fn paste_clipboard_image_command(
+  app: AppHandle,
+  dir: String,
+  name: Option<String>,
+) -> Result<FsEntry, String> {
+  crate::archive::refuse_if_cached(&app, &dir)?;
+  paste_clipboard_image(dir, name)
+}
+
+/// Save bytes the WebView already has, for the Ctrl+V path that does not need the system
+/// clipboard at all.
+#[tauri::command(async, rename = "save_pasted_image")]
+pub fn save_pasted_image_command(
+  app: AppHandle,
+  dir: String,
+  data: String,
+  name: Option<String>,
+) -> Result<FsEntry, String> {
+  crate::archive::refuse_if_cached(&app, &dir)?;
+  save_pasted_image(dir, data, name)
+}
+
+/// The stem the paste dialog should start with, numbered so the first save cannot collide.
+#[tauri::command(async, rename = "pasted_image_name")]
+pub fn pasted_image_name_command(app: AppHandle, dir: String) -> Result<String, String> {
+  crate::archive::refuse_if_cached(&app, &dir)?;
+  let dir = paste_dir(&dir)?;
+  Ok(free_image_stem(&dir))
+}
+
+/// What the clipboard offers a paste: a file list, a picture, or nothing.
+///
+/// Only the formats are inspected here; the picture itself is read after the reader has
+/// confirmed the name, which is what keeps a large screenshot from being decoded first.
+#[tauri::command(async)]
+pub fn clipboard_paste_kind() -> Result<String, String> {
+  if let Some(files) = clipboard_files()? {
+    if !files.is_empty() {
+      return Ok("files".into());
+    }
+  }
+  Ok(
+    if clipboard_has_image() {
+      "image"
+    } else {
+      "empty"
+    }
+    .into(),
+  )
+}
+
+/// Whether the clipboard advertises a picture this build can read.
+///
+/// Format availability rather than decoding: this only decides whether the name dialog is
+/// worth opening, and a capture tool's picture can be several megabytes.
+#[cfg(windows)]
+fn clipboard_has_image() -> bool {
+  let Ok(_guard) = clipboard_win::Clipboard::new_attempts(5) else {
+    return false;
+  };
+  for name in ["PNG", "image/png"] {
+    if let Some(format) = clipboard_win::raw::register_format(name) {
+      if clipboard_win::raw::is_format_avail(format.get()) {
+        return true;
+      }
+    }
+  }
+  clipboard_win::raw::is_format_avail(clipboard_win::formats::CF_DIBV5)
+}
+
+#[cfg(not(windows))]
+fn clipboard_has_image() -> bool {
+  arboard::Clipboard::new()
+    .and_then(|mut clipboard| clipboard.get_image().map(|_| ()))
+    .is_ok()
 }
 
 /// What a clipboard paste did: the copies it made, and how many sources it could not take.
@@ -486,12 +894,20 @@ pub fn paste_clipboard_files_command(
 }
 
 /// The paste itself, once the destination has been cleared to receive it.
+///
+/// A file list wins; a clipboard with no list but a picture becomes a PNG in the folder.
+/// With neither, the clipboard is empty as far as a paste is concerned.
 pub fn paste_clipboard_files(target: String) -> Result<ClipboardPaste, String> {
-  let sources = clipboard_files()?;
-  if sources.is_empty() {
-    return Err("clipboard_empty".into());
+  if let Some(sources) = clipboard_files()? {
+    if !sources.is_empty() {
+      return copy_sources(sources, target);
+    }
   }
-  copy_sources(sources, target)
+  let entry = paste_clipboard_image(target, None)?;
+  Ok(ClipboardPaste {
+    copied: vec![entry],
+    failed: 0,
+  })
 }
 
 /// Copy the paths Windows Explorer dropped on the window into `target`.
@@ -923,6 +1339,161 @@ mod tests {
     // And so does a copy of something that is not there at all.
     assert!(copy_entry(format!("{dir}\\missing.txt"), dir.clone()).is_err());
     let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn a_clipboard_picture_is_shaped_before_it_is_used() {
+    assert_eq!(clipboard_image_shape(2, 2, 16), Ok(()));
+    assert_eq!(
+      clipboard_image_shape(2, 2, 15),
+      Err("clipboard_image_invalid".to_string())
+    );
+    assert_eq!(
+      clipboard_image_shape(0, 2, 0),
+      Err("clipboard_image_invalid".to_string())
+    );
+    assert_eq!(
+      clipboard_image_shape(10_000, 10_000, 400_000_000),
+      Err("clipboard_image_too_large".to_string())
+    );
+  }
+
+  #[test]
+  fn a_pasted_picture_lands_as_a_png_and_never_overwrites() {
+    let dir = scratch("picture");
+    let png = clipboard_png(
+      2,
+      2,
+      vec![
+        255, 0, 0, 255, 0, 255, 0, 255, 0, 0, 255, 255, 255, 255, 255, 255,
+      ],
+    )
+    .expect("encoded");
+    let (first, name) =
+      write_pasted_png(Path::new(&dir), "image-20261121-103045", &png).expect("first");
+    assert_eq!(name, "image-20261121-103045.png");
+    let decoded = image::open(&first).expect("decodes");
+    assert_eq!((decoded.width(), decoded.height()), (2, 2));
+
+    let (second, name) =
+      write_pasted_png(Path::new(&dir), "image-20261121-103045", &png).expect("second");
+    assert_eq!(name, "image-20261121-103045-2.png");
+    assert_ne!(first, second);
+    // The file already there is untouched: a paste never lands on a name somebody has.
+    assert_eq!(std::fs::read(&first).expect("read"), png);
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn a_picture_needs_a_folder_it_may_write_to() {
+    let dir = scratch("picture-target");
+    create_file(dir.clone(), "notes.txt".into()).expect("file");
+    assert_eq!(
+      paste_dir(&format!("{dir}\\notes.txt")).err(),
+      Some("copy_no_target".into())
+    );
+    assert_eq!(
+      paste_dir(&format!("{dir}\\missing")).err(),
+      Some("copy_no_target".into())
+    );
+    assert!(paste_dir(&dir).is_ok());
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn a_paste_event_picture_is_saved_without_the_clipboard() {
+    use base64::Engine as _;
+    let dir = scratch("pasted-bytes");
+    let png = clipboard_png(1, 1, vec![0, 0, 0, 255]).expect("encoded");
+    let data = base64::engine::general_purpose::STANDARD.encode(&png);
+    let made = save_pasted_image(dir.clone(), data, None).expect("saved");
+    assert!(made.name.starts_with("image-"));
+    assert!(made.name.ends_with(".png"));
+    assert_eq!(
+      std::fs::read(&made.path).expect("read"),
+      png,
+      "an already-PNG paste is written unchanged rather than re-encoded"
+    );
+    let decoded = image::open(&made.path).expect("decodes");
+    assert_eq!((decoded.width(), decoded.height()), (1, 1));
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn a_png_header_is_recognised_without_decoding() {
+    let png = clipboard_png(3, 2, vec![0; 3 * 2 * 4]).expect("encoded");
+    assert_eq!(png_dimensions(&png), Some((3, 2)));
+    assert_eq!(png_dimensions(b"not a png"), None);
+    assert_eq!(png_dimensions(&[0x89, b'P', b'N', b'G']), None);
+    assert!(!acceptable_image(0, 2));
+    assert!(acceptable_image(2377, 16761));
+    assert!(!acceptable_image(10_000, 10_000));
+  }
+
+  #[test]
+  fn a_paste_event_that_is_not_a_picture_is_refused() {
+    use base64::Engine as _;
+    let dir = scratch("pasted-bad");
+    assert_eq!(
+      save_pasted_image(dir.clone(), "not base64".into(), None).err(),
+      Some("clipboard_image_invalid".into())
+    );
+    let text = base64::engine::general_purpose::STANDARD.encode(b"hello");
+    assert_eq!(
+      save_pasted_image(dir.clone(), text, None).err(),
+      Some("clipboard_image_invalid".into())
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn a_named_paste_uses_the_name_and_refuses_a_taken_one() {
+    use base64::Engine as _;
+    let dir = scratch("named-picture");
+    let png = clipboard_png(1, 1, vec![0, 0, 0, 255]).expect("encoded");
+    let data = || base64::engine::general_purpose::STANDARD.encode(&png);
+
+    let first = save_pasted_image(dir.clone(), data(), Some("my shot".into())).expect("first");
+    assert_eq!(first.name, "my shot.png");
+    // A taken name is the reader's to fix in the dialog, not the backend's to number.
+    assert_eq!(
+      save_pasted_image(dir.clone(), data(), Some("my shot".into())).err(),
+      Some("create_exists".into())
+    );
+    // A typed extension is folded into the one the dialog shows.
+    let typed = save_pasted_image(dir.clone(), data(), Some("foto.PNG".into())).expect("typed");
+    assert_eq!(typed.name, "foto.png");
+    let _ = std::fs::remove_dir_all(&dir);
+  }
+
+  #[test]
+  fn a_paste_name_follows_the_same_rules_as_a_renamed_file() {
+    assert_eq!(explicit_image_stem(" my shot "), Ok("my shot".into()));
+    assert_eq!(explicit_image_stem("shot.png"), Ok("shot".into()));
+    assert_eq!(explicit_image_stem("shot.PNG"), Ok("shot".into()));
+    assert_eq!(explicit_image_stem(""), Err("create_name_empty".into()));
+    assert_eq!(explicit_image_stem(".png"), Err("create_name_empty".into()));
+    assert_eq!(
+      explicit_image_stem("a/b"),
+      Err("create_name_invalid".into())
+    );
+    assert_eq!(
+      explicit_image_stem("CON"),
+      Err("create_name_invalid".into())
+    );
+  }
+
+  #[test]
+  fn the_default_paste_name_is_free() {
+    let dir = scratch("default-name");
+    let dir = Path::new(&dir);
+    let stem = free_image_stem(dir);
+    assert!(stem.starts_with("image-"));
+    std::fs::write(dir.join(format!("{stem}.png")), b"x").expect("occupy the name");
+    let next = free_image_stem(dir);
+    assert_ne!(stem, next);
+    assert!(!dir.join(format!("{next}.png")).exists());
+    let _ = std::fs::remove_dir_all(dir);
   }
 
   /// A deleted folder takes its whole subtree with it, while a sibling sharing its prefix

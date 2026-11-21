@@ -1,13 +1,23 @@
 import MonacoEditor from "@monaco-editor/react";
 import type { Monaco } from "@monaco-editor/loader";
-import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ClipboardEvent as ReactClipboardEvent,
+  type MouseEvent as ReactMouseEvent,
+} from "react";
 import type { editor } from "monaco-editor";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 import monaco from "../lib/monaco";
 import { t } from "../lib/i18n";
+import { api, errorMessage } from "../lib/tauri";
 import { useMenuPlacement } from "../hooks/useMenuPlacement";
 import { dirtyRanges } from "../lib/dirtyDiff";
-import { isUntitled, modelUri } from "../lib/path";
+import { dirOf } from "../lib/markdownAsset";
+import { isMarkdown, isUntitled, modelUri } from "../lib/path";
+import { setImagePasteHandler } from "../lib/editorMenu";
 import { isFileTab, type CursorPos, type EditStats, type EditorHandle, type Tab } from "../lib/types";
 
 interface Props {
@@ -33,6 +43,14 @@ interface Props {
   onReady: (handle: EditorHandle | null) => void;
   /** Highlight this tab as another language; null goes back to detecting it. */
   onLanguage: (language: string | null) => void;
+  /** Something the editor could not do, said where every other failure is said. */
+  onError: (message: string) => void;
+  /** Ask for a name and write a pasted picture; resolves when the dialog is finished. */
+  onRequestImageSave: (
+    dir: string,
+    defaultName: string,
+    save: (name: string) => Promise<void>
+  ) => Promise<boolean>;
 }
 
 /**
@@ -56,6 +74,36 @@ function languageName(id: string): string {
   return languages().find(([candidate]) => candidate === id)?.[1] ?? id;
 }
 
+/**
+ * The base64 body of a pasted File.
+ *
+ * A paste event hands the picture over as a File, and the backend that writes it wants the
+ * bytes rather than a second read of the system clipboard: what was pasted is what lands.
+ * `readAsDataURL` rather than `btoa` over the array, which would exceed the argument limit
+ * on a full-screen screenshot.
+ */
+function fileBase64(file: File): Promise<string | null> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result !== "string") {
+        resolve(null);
+        return;
+      }
+      const comma = result.indexOf(",");
+      resolve(comma >= 0 ? result.slice(comma + 1) : null);
+    };
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  });
+}
+
+/** The URL-safe spelling of a file name inside a Markdown image destination. */
+function markdownImageRef(name: string): string {
+  return encodeURIComponent(name).replace(/\(/g, "%28").replace(/\)/g, "%29");
+}
+
 export default function Editor({
   tab,
   fontSize,
@@ -74,6 +122,8 @@ export default function Editor({
   onScrollRatio,
   onReady,
   onLanguage,
+  onError,
+  onRequestImageSave,
 }: Props) {
   const cursorRef = useRef(onCursor);
   cursorRef.current = onCursor;
@@ -83,6 +133,8 @@ export default function Editor({
   scrollRef.current = onScrollRatio;
   const readyRef = useRef(onReady);
   readyRef.current = onReady;
+  const errorRef = useRef(onError);
+  errorRef.current = onError;
   const instanceRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   /** The app's own right-click menu; Monaco's is turned off in the options below. */
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
@@ -335,6 +387,129 @@ export default function Editor({
     instance.trigger("editorMenu", "editor.action.selectAll", null);
   };
 
+  /**
+   * Turn a clipboard picture into a named file beside the Markdown document, and a link
+   * where the caret is.
+   *
+   * The name dialog runs before anything is written: the default is a free timestamped
+   * stem, and whatever the reader types is the name the file actually gets — a taken one is
+   * reported in the dialog rather than silently numbered. The picture is saved before the
+   * buffer is touched: a link to a file that was never written would be a broken reference
+   * the reader discovers on the next open. If the tab moves while the file is being
+   * written, the link is not inserted — the model is gone and whatever is attached now is a
+   * document the reader never pointed at.
+   *
+   * `imageData` is the paste event's own bytes. Without it — the menu's Paste, or a
+   * FileReader that could not deliver — the backend reads the system clipboard instead.
+   */
+  const pasteImage = useCallback(
+    async (instance: editor.ICodeEditor, imageData: string | null): Promise<boolean> => {
+      const current = tabRef.current;
+      // The menu path has only text to go on, so ask the clipboard before opening a dialog.
+      const clipboardIsPicture =
+        imageData !== null ||
+        (await api.clipboardPasteKind().catch(() => "empty" as const)) === "image";
+      if (!clipboardIsPicture) return false;
+      if (!isFileTab(current) || isUntitled(current.path)) {
+        errorRef.current(t("editor.imagePasteSaveFirst"));
+        return true;
+      }
+      if (!isMarkdown(current.path)) {
+        errorRef.current(t("editor.imagePasteMarkdown"));
+        return true;
+      }
+      if (current.locked) {
+        errorRef.current(t("editor.imagePasteLocked"));
+        return true;
+      }
+      if (current.archiveSource) {
+        errorRef.current(t("err.archive_read_only"));
+        return true;
+      }
+      const model = instance.getModel();
+      const selections = instance.getSelections();
+      if (!model || !selections || selections.length === 0) return false;
+      const dir = dirOf(current.path);
+      let defaultName: string;
+      try {
+        defaultName = await api.pastedImageName(dir);
+      } catch (e) {
+        errorRef.current(errorMessage(e));
+        return true;
+      }
+      await onRequestImageSave(dir, defaultName, async (name) => {
+        const entry = imageData
+          ? await api.savePastedImage(dir, imageData, name)
+          : await api.pasteClipboardImage(dir, name);
+        if (instanceRef.current !== instance || instance.getModel() !== model) return;
+        instance.executeEdits(
+          "paste-image",
+          selections.map((selection) => ({
+            range: selection,
+            text: `![](${markdownImageRef(entry.name)})`,
+            forceMoveMarkers: true,
+          }))
+        );
+        instance.focus();
+        // The picture is next to the document, so a gallery or Explorer already looking at
+        // that folder is now one entry behind.
+        window.dispatchEvent(new CustomEvent("wrolp:folder-changed", { detail: dir }));
+      });
+      return true;
+    },
+    [onRequestImageSave]
+  );
+
+  // The menu's Paste command lives in `lib/editorMenu.ts`, outside this component's state.
+  // It asks this handler only when the clipboard carried no text.
+  useEffect(() => {
+    setImagePasteHandler(async (target) =>
+      target === instanceRef.current ? pasteImage(target, null) : false
+    );
+    return () => setImagePasteHandler(null);
+  }, [pasteImage]);
+
+  /**
+   * A screenshot arrives through the same Ctrl+V as text. The paste event carries the
+   * clipboard's items before Monaco turns them into text, so a picture with no text beside it
+   * is taken here; a clipboard carrying both is left to the ordinary text paste.
+   */
+  const onPasteCapture = (event: ReactClipboardEvent<HTMLDivElement>) => {
+    const data = event.clipboardData;
+    if (!data) return;
+    let file: File | null = null;
+    let text = false;
+    for (const item of Array.from(data.items)) {
+      if (item.kind === "file" && item.type.startsWith("image/")) {
+        file ??= item.getAsFile();
+      } else if (item.kind === "string") {
+        text = true;
+      }
+    }
+    // Some WebViews list the picture only through `files`, not through `items`.
+    if (!file) {
+      file =
+        Array.from(data.files).find((candidate) => candidate.type.startsWith("image/")) ?? null;
+    }
+    // A rich clipboard (HTML and an image together) keeps the text paste it would otherwise
+    // have; only a picture on its own is taken here.
+    const hasText =
+      text ||
+      data.getData("text/plain") !== "" ||
+      data.getData("text/html") !== "" ||
+      data.getData("text/uri-list") !== "";
+    if (!file || hasText) return;
+    const picked = file;
+    const instance = instanceRef.current;
+    if (!instance) return;
+    event.preventDefault();
+    event.stopPropagation();
+    void (async () => {
+      const imageData = await fileBase64(picked);
+      await pasteImage(instance, imageData);
+    })();
+  };
+
   /** Apply a language — null meaning "detect" — and hand the keyboard back to the buffer. */
   const pickLanguage = (language: string | null) => {
     setMenu(null);
@@ -403,7 +578,7 @@ export default function Editor({
       : [];
 
   return (
-    <div className="editor-frame" onContextMenuCapture={openMenu}>
+    <div className="editor-frame" onContextMenuCapture={openMenu} onPasteCapture={onPasteCapture}>
       <MonacoEditor
         path={modelUri(tab.path)}
         defaultValue={tab.initialValue ?? tab.original}

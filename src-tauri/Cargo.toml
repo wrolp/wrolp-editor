@@ -67,6 +67,11 @@ sevenz-rust = { version = "0.6", default-features = false, features = ["compress
 tauri-plugin-single-instance = "2"
 windows-native-keyring-store = "1.1.0"
 winreg = "0.52"
+# Some capture tools (WeChat's screenshot among them) publish the bitmap only under the
+# MIME-spelled "image/png" registration, which arboard's standard "PNG" / CF_DIBV5 lookup
+# misses. This reads those formats for the paste paths; it is already in the tree as
+# arboard's Windows backend.
+clipboard-win = "5"
 # DPAPI (CryptProtectData), for the one secret that lives in the settings file rather than the
 # credential store: the settings page has to be able to read it back, and a value only this
 # Windows account can decrypt is what makes that file safe to copy into a backup.

@@ -23,6 +23,7 @@ import MarkdownPreview from "./components/MarkdownPreview";
 import PaneErrorBoundary from "./components/PaneErrorBoundary";
 import DraftRestoreDialog from "./components/DraftRestoreDialog";
 import NewGroupDialog from "./components/NewGroupDialog";
+import PasteImageDialog from "./components/PasteImageDialog";
 import SettingsPanel from "./components/SettingsPanel";
 import FileSettingsDialog from "./components/FileSettingsDialog";
 import Sidebar, { type EntryKind } from "./components/Sidebar";
@@ -437,6 +438,16 @@ function usePrefersDark(): boolean {
 /** What fills the preview pane: rendered markdown, a picture, or a live HTML page. */
 type PreviewKind = "markdown" | "image" | "html" | null;
 
+/** A pasted picture held while the reader names the file it becomes. */
+interface ImageSaveAsk {
+  dir: string;
+  defaultName: string;
+  /** Returns a localized failure to show in place, or null once the file is written. */
+  save: (name: string) => Promise<string | null>;
+  /** The dialog is finished; true only when the picture was saved. */
+  settle: (saved: boolean) => void;
+}
+
 /**
  * How long a toast stays up on its own. Long enough to read a two-line error once, without
  * being so long that the next message arrives before the last one has gone.
@@ -653,6 +664,10 @@ export default function App() {
   const [confirmingClear, setConfirmingClear] = useState(false);
   /** The file whose "open with the default app" is paused on the run-confirmation. */
   const [runConfirm, setRunConfirm] = useState<{ path: string; name: string } | null>(null);
+  /** The picture-name dialog a paste opens; see `requestImageSave`. */
+  const [imageSaveAsk, setImageSaveAsk] = useState<ImageSaveAsk | null>(null);
+  /** A second paste while that dialog is up must not overwrite the first request. */
+  const imageSaveBusy = useRef(false);
   /**
    * A PDF export in flight: what it is doing and how far it got. The first export of a
    * picture-heavy document spends its time reading each image through the backend, and a
@@ -1828,14 +1843,73 @@ export default function App() {
   );
 
   /**
+   * Put a pasted picture behind the name dialog and finish it once a name is chosen.
+   *
+   * The save runs while the dialog is still up, so a taken or invalid name is an inline
+   * error the reader can fix rather than a toast that arrives after the dialog is gone.
+   * One picture at a time: a second paste while the first is being named is refused, not
+   * allowed to replace the request the first caller is still waiting on.
+   */
+  const requestImageSave = useCallback(
+    (dir: string, defaultName: string, save: (name: string) => Promise<void>): Promise<boolean> => {
+      if (imageSaveBusy.current) return Promise.resolve(false);
+      imageSaveBusy.current = true;
+      return new Promise<boolean>((resolve) => {
+        const settle = (saved: boolean) => {
+          imageSaveBusy.current = false;
+          setImageSaveAsk(null);
+          resolve(saved);
+        };
+        setImageSaveAsk({
+          dir,
+          defaultName,
+          settle,
+          save: async (name) => {
+            try {
+              await save(name);
+              return null;
+            } catch (e) {
+              return errorMessage(e);
+            }
+          },
+        });
+      });
+    },
+    []
+  );
+
+  /**
    * Paste what Explorer copied into a folder.
    *
    * The backend takes each source by the same rules as a copy inside the tree, so nothing is
    * overwritten; a source it could not take is counted rather than fatal. "Nothing landed" is
    * already an error carrying the reason, which is what the toast shows.
+   *
+   * A clipboard holding a picture is not a copy of a file: it asks for the name the picture
+   * will carry first, and only then writes it.
    */
   const pasteFiles = useCallback(
     async (dir: string): Promise<boolean> => {
+      const kind = await api.clipboardPasteKind().catch((e) => {
+        toast(errorMessage(e));
+        return null;
+      });
+      if (!kind) return false;
+      if (kind === "image") {
+        const defaultName = await api.pastedImageName(dir).catch((e) => {
+          toast(errorMessage(e));
+          return null;
+        });
+        if (!defaultName) return false;
+        return requestImageSave(dir, defaultName, async (name) => {
+          const entry = await api.pasteClipboardImage(dir, name);
+          toast(t("side.pastedImage", { name: entry.name }));
+        });
+      }
+      if (kind === "empty") {
+        toast(t("err.clipboard_empty"));
+        return false;
+      }
       const report = await api.pasteClipboardFiles(dir).catch((e) => {
         toast(errorMessage(e));
         return null;
@@ -1849,7 +1923,7 @@ export default function App() {
       );
       return true;
     },
-    [toast]
+    [requestImageSave, toast]
   );
 
   /** Files dropped anywhere but the Explorer open as tabs, one per path. */
@@ -3638,6 +3712,8 @@ const defaultModeFor = useCallback(
                   // on the last file tab while Settings or a comparison is on screen.
                   if (tabs.fileTab) void tabs.setLanguage(tabs.fileTab.id, language);
                 }}
+                onError={toast}
+                onRequestImageSave={requestImageSave}
               />
               {lockedTab && (
                 <div
@@ -4486,6 +4562,15 @@ const defaultModeFor = useCallback(
             if (created) toast(t("grp.created", { name: created.name }));
           }}
           onCancel={() => setNewGroupOpen(false)}
+        />
+      )}
+
+      {imageSaveAsk && (
+        <PasteImageDialog
+          dir={imageSaveAsk.dir}
+          defaultName={imageSaveAsk.defaultName}
+          onSave={imageSaveAsk.save}
+          onClose={imageSaveAsk.settle}
         />
       )}
 

@@ -21,7 +21,7 @@ A small local text editor for Windows: tabs, Markdown preview, PDF and Office do
 | Markdown | Rendered beside the source, with an outline, Monaco-coloured code blocks and `mermaid` / `plantuml` / `graphviz` drawn as SVG. A document's own HTML passes a whitelist — no scripts, no event handlers |
 | PDF | A reader of its own: one continuous column, 25–400 %, white / warm / green / night paper, bookmarks, automatic scroll, and the page you left remembered per file |
 | Office | Word, spreadsheet and slide files open in the app. The Word preview pages the document, zooms, fits the width, hides page gaps, tints the paper and shows the page you are on |
-| Pictures | A whole folder in a gallery tab: stacked, one by one, slideshow or grid. Inside an archive, pictures open in the gallery without unpacking anything first |
+| Pictures | A whole folder in a gallery tab: stacked, one by one, slideshow or grid. Inside an archive, pictures open in the gallery without unpacking anything first. A screenshot pasted into a Markdown file is saved beside it and linked; pasted into the Explorer, it becomes a PNG |
 | Archives | zip, tar, tar.gz and 7z are browsed in the Explorer, unpacked into a read-only cache that every viewer can use. Encrypted archives take a password from the session, a rule on the name, the default password, or a prompt |
 | Files | Batch rename by pattern or regular expression, side-by-side comparison of any two contents, and configuration backup snapshots |
 | Version history | Off by default. Once on, every save by hand records the file, and any two versions — or a version and what is open — can be compared or brought back |

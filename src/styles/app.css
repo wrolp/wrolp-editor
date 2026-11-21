@@ -838,6 +838,45 @@ body {
   width: 100%;
   box-sizing: border-box;
 }
+/* The picture-name dialog: the field and the fixed .png suffix share one box, and the
+   destination line says where the file will land. */
+.paste-name-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.paste-name-row {
+  display: flex;
+  align-items: stretch;
+}
+.paste-name-row .grp-input {
+  flex: 1 1 auto;
+  width: auto;
+  min-width: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.paste-name-suffix {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  padding: 0 9px;
+  border: 1px solid var(--border);
+  border-left: none;
+  border-radius: 0 6px 6px 0;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12px;
+}
+.paste-name-dir {
+  margin-top: 8px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 /* The body of a version note: the same box as the line above it, holding the lines that do not
    fit on one. It inherits the interface font rather than falling back to a textarea's monospace. */
 textarea.ver-note-body {
@@ -6263,6 +6302,9 @@ select {
 .gal-stack,
 .gal-grid,
 .gal-strip,
+/* The picture pane now scrolls too: fit-width makes a tall screenshot scroll down, and a
+   zoomed picture can scroll both ways. It gets the same thin bar as the gallery around it. */
+.img-stage,
 .commit-list {
   scrollbar-width: thin;
   scrollbar-color: var(--scroll-thumb) transparent;
@@ -6285,6 +6327,7 @@ select {
 .gal-stack::-webkit-scrollbar,
 .gal-grid::-webkit-scrollbar,
 .gal-strip::-webkit-scrollbar,
+.img-stage::-webkit-scrollbar,
 .commit-list::-webkit-scrollbar {
   width: var(--scroll-size);
   height: var(--scroll-size);
@@ -6312,6 +6355,10 @@ select {
 .gal-stack::-webkit-scrollbar-track,
 .gal-grid::-webkit-scrollbar-track,
 .gal-strip::-webkit-scrollbar-track,
+/* The picture pane scrolls both ways once a picture is zoomed past the pane, so its corner
+   needs the same transparent treatment as the PDF and office pages. */
+.img-stage::-webkit-scrollbar-track,
+.img-stage::-webkit-scrollbar-corner,
 .commit-list::-webkit-scrollbar-track {
   background: transparent;
 }
@@ -6333,6 +6380,7 @@ select {
 .gal-stack::-webkit-scrollbar-thumb,
 .gal-grid::-webkit-scrollbar-thumb,
 .gal-strip::-webkit-scrollbar-thumb,
+.img-stage::-webkit-scrollbar-thumb,
 .commit-list::-webkit-scrollbar-thumb {
   background: var(--scroll-thumb);
   border: 2px solid transparent;
@@ -6359,6 +6407,7 @@ select {
 .gal-stack:hover::-webkit-scrollbar-thumb,
 .gal-grid:hover::-webkit-scrollbar-thumb,
 .gal-strip:hover::-webkit-scrollbar-thumb,
+.img-stage:hover::-webkit-scrollbar-thumb,
 .commit-list:hover::-webkit-scrollbar-thumb {
   background-color: var(--scroll-thumb-hover);
 }

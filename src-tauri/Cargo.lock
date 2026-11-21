@@ -6276,6 +6276,7 @@ dependencies = [
  "argon2",
  "base64 0.22.1",
  "chrono",
+ "clipboard-win",
  "encoding_rs",
  "flate2",
  "futures-util",
