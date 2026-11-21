@@ -55,6 +55,8 @@ import {
   IconCompare,
   IconCopy,
   IconDetect,
+  IconExport,
+  IconExternal,
   IconFile,
   IconFolder,
   IconIndentWidth,
@@ -63,13 +65,17 @@ import {
   IconMinimap,
   IconModePreview,
   IconMoveTo,
-  IconOpenFolder,
   IconPencil,
+  IconPrint,
+  IconRecord,
   IconReload,
+  IconReveal,
   IconSave,
   IconSettings,
   IconSidebar,
   IconStickyScroll,
+  IconStop,
+  IconSwap,
   IconTabStop,
   IconVersions,
   IconWhitespace,
@@ -4011,7 +4017,7 @@ const defaultModeFor = useCallback(
                   }}
                 >
                   <span className="ctx-icon">
-                    <IconReload size={14} />
+                    <IconSwap size={14} />
                   </span>
                   {t("cmp.swap")}
                 </div>
@@ -4046,7 +4052,7 @@ const defaultModeFor = useCallback(
                 }}
               >
                 <span className="ctx-icon">
-                  <IconOpenFolder size={14} />
+                  <IconReveal size={14} />
                 </span>
                 {t("title.menuReveal")}
               </div>
@@ -4061,7 +4067,7 @@ const defaultModeFor = useCallback(
                   }}
                 >
                   <span className="ctx-icon">
-                    <IconOpenFolder size={14} />
+                    <IconExternal size={14} />
                   </span>
                   {t("tab.menuOpenSystem")}
                 </div>
@@ -4077,7 +4083,7 @@ const defaultModeFor = useCallback(
                   }}
                 >
                   <span className="ctx-icon">
-                    <IconFile size={14} />
+                    <IconPrint size={14} />
                   </span>
                   {t("export.print")}
                 </div>
@@ -4091,7 +4097,7 @@ const defaultModeFor = useCallback(
                   }}
                 >
                   <span className="ctx-icon">
-                    <IconFile size={14} />
+                    <IconExport size={14} />
                   </span>
                   {t("export.word")}
                 </div>
@@ -4231,7 +4237,7 @@ const defaultModeFor = useCallback(
                       }}
                     >
                       <span className="ctx-icon">
-                        <IconVersions size={14} />
+                        {menuVersions?.tracking ? <IconStop size={14} /> : <IconRecord size={14} />}
                       </span>
                       {t(menuVersions?.tracking ? "ver.disable" : "ver.enable")}
                     </div>

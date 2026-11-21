@@ -38,6 +38,32 @@ export function IconOpenFolder({ size = 18 }: IconProps) {
   );
 }
 
+/** Handing a file to another program: the window it leaves by, arrow and all. */
+export function IconExternal({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <path d="M13 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7" />
+      <polyline points="14 4 20 4 20 10" />
+      <line x1="20" y1="4" x2="12" y2="12" />
+    </svg>
+  );
+}
+
+/**
+ * Pointing at where a file lives: its folder, with the arrow that walks to it. Not the plain
+ * folder of "open a folder" — this action never changes which folder the tree shows, it only
+ * asks Windows to open the one that already holds the file.
+ */
+export function IconReveal({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <path d="M3 13V6.5A1.5 1.5 0 0 1 4.5 5h4L10 6.75h4.5A1.5 1.5 0 0 1 16 8.25V13A1.5 1.5 0 0 1 14.5 14.5h-10A1.5 1.5 0 0 1 3 13z" />
+      <line x1="14" y1="18.5" x2="21" y2="18.5" />
+      <polyline points="18 15.5 21 18.5 18 21.5" />
+    </svg>
+  );
+}
+
 export function IconSettings({ size = 18 }: IconProps) {
   return (
     <svg {...base(size)}>
@@ -98,6 +124,20 @@ export function IconVersions({ size = 14 }: IconProps) {
 }
 
 /**
+ * Recording on: the dot a recorder shows while it is running. Creating one version is the rail
+ * of `IconVersions`; this is the switch that keeps recording every save, so the two rows in the
+ * tab menu no longer draw the same glyph for different promises.
+ */
+export function IconRecord({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <circle cx="12" cy="12" r="8.5" />
+      <circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+/**
  * Show only the changes: two runs collapsing towards the middle line, which is what the control
  * does to a diff — the untouched stretches between the changed ones fold away.
  */
@@ -142,6 +182,51 @@ export function IconEyeOff({ size = 14 }: IconProps) {
       <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" />
       <circle cx="12" cy="12" r="2.6" />
       <line x1="4" y1="20" x2="20" y2="4" />
+    </svg>
+  );
+}
+
+/**
+ * Assume unchanged: the flake that freezes a file's state. The eye is already taken by ignore,
+ * and the two are different promises — one keeps an untracked path out of git, the other tells
+ * git to stop checking a tracked one.
+ */
+export function IconFreeze({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <line x1="12" y1="3" x2="12" y2="21" />
+      <line x1="4.2" y1="7.5" x2="19.8" y2="16.5" />
+      <line x1="4.2" y1="16.5" x2="19.8" y2="7.5" />
+      <path d="M9.4 4.2L12 6.3l2.6-2.1" />
+      <path d="M9.4 19.8L12 17.7l2.6 2.1" />
+    </svg>
+  );
+}
+
+/** Stop assuming unchanged: the flake thawed back into a sun, so git watches the file again. */
+export function IconThaw({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <circle cx="12" cy="12" r="3.4" />
+      <line x1="12" y1="3" x2="12" y2="5.2" />
+      <line x1="12" y1="18.8" x2="12" y2="21" />
+      <line x1="3" y1="12" x2="5.2" y2="12" />
+      <line x1="18.8" y1="12" x2="21" y2="12" />
+      <line x1="5.6" y1="5.6" x2="7.2" y2="7.2" />
+      <line x1="16.8" y1="16.8" x2="18.4" y2="18.4" />
+      <line x1="5.6" y1="18.4" x2="7.2" y2="16.8" />
+      <line x1="16.8" y1="7.2" x2="18.4" y2="5.6" />
+    </svg>
+  );
+}
+
+/** Local-only state: the machine the repository sits on, rather than the remote it talks to. */
+export function IconLocal({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <rect x="3" y="4.5" width="18" height="12" rx="2" />
+      <line x1="9" y1="20.5" x2="15" y2="20.5" />
+      <line x1="12" y1="16.5" x2="12" y2="20.5" />
     </svg>
   );
 }
@@ -226,6 +311,31 @@ export function IconSave({ size = 14 }: IconProps) {
       <path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" />
       <path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7" />
       <path d="M7 3v4a1 1 0 0 0 1 1h7" />
+    </svg>
+  );
+}
+
+/** The printer: what "export as PDF" hands the document to. */
+export function IconPrint({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.6}>
+      <path d="M7 9V4a1 1 0 0 1 1-1h8a1 1 0 0 1 1 1v5" />
+      <path d="M7 17H5a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2h-2" />
+      <rect x="7" y="14" width="10" height="7" rx="1" />
+    </svg>
+  );
+}
+
+/**
+ * A copy leaving for somewhere else: the arrow lifting out of the tray. That is the direction
+ * both export rows read — a file written out, or an entry taken out of an archive.
+ */
+export function IconExport({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <path d="M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" />
+      <line x1="12" y1="15" x2="12" y2="3" />
+      <polyline points="7 8 12 3 17 8" />
     </svg>
   );
 }
@@ -333,6 +443,17 @@ export function IconFileLock({ size = 14 }: IconProps) {
   );
 }
 
+/** A rule written into `.gitignore`: the file it goes in, struck through like the entry it hides. */
+export function IconGitignore({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.6}>
+      <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8l-5-5z" />
+      <path d="M14 3v5h5" />
+      <line x1="8" y1="18" x2="16" y2="10" />
+    </svg>
+  );
+}
+
 /** A new folder: the folder, with the plus that says it does not exist yet. */
 export function IconFolderPlus({ size = 14 }: IconProps) {
   return (
@@ -381,6 +502,21 @@ export function IconPencil({ size = 14 }: IconProps) {
     <svg {...base(size)} strokeWidth={1.7}>
       <path d="M4 20h4L19 9l-4-4L4 16v4z" />
       <path d="M14.5 5.5l4 4" />
+    </svg>
+  );
+}
+
+/**
+ * Renaming a whole list: the lines of names, with the pencil that rewrites all of them. The
+ * single-entry rename keeps the plain pencil; this one says the pattern reaches every row.
+ */
+export function IconBatchRename({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.6}>
+      <line x1="3" y1="6" x2="9" y2="6" />
+      <line x1="3" y1="11" x2="7" y2="11" />
+      <line x1="3" y1="16" x2="9" y2="16" />
+      <path d="M12.5 19.5l.7-2.9 5.6-5.6a1.4 1.4 0 0 1 2 2l-5.6 5.6-2.7.9z" />
     </svg>
   );
 }

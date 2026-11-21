@@ -35,11 +35,11 @@ import {
   IconBranch,
   IconChevron,
   IconCommit,
-  IconEyeOff,
   IconFetch,
   IconFile,
   IconFolder,
   IconList,
+  IconLocal,
   IconOutline,
   IconPull,
   IconPush,
@@ -761,7 +761,7 @@ export default function GitPanel({
     {
       key: "local",
       label: t("git.local.settings"),
-      icon: <IconEyeOff size={13} />,
+      icon: <IconLocal size={13} />,
       run: () => {
         if (repoRoot) onOpenLocalSettings(repoRoot);
       },

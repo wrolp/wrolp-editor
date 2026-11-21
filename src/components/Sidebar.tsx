@@ -13,10 +13,13 @@ import {
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { formatWhen, t } from "../lib/i18n";
 import {
+  IconBatchRename,
   IconChevron,
   IconCompare,
   IconCopy,
   IconCut,
+  IconExport,
+  IconExternal,
   IconEye,
   IconEyeOff,
   IconFile,
@@ -24,18 +27,21 @@ import {
   IconFilePlus,
   IconFolder,
   IconFolderPlus,
+  IconFreeze,
+  IconGitignore,
   IconGoUp,
   IconImage,
   IconInfo,
+  IconLocal,
   IconOpenFolder,
   IconPaste,
-  IconMoveTo,
   IconPencil,
   IconReload,
-  IconRestore,
-  IconSettings,
+  IconReveal,
+  IconRevert,
   IconSort,
   IconTarget,
+  IconThaw,
   IconTrash,
   IconTreeChevron,
   IconVersions,
@@ -2597,7 +2603,7 @@ export default function Sidebar(props: Props) {
                       title={t("ver.restore")}
                       onClick={() => onRestoreVersion(activePath, v.oid)}
                     >
-                      <IconRestore size={13} />
+                      <IconRevert size={13} />
                     </button>
                   </span>
                 </div>
@@ -2733,7 +2739,7 @@ export default function Sidebar(props: Props) {
                       }}
                     >
                       <span className="ctx-icon">
-                        <IconPencil size={14} />
+                        <IconBatchRename size={14} />
                       </span>
                       {t("side.menuBatchFolder")}
                     </div>
@@ -2802,7 +2808,7 @@ export default function Sidebar(props: Props) {
                       }}
                     >
                       <span className="ctx-icon">
-                        <IconMoveTo size={14} />
+                        <IconExport size={14} />
                       </span>
                       {t("side.menuExport")}
                     </div>
@@ -2861,7 +2867,7 @@ export default function Sidebar(props: Props) {
                     }}
                   >
                     <span className="ctx-icon">
-                      <IconOpenFolder size={14} />
+                      <IconExternal size={14} />
                     </span>
                     {t("side.menuOpenSystem")}
                   </div>
@@ -2875,7 +2881,7 @@ export default function Sidebar(props: Props) {
                 }}
               >
                 <span className="ctx-icon">
-                  <IconOpenFolder size={14} />
+                  <IconReveal size={14} />
                 </span>
                 {t("side.menuReveal")}
               </div>
@@ -2981,7 +2987,7 @@ export default function Sidebar(props: Props) {
                       }}
                     >
                       <span className="ctx-icon">
-                        <IconPencil size={14} />
+                        <IconBatchRename size={14} />
                       </span>
                       {t("side.menuBatchFolder")}
                     </div>
@@ -3000,7 +3006,7 @@ export default function Sidebar(props: Props) {
                   }}
                 >
                   <span className="ctx-icon">
-                    <IconPencil size={14} />
+                    <IconBatchRename size={14} />
                   </span>
                   {t("side.menuBatchRename", { count: selected.size })}
                 </div>
@@ -3032,7 +3038,7 @@ export default function Sidebar(props: Props) {
                   }}
                 >
                   <span className="ctx-icon">
-                    <IconPencil size={14} />
+                    <IconBatchRename size={14} />
                   </span>
                   {t("side.menuBatchFolder")}
                 </div>
@@ -3134,7 +3140,7 @@ export default function Sidebar(props: Props) {
                   {localGitActions?.gitignore && (
                     <div className="ctx-item" onClick={() => void runLocalGit("gitignore")}>
                       <span className="ctx-icon">
-                        <IconFile size={14} />
+                        <IconGitignore size={14} />
                       </span>
                       {t("side.menuGitignore")}
                     </div>
@@ -3150,7 +3156,7 @@ export default function Sidebar(props: Props) {
                   {localGitActions?.assume && (
                     <div className="ctx-item" onClick={() => void runLocalGit("assume")}>
                       <span className="ctx-icon">
-                        <IconEyeOff size={14} />
+                        <IconFreeze size={14} />
                       </span>
                       {t("side.menuAssume")}
                     </div>
@@ -3158,7 +3164,7 @@ export default function Sidebar(props: Props) {
                   {localGitActions?.unassume && (
                     <div className="ctx-item" onClick={() => void runLocalGit("unassume")}>
                       <span className="ctx-icon">
-                        <IconEye size={14} />
+                        <IconThaw size={14} />
                       </span>
                       {t("side.menuUnassume")}
                     </div>
@@ -3171,7 +3177,7 @@ export default function Sidebar(props: Props) {
                     }}
                   >
                     <span className="ctx-icon">
-                      <IconSettings size={14} />
+                      <IconLocal size={14} />
                     </span>
                     {t("side.menuLocalSettings")}
                   </div>

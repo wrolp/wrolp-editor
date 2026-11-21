@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { t } from "../lib/i18n";
 import { useMenuPlacement } from "../hooks/useMenuPlacement";
 import type { GitLocalPathState } from "../lib/tauri";
-import { IconEye, IconEyeOff, IconFile, IconSettings } from "./icons";
+import { IconEyeOff, IconFile, IconFreeze, IconGitignore, IconLocal, IconThaw } from "./icons";
 
 interface Props {
   /** The path's local state, or null while the probe is still in flight. */
@@ -95,7 +95,7 @@ export default function GitRowMenu({
               machine's own exclude — the difference is who the rule reaches. */}
           <div className="ctx-item" onClick={onIgnoreRepo}>
             <span className="ctx-icon">
-              <IconFile size={14} />
+              <IconGitignore size={14} />
             </span>
             {t("side.menuGitignore")}
           </div>
@@ -104,7 +104,7 @@ export default function GitRowMenu({
       {action === "assume" && (
         <div className="ctx-item" onClick={() => onAssume(true)}>
           <span className="ctx-icon">
-            <IconEyeOff size={14} />
+            <IconFreeze size={14} />
           </span>
           {t("side.menuAssume")}
         </div>
@@ -112,7 +112,7 @@ export default function GitRowMenu({
       {action === "unassume" && (
         <div className="ctx-item" onClick={() => onAssume(false)}>
           <span className="ctx-icon">
-            <IconEye size={14} />
+            <IconThaw size={14} />
           </span>
           {t("side.menuUnassume")}
         </div>
@@ -120,7 +120,7 @@ export default function GitRowMenu({
       {action && <div className="ws-sep" />}
       <div className="ctx-item" onClick={onOpenSettings}>
         <span className="ctx-icon">
-          <IconSettings size={14} />
+          <IconLocal size={14} />
         </span>
         {t("side.menuLocalSettings")}
       </div>
