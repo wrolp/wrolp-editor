@@ -1,4 +1,5 @@
 import JSZip from "jszip";
+import { dateFormatFor, looksLikeDate } from "./xlsxDates";
 
 /**
  * A workbook read one sheet at a time, straight out of the zip.
@@ -308,7 +309,12 @@ function formatNumber(raw: string, numFmtId: number, styles: Styles, ssf: Ssf | 
       // SheetJS prints whole numbers directly and hands the rest to the General format.
       return (value | 0) === value ? value.toString(10) : ssf.format(0, value);
     }
-    return ssf.format(custom ?? numFmtId, value, { date1904: styles.date1904 });
+    const code = custom ?? numFmtId;
+    // A date is printed the one way the viewer prints dates, whatever format the sheet used.
+    if (looksLikeDate(ssf, code)) {
+      return ssf.format(dateFormatFor(value), value, { date1904: styles.date1904 });
+    }
+    return ssf.format(code, value, { date1904: styles.date1904 });
   } catch {
     return raw;
   }

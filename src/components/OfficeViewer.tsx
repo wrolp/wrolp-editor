@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { t } from "../lib/i18n";
+import { dateFormatFor, looksLikeDate } from "../lib/xlsxDates";
 import { api, errorMessage, type OfficeState } from "../lib/tauri";
 import type { OfficeKind } from "../lib/path";
 import { IconChevron, IconSliders } from "./icons";
@@ -308,7 +309,29 @@ function columnName(index: number): string {
  */
 async function readWorkbook(raw: ArrayBuffer, images: SheetImages | null): Promise<SheetView[]> {
   const XLSX = await import("xlsx");
-  const book = XLSX.read(raw, { type: "array" });
+  // `cellNF` keeps each cell's number format: without it a date serial is indistinguishable
+  // from any other number, and the cell would be printed as `45900` instead of a day.
+  const book = XLSX.read(raw, { type: "array", cellNF: true });
+  const date1904 = book.Workbook?.WBProps?.date1904 ?? false;
+  type Cell = Parameters<typeof XLSX.utils.format_cell>[0];
+  /**
+   * A cell's text, with dates printed the one way this viewer prints dates.
+   *
+   * The sheet's own format decides what a value means — that it is a date, and whether it has
+   * a time — but not how it looks: the same day written `9/8/26` in one workbook and
+   * `2026-09-08` in the next is one fact, and a column of dates should read as one.
+   */
+  const textOf = (cell: Cell): string => {
+    const printed = XLSX.utils.format_cell(cell) ?? "";
+    const value = (cell as { v?: unknown }).v;
+    if (typeof value !== "number" || !Number.isFinite(value)) return printed;
+    if (!looksLikeDate(XLSX.SSF, (cell as { z?: string }).z)) return printed;
+    try {
+      return XLSX.SSF.format(dateFormatFor(value), value, { date1904 });
+    } catch {
+      return printed;
+    }
+  };
   return book.SheetNames.map((name) => {
     const sheet = book.Sheets[name];
     const pictures = images?.[name]?.cells;
@@ -328,7 +351,7 @@ async function readWorkbook(raw: ArrayBuffer, images: SheetImages | null): Promi
           const cell = sheet[XLSX.utils.encode_cell({ r: row, c: column })];
           // An in-cell picture takes the cell's place; the text beside it is the formula that
           // referred to it, which is not what the cell shows.
-          const text = picture ? "" : cell ? XLSX.utils.format_cell(cell) : "";
+          const text = picture ? "" : cell ? textOf(cell) : "";
           kept.push(text ?? "");
           if (text || picture) {
             used = true;
