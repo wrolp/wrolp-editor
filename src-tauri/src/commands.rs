@@ -291,6 +291,9 @@ pub struct Settings {
   /// or a `#rrggbb` colour picked by hand. Only the frontend draws it — this decides which
   /// values are worth handing on, since an unusable one would leave the picture on nothing.
   pub image_backdrop: String,
+  /// Recognize the text in a picture as soon as it is shown. Off by default: reading a picture
+  /// is a deliberate action unless the reader asked for it to happen on its own.
+  pub ocr_auto: bool,
   /// The paper a PDF page is drawn on: a `#rrggbb` colour, white by default, or `night` to turn
   /// the page over. Only the frontend draws it — this decides which values are worth handing on,
   /// since a colour it cannot parse would be dropped by the stylesheet and leave the page
@@ -468,6 +471,7 @@ impl Default for Settings {
       gallery_loop: true,
       gallery_mode: GALLERY_MODE_DEFAULT.into(),
       image_backdrop: IMAGE_BACKDROP_CHECKER.into(),
+      ocr_auto: false,
       pdf_paper: PDF_PAPER_WHITE.into(),
       word_paper: PDF_PAPER_WHITE.into(),
       pdf_outline_side: "right".into(),
@@ -789,6 +793,7 @@ impl Settings {
       // the stylesheet cannot use would leave a transparent picture on no backdrop at all.
       image_backdrop: as_hex_color(&self.image_backdrop)
         .unwrap_or_else(|| IMAGE_BACKDROP_CHECKER.into()),
+      ocr_auto: self.ocr_auto,
       // A tint the stylesheet cannot parse would leave the page as it was, so a stale or
       // hand-edited key reads as white rather than as a colour that never applies.
       pdf_paper: if self.pdf_paper == PDF_PAPER_NIGHT {

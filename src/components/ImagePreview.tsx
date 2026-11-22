@@ -1,7 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { t } from "../lib/i18n";
-import { api, revealItemInDir } from "../lib/tauri";
+import {
+  api,
+  copyText,
+  errorMessage,
+  revealItemInDir,
+  type OcrImage,
+  type OcrLanguage,
+  type OcrLine,
+  type OcrSource,
+} from "../lib/tauri";
+import { useMenuPlacement } from "../hooks/useMenuPlacement";
 import { stepFrom, zoomText } from "../lib/zoom";
 import BackdropPicker from "./BackdropPicker";
 import { IconCollapse, IconSliders } from "./icons";
@@ -37,6 +47,15 @@ interface Props {
    * whole path so the gallery can find it in its own naturally-ordered list.
    */
   onBrowseFolder?: (path: string) => void;
+  /**
+   * Where text recognition reads the picture from. Null hides the controls — an SVG has no
+   * pixels to recognize, and a pane without a readable source has nothing to ask.
+   */
+  ocrSource?: OcrSource | null;
+  /** Recognize the picture as soon as it is shown; off, Extract text starts it. */
+  ocrAuto?: boolean;
+  /** A sentence for the app's toast row (recognition failure, copied characters). */
+  onNotice?: (message: string) => void;
 }
 
 /** Zoom levels the buttons walk, as a percentage of the picture's own pixels. */
@@ -73,6 +92,45 @@ function xmlIsWellFormed(svg: string): boolean {
   return !new DOMParser().parseFromString(svg, "image/svg+xml").querySelector("parsererror");
 }
 
+/** A stable identity for an OCR source, so a fresh object literal does not re-ask. */
+function sourceId(source: OcrSource | null | undefined): string {
+  if (!source) return "";
+  return source.kind === "path"
+    ? `p:${source.path}`
+    : `a:${source.archive}:${source.entry}`;
+}
+
+/**
+ * Windows' Chinese OCR returns one word per character, so `OcrLine.Text` joins them with
+ * spaces that are not on the page. Word boxes tell the truth: a real space is a gap wider than
+ * a fraction of the line's height, while two Chinese characters sit flush.
+ */
+function wordHasGap(line: OcrLine, index: number): boolean {
+  const word = line.words[index];
+  const next = line.words[index + 1];
+  if (!word || !next) return false;
+  return next.x - (word.x + word.width) > Math.max(1, word.height * 0.18);
+}
+
+function lineText(line: OcrLine): string {
+  return line.words
+    .map((word, index) => word.text + (wordHasGap(line, index) ? " " : ""))
+    .join("")
+    .trimEnd();
+}
+
+/** One language list for the whole window; the engine's list only changes with Windows. */
+let ocrLanguagesPromise: Promise<OcrLanguage[]> | null = null;
+function loadOcrLanguages(): Promise<OcrLanguage[]> {
+  if (!ocrLanguagesPromise) {
+    ocrLanguagesPromise = api.ocrLanguages().catch((error) => {
+      ocrLanguagesPromise = null;
+      throw error;
+    });
+  }
+  return ocrLanguagesPromise;
+}
+
 /**
  * Draws an image file — raster or SVG — instead of leaving its bytes in the editor.
  *
@@ -91,6 +149,9 @@ export default function ImagePreview({
   backdrop,
   onSaveBackdrop,
   onBrowseFolder,
+  ocrSource,
+  ocrAuto = false,
+  onNotice,
 }: Props) {
   const [src, setSrc] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -104,6 +165,28 @@ export default function ImagePreview({
   const [zoomDraft, setZoomDraft] = useState("");
   /** The tools take no room unless they are in use; the tab in the corner brings them back. */
   const [toolsOpen, setToolsOpen] = useState(false);
+  /** The installed recognizers, and whether this platform has the feature at all. */
+  const [ocrLanguages, setOcrLanguages] = useState<OcrLanguage[]>([]);
+  const [ocrAvailable, setOcrAvailable] = useState(false);
+  const [ocrLanguage, setOcrLanguage] = useState("");
+  const [ocrState, setOcrState] = useState<"idle" | "running" | "ready" | "empty">(
+    "idle"
+  );
+  const [ocr, setOcr] = useState<OcrImage | null>(null);
+  const [ocrShown, setOcrShown] = useState(true);
+  const [ocrMenu, setOcrMenu] = useState<{
+    x: number;
+    y: number;
+    selection: string;
+  } | null>(null);
+  const ocrLayerRef = useRef<HTMLDivElement>(null);
+  const ocrMenuRef = useRef<HTMLDivElement>(null);
+  /** Invalidates a result that belongs to a picture no longer on screen. */
+  const ocrRequest = useRef(0);
+  /** The one source the automatic pass has already run for; a failure must not loop. */
+  const autoOcrFor = useRef("");
+  const ocrMenuAt = useMenuPlacement(ocrMenu, ocrMenuRef);
+  const ocrId = sourceId(ocrSource);
 
   useEffect(() => {
     const node = stageRef.current;
@@ -272,6 +355,153 @@ export default function ImagePreview({
     };
   }, [assetSrc, inlineSvg, external, prepared]);
 
+  useEffect(() => {
+    if (!ocrId) {
+      setOcrAvailable(false);
+      setOcrLanguages([]);
+      return;
+    }
+    let live = true;
+    loadOcrLanguages()
+      .then((list) => {
+        if (!live) return;
+        setOcrLanguages(list);
+        setOcrAvailable(true);
+        setOcrLanguage((current) =>
+          list.some((language) => language.tag === current) ? current : ""
+        );
+      })
+      .catch((error) => {
+        if (!live) return;
+        const raw =
+          typeof error === "string"
+            ? error
+            : error instanceof Error
+              ? error.message
+              : String(error);
+        setOcrLanguages([]);
+        setOcrAvailable(!raw.startsWith("ocr_unsupported"));
+      });
+    return () => {
+      live = false;
+    };
+  }, [ocrId]);
+
+  // A new picture starts without the last one's words; the chosen language is a session
+  // preference and stays.
+  useEffect(() => {
+    ocrRequest.current += 1;
+    autoOcrFor.current = "";
+    setOcrState("idle");
+    setOcr(null);
+    setOcrShown(true);
+    setOcrMenu(null);
+  }, [path]);
+
+  useEffect(() => {
+    if (!ocrMenu) return;
+    const close = () => setOcrMenu(null);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("wheel", close, { passive: true });
+    window.addEventListener("blur", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("wheel", close);
+      window.removeEventListener("blur", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [ocrMenu]);
+
+  /**
+   * Recognize the current picture. `announce` is what separates a deliberate extraction —
+   * which must say why it failed — from the automatic pass that runs as the picture appears.
+   * That one stays silent: a gallery of unsupported pictures would otherwise fill the toast
+   * row on every turn.
+   */
+  const runOcr = useCallback(
+    async (announce = true) => {
+      if (!ocrSource || ocrState === "running") return;
+      const generation = ++ocrRequest.current;
+      setOcrState("running");
+      setOcrMenu(null);
+      try {
+        const result = await api.ocrImage(ocrSource, ocrLanguage || null);
+        if (generation !== ocrRequest.current) return;
+        const hasText = result.lines.some((line) => line.words.length > 0);
+        setOcr(result);
+        setOcrShown(true);
+        setOcrState(hasText ? "ready" : "empty");
+        if (!hasText && announce) onNotice?.(t("img.ocrEmpty"));
+      } catch (error) {
+        if (generation !== ocrRequest.current) return;
+        setOcrState("idle");
+        if (announce) onNotice?.(errorMessage(error));
+      }
+    },
+    [ocrLanguage, ocrSource, ocrState, onNotice]
+  );
+
+  // The reading happens on its own: the words are what a picture is opened for as often as
+  // the pixels are. The Extract button stays as the way to run it again, and as the way to
+  // see the reason when an automatic pass could not read the picture.
+  const autoOcrKey = `${ocrId}|${src ?? ""}|${ocrLanguage}|${dims.width}`;
+  useEffect(() => {
+    if (!ocrAuto || !ocrId || !ocrAvailable || !src || failed || dims.width === 0) return;
+    if (ocrState !== "idle" || autoOcrFor.current === autoOcrKey) return;
+    autoOcrFor.current = autoOcrKey;
+    void runOcr(false);
+  }, [autoOcrKey, dims.width, failed, ocrAuto, ocrAvailable, ocrId, ocrState, runOcr, src]);
+
+  const copyAllOcr = useCallback(() => {
+    if (!ocr) return;
+    const text = ocr.lines.map(lineText).join("\n");
+    if (!text) {
+      onNotice?.(t("img.ocrEmpty"));
+      return;
+    }
+    void copyText(text).then((ok) => {
+      onNotice?.(
+        ok ? t("img.ocrCopied", { n: String(text.length) }) : t("side.copyFailed")
+      );
+    });
+    setOcrMenu(null);
+  }, [ocr, onNotice]);
+
+  const copyOcrSelection = useCallback(() => {
+    const text = ocrMenu?.selection ?? "";
+    if (!text) return;
+    void copyText(text).then((ok) => {
+      onNotice?.(
+        ok ? t("img.ocrCopied", { n: String(text.length) }) : t("side.copyFailed")
+      );
+    });
+    setOcrMenu(null);
+  }, [ocrMenu, onNotice]);
+
+  const selectAllOcr = useCallback(() => {
+    const layer = ocrLayerRef.current;
+    if (!layer) return;
+    const range = document.createRange();
+    range.selectNodeContents(layer);
+    const selection = window.getSelection();
+    selection?.removeAllRanges();
+    selection?.addRange(range);
+    setOcrMenu(null);
+  }, []);
+
+  const pictureHeight =
+    dims.width > 0 && pictureWidth > 0
+      ? Math.round(dims.height * (pictureWidth / dims.width))
+      : 0;
+  const ocrScaleX =
+    ocr && ocr.width > 0 && pictureWidth > 0 ? pictureWidth / ocr.width : 0;
+  const ocrScaleY =
+    ocr && ocr.height > 0 && pictureHeight > 0 ? pictureHeight / ocr.height : 0;
+
   return (
     <div className="img-preview">
       {/* The only thing on the picture when the tools are away: a tab in the corner that brings
@@ -350,6 +580,56 @@ export default function ImagePreview({
         <button className="img-tool" title={t("img.actual")} onClick={() => setZoom(100)}>
           {t("img.actual")}
         </button>
+        {ocrSource && ocrAvailable && (
+          <>
+            {ocrLanguages.length > 1 && (
+              <select
+                className="select img-ocr-lang"
+                value={ocrLanguage}
+                title={t("img.ocrLang")}
+                aria-label={t("img.ocrLang")}
+                onChange={(event) => setOcrLanguage(event.target.value)}
+              >
+                <option value="">{t("img.ocrSystem")}</option>
+                {ocrLanguages.map((language) => (
+                  <option key={language.tag} value={language.tag}>
+                    {language.name || language.tag}
+                  </option>
+                ))}
+              </select>
+            )}
+            <button
+              className="img-tool"
+              title={t("img.ocrExtract")}
+              disabled={ocrState === "running"}
+              onClick={() => void runOcr(true)}
+            >
+              {ocrState === "running" ? t("img.ocrRunning") : t("img.ocrExtract")}
+            </button>
+            {ocrState === "ready" && (
+              <>
+                <button
+                  className={`img-tool${ocrShown ? " on" : ""}`}
+                  title={ocrShown ? t("img.ocrHide") : t("img.ocrShow")}
+                  aria-pressed={ocrShown}
+                  onClick={() => setOcrShown((shown) => !shown)}
+                >
+                  {ocrShown ? t("img.ocrHide") : t("img.ocrShow")}
+                </button>
+                <button
+                  className="img-tool"
+                  title={t("img.ocrCopyAll")}
+                  onClick={copyAllOcr}
+                >
+                  {t("img.ocrCopyAll")}
+                </button>
+              </>
+            )}
+            {ocrState === "empty" && (
+              <span className="img-note">{t("img.ocrEmpty")}</span>
+            )}
+          </>
+        )}
         {dims.width > 0 && (
           <span className="img-dims">
             {dims.width} × {dims.height}
@@ -375,13 +655,25 @@ export default function ImagePreview({
         ref={stageRef}
         // Reaching for the picture is a decision, not a hand passing over: the tools go at once
         // and the picture gets the whole pane.
-        onPointerDown={closeNow}
+        onPointerDown={() => {
+          closeNow();
+          setOcrMenu(null);
+        }}
         onWheel={(e) => {
           // Ctrl+wheel only: a bare wheel over the picture would zoom the app out from under
           // the user, and this pane has nothing to scroll, so nothing would be gained.
           if (!e.ctrlKey) return;
           e.preventDefault();
           stepBy(e.deltaY < 0 ? 1 : -1);
+        }}
+        onContextMenu={(event) => {
+          if (ocrState !== "ready" || !ocrShown) return;
+          event.preventDefault();
+          setOcrMenu({
+            x: event.clientX,
+            y: event.clientY,
+            selection: window.getSelection()?.toString() ?? "",
+          });
         }}
       >
         {failed || !src ? (
@@ -413,31 +705,96 @@ export default function ImagePreview({
             </div>
           </div>
         ) : (
-          <img
-            className="img-frame"
-            src={src}
-            alt=""
+          <div
+            className="img-ocr-shell"
             style={
-              pictureWidth > 0
-                ? {
-                    // Pixels of the picture's own size, not a share of the pane: "100%" is the
-                    // picture at its real size, which is what the 100% button says. Both caps
-                    // have to go, or a picture taller than the pane stops growing while the
-                    // percentage keeps climbing.
-                    width: `${pictureWidth}px`,
-                    maxWidth: "none",
-                    maxHeight: "none",
-                  }
+              pictureWidth > 0 && pictureHeight > 0
+                ? { width: `${pictureWidth}px`, height: `${pictureHeight}px` }
                 : undefined
             }
-            onLoad={(e) => {
-              const img = e.currentTarget;
-              setDims({ width: img.naturalWidth, height: img.naturalHeight });
-            }}
-            onError={() => setFailed(true)}
-          />
+          >
+            <img
+              className="img-frame"
+              src={src}
+              alt=""
+              style={
+                pictureWidth > 0 && pictureHeight > 0
+                  ? {
+                      // Pixels of the picture's own size, not a share of the pane: "100%" is the
+                      // picture at its real size, which is what the 100% button says. Both caps
+                      // have to go, or a picture taller than the pane stops growing while the
+                      // percentage keeps climbing.
+                      width: "100%",
+                      height: "100%",
+                      maxWidth: "none",
+                      maxHeight: "none",
+                    }
+                  : undefined
+              }
+              onLoad={(e) => {
+                const img = e.currentTarget;
+                setDims({ width: img.naturalWidth, height: img.naturalHeight });
+              }}
+              onError={() => setFailed(true)}
+            />
+            {ocrState === "ready" && ocrShown && ocr && (
+              <div className="img-ocr-layer" ref={ocrLayerRef}>
+                {ocr.lines.map((line, lineIndex) => (
+                  <div className="img-ocr-line" key={lineIndex}>
+                    {line.words.map((word, wordIndex) => (
+                      <span
+                        key={wordIndex}
+                        style={{
+                          left: `${word.x * ocrScaleX}px`,
+                          top: `${word.y * ocrScaleY}px`,
+                          width: `${word.width * ocrScaleX}px`,
+                          height: `${word.height * ocrScaleY}px`,
+                          fontSize: `${Math.max(8, word.height * ocrScaleY * 0.82)}px`,
+                          lineHeight: `${word.height * ocrScaleY}px`,
+                        }}
+                      >
+                        {word.text}
+                        {wordHasGap(line, wordIndex) ? " " : ""}
+                      </span>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </div>
+
+      {ocrMenu && (
+        <div
+          className="ctx-menu"
+          ref={ocrMenuRef}
+          style={{ left: ocrMenuAt.left, top: ocrMenuAt.top }}
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          {ocrMenu.selection && (
+            <div className="ctx-item" onClick={copyOcrSelection}>
+              {t("img.ocrCopy")}
+            </div>
+          )}
+          <div className="ctx-item" onClick={selectAllOcr}>
+            {t("img.ocrSelectAll")}
+          </div>
+          <div className="ctx-item" onClick={copyAllOcr}>
+            {t("img.ocrCopyAll")}
+          </div>
+          <div className="ws-sep" />
+          <div
+            className="ctx-item"
+            onClick={() => {
+              setOcrShown(false);
+              setOcrMenu(null);
+            }}
+          >
+            {t("img.ocrHide")}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

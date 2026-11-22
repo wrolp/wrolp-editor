@@ -23,7 +23,7 @@ import {
 } from "../lib/tauri";
 import { t } from "../lib/i18n";
 import { listGallery, loadImage, sourceArchive, type GallerySource } from "../lib/gallerySource";
-import { extOf } from "../lib/path";
+import { extOf, isSvg } from "../lib/path";
 import { pathKey } from "../lib/types";
 import { useMenuPlacement } from "../hooks/useMenuPlacement";
 import { IconCollapse, IconReload, IconSliders } from "./icons";
@@ -97,6 +97,8 @@ interface Props {
   onSaveSettings: (patch: Partial<Settings>) => void | Promise<unknown>;
   /** A sentence that is not a failure (an export finished). Goes to the app's toast row. */
   onNotice?: (message: string) => void;
+  /** Recognize a picture as soon as it is shown; off, Extract text starts it. */
+  ocrAuto?: boolean;
 }
 
 /* ---------- lazy images ----------
@@ -839,6 +841,7 @@ export default function ImageGallery({
   backdrop,
   onSaveSettings,
   onNotice,
+  ocrAuto = false,
 }: Props) {
   /** The zip the pictures come from; null when they are a folder's. */
   const archive = sourceArchive(source);
@@ -1537,6 +1540,15 @@ export default function ImageGallery({
                 text={null}
                 backdrop={backdrop}
                 onSaveBackdrop={(value) => onSaveSettings({ imageBackdrop: value })}
+                ocrSource={
+                  isSvg(current.path)
+                    ? null
+                    : archive !== null
+                      ? { kind: "archive", archive, entry: current.path }
+                      : { kind: "path", path: current.path }
+                }
+                ocrAuto={ocrAuto}
+                onNotice={onNotice}
               />
             ) : null}
           </div>

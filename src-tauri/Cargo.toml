@@ -66,6 +66,18 @@ sevenz-rust = { version = "0.6", default-features = false, features = ["compress
 [target.'cfg(windows)'.dependencies]
 tauri-plugin-single-instance = "2"
 windows-native-keyring-store = "1.1.0"
+# Windows' own OCR engine: no model to download, and it runs offline. The crate was already in
+# the tree as a transitive dependency; naming the features here is what compiles the OCR and
+# imaging APIs.
+windows = { version = "0.62.2", features = [
+  "Foundation",
+  "Foundation_Collections",
+  "Globalization",
+  "Graphics_Imaging",
+  "Media_Ocr",
+  "Storage_Streams",
+  "Win32_System_WinRT",
+] }
 winreg = "0.52"
 # Some capture tools (WeChat's screenshot among them) publish the bitmap only under the
 # MIME-spelled "image/png" registration, which arboard's standard "PNG" / CF_DIBV5 lookup

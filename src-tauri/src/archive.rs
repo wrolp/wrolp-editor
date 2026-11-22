@@ -1672,6 +1672,28 @@ pub fn serve_archive_image(
     .unwrap_or_else(|_| reply(500, "response"))
 }
 
+/// One picture's bytes from an archive the reader has opened, for OCR.
+///
+/// Same scope check and password chain as the image protocol: a page cannot name an arbitrary
+/// archive or entry, and an encrypted archive is only read with the password already resolved
+/// for this session.
+pub(crate) fn read_gallery_image(
+  app: &AppHandle,
+  archive: &str,
+  entry: &str,
+) -> Result<Vec<u8>, String> {
+  if !app.state::<ArchiveScope>().contains(archive) {
+    return Err("archive_not_opened".into());
+  }
+  if !gallery::has_image_ext(entry) {
+    return Err("not_a_picture".into());
+  }
+  let path = PathBuf::from(draft::io_path(archive));
+  let passwords = app.state::<crate::archive_passwords::ArchivePasswords>();
+  let resolved = crate::archive_passwords::resolve(app, &passwords, &path, None)?;
+  read_image_from(&path, entry, resolved.as_deref())
+}
+
 /// Remove unpacked archives nobody has looked at for `KEEP_DAYS`. Runs on the way into a new
 /// extract, so a cache left behind by a crash is cleaned the next time the feature is used.
 fn sweep(root: &Path, keep_days: u64) {

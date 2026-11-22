@@ -332,6 +332,7 @@ const DEFAULT_SETTINGS: Settings = {
   // Empty is `wrolp/backups`, one folder away from the state it protects. Twenty snapshots is a
   // few weeks of daily ones.
   backupDir: "",
+  ocrAuto: false,
   backupRetain: 20,
   // Checking costs one request and tells the user a new version exists; installing still waits
   // for a click. Off is there for anyone who would rather not talk to the release endpoint.
@@ -3867,6 +3868,13 @@ const defaultModeFor = useCallback(
               backdrop={settings.imageBackdrop}
               onSaveBackdrop={(value) => void saveSettings({ imageBackdrop: value })}
               onBrowseFolder={(path) => void tabs.openGallery(parentOf(path), path)}
+              ocrSource={
+                isSvg(editorTab.path)
+                  ? null
+                  : { kind: "path", path: editorTab.path }
+              }
+              ocrAuto={settings.ocrAuto}
+              onNotice={toast}
             />
           )}
 
@@ -3940,6 +3948,7 @@ const defaultModeFor = useCallback(
               loop={settings.galleryLoop}
               initialMode={settings.galleryMode}
               backdrop={settings.imageBackdrop}
+              ocrAuto={settings.ocrAuto}
               onSaveSettings={saveSettings}
               onNotice={toast}
             />

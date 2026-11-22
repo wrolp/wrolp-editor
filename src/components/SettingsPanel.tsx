@@ -1036,6 +1036,12 @@ export default function SettingsPanel({
                 />
               </SettingField>
               <p className="muted">{t("settings.imageBackdropDesc")}</p>
+              <SettingCheck
+                label={t("settings.ocrAuto")}
+                checked={settings.ocrAuto}
+                onChange={(v) => onSaveSettings({ ocrAuto: v })}
+                description={t("settings.ocrAutoDesc")}
+              />
               <SettingField label={t("settings.archiveCache")}>
                 <select
                   className="select"

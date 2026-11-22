@@ -432,6 +432,8 @@ export interface Settings {
   askNoteOnSave: boolean;
   /** Where configuration snapshots are written; empty means `wrolp/backups`. */
   backupDir: string;
+  /** Run OCR as soon as a picture is shown; off by default. */
+  ocrAuto: boolean;
   /** How many snapshots are kept. Older ones are removed when a new one is written. */
   backupRetain: number;
   /** Check the release endpoint after startup and every six hours; installing stays manual. */
@@ -728,6 +730,38 @@ export type AiCommitEvent =
   | { type: "delta"; text: string }
   | { type: "done"; text: string }
   | { type: "error"; code: string; detail: string };
+
+/** Where an OCR request reads its picture from. */
+export type OcrSource =
+  | { kind: "path"; path: string }
+  | { kind: "archive"; archive: string; entry: string };
+
+/** One recognized word, in the coordinate space of the bitmap the engine saw. */
+export interface OcrWord {
+  text: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface OcrLine {
+  words: OcrWord[];
+}
+
+export interface OcrImage {
+  /** The engine's bitmap size; the image may have been scaled down before recognition. */
+  width: number;
+  height: number;
+  lines: OcrLine[];
+}
+
+export interface OcrLanguage {
+  /** The tag a later `ocrImage` names. */
+  tag: string;
+  /** The name Windows shows for the language. */
+  name: string;
+}
 
 /** One step of a network operation, streamed while it runs. */
 export interface GitProgress {
@@ -1454,6 +1488,11 @@ export const api = {
     channel.onmessage = onEvent;
     return invoke<void>("ai_commit_message", { root, opId, onEvent: channel });
   },
+  /** OCR languages Windows can recognize; `ocr_unsupported` off Windows. */
+  ocrLanguages: () => invoke<OcrLanguage[]>("ocr_languages"),
+  /** Recognize one picture. `language` is a tag from `ocrLanguages`, or null for the profile. */
+  ocrImage: (source: OcrSource, language: string | null) =>
+    invoke<OcrImage>("ocr_image", { source, language }),
   aiCancel: (opId: string) => invoke<void>("ai_cancel", { opId }),
   gitConflictSides: (root: string, path: string) =>
     invoke<GitConflictSides>("git_conflict_sides", { root, path }),

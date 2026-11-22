@@ -13,6 +13,7 @@ mod gallery;
 mod git;
 mod group;
 mod name_order;
+mod ocr;
 mod office_state;
 mod pdf_position;
 mod rename;
@@ -239,7 +240,9 @@ pub fn run() {
       ai::ai_clear_key,
       ai::ai_models,
       ai::ai_cancel,
-      ai::ai_commit_message
+      ai::ai_commit_message,
+      ocr::ocr_languages,
+      ocr::ocr_image
     ]);
 
   #[cfg(windows)]

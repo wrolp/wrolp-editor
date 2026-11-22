@@ -4599,6 +4599,44 @@ button.pdf-outline-twist:hover {
   padding: 14px;
   background: var(--sunken);
 }
+/* The picture and its OCR text share one box, so the overlay follows the picture when it is
+   fitted, zoomed, or scrolled. */
+.img-ocr-shell {
+  position: relative;
+  display: block;
+  flex: 0 0 auto;
+}
+/* Invisible text over the pixels, like the PDF reader's layer: the words are there to be
+   dragged across and copied, not to be read twice. */
+.img-ocr-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  cursor: text;
+  line-height: 0;
+  user-select: text;
+}
+.img-ocr-line {
+  position: static;
+}
+.img-ocr-layer span {
+  position: absolute;
+  overflow: visible;
+  color: transparent;
+  white-space: pre;
+  cursor: text;
+  font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+}
+.img-ocr-layer ::selection {
+  background: rgba(76, 141, 255, 0.35);
+}
+/* The language picker sits in a row sized for 26px buttons, not for a dialog's select. */
+.img-tools .img-ocr-lang {
+  width: auto;
+  height: 26px;
+  padding: 0 4px;
+  font-size: 11px;
+}
 /* The failure actions sit under a centred message in a pane that can be narrow, so they
    wrap and their buttons are allowed to wrap too. */
 .img-actions {
