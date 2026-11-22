@@ -4564,6 +4564,25 @@ button.pdf-outline-twist:hover {
   padding: 24px;
   color: var(--muted);
 }
+/* What a crashed pane keeps behind "Details": the renderer's own stack. It is folded away
+   because the sentence above is what a reader needs, and the lines below are for a report. */
+.pane-error-more {
+  margin-top: 10px;
+  font-size: 11px;
+}
+.pane-error-more summary {
+  color: var(--muted);
+  cursor: pointer;
+}
+.pane-error-more pre {
+  max-height: 240px;
+  margin: 6px 0 0;
+  overflow: auto;
+  color: var(--muted);
+  font: 11px/1.5 var(--mono, ui-monospace, monospace);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 /* The pane a picture sits in. The backdrop behind its transparent pixels belongs to the picture
    (`.img-frame`) rather than to this surface, so the checkering stops where the picture stops and
    its edges stay readable against the pane. */

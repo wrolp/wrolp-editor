@@ -3757,7 +3757,7 @@ const defaultModeFor = useCallback(
           {/* A PDF takes the pane the way a picture does: there is no text behind it to
               edit, and the reader is the only view that means anything. */}
           {isPdf && tabs.fileTab && !showSettings && !showGallery && (
-            <PaneErrorBoundary>
+            <PaneErrorBoundary key={tabs.fileTab.path}>
               <Suspense fallback={<div className="pdf-loading">{t("app.loading")}</div>}>
                 <PdfViewer
                   key={tabs.fileTab.path}
@@ -3779,7 +3779,7 @@ const defaultModeFor = useCallback(
               does: the renderer is the only view of it that means anything. A CSV comes here
               too, but from its text rather than its bytes. */}
           {(officeView || csvTable) && tabs.fileTab && !showSettings && !showGallery && (
-            <PaneErrorBoundary>
+            <PaneErrorBoundary key={tabs.fileTab.path}>
               <Suspense fallback={<div className="office-status">{t("app.loading")}</div>}>
                 <OfficeViewer
                   key={tabs.fileTab.path}
