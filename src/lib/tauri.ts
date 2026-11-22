@@ -868,8 +868,8 @@ export interface OfficeState {
   showTitles: boolean;
   titleRow: number;
   titleRows: number;
-  /** The dragged width of the title column, in CSS pixels; `null` when never dragged. */
-  labelWidth: number | null;
+  /** The dragged width of each label column, in CSS pixels, by level; empty when none. */
+  labelWidths: number[];
   /** Zero-based, as the viewer counts them. */
   sheet: number;
   record: number;

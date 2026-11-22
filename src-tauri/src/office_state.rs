@@ -30,8 +30,10 @@ pub struct OfficeState {
   pub show_titles: bool,
   pub title_row: u32,
   pub title_rows: u32,
-  /// The dragged width of the title column, in CSS pixels; `None` when it was never dragged.
-  pub label_width: Option<f64>,
+  /// The dragged width of each label column, in CSS pixels, by level; an empty list is the
+  /// columns nobody dragged. The levels before the last are group headings, which the same
+  /// gesture moves when a heading is too narrow to read.
+  pub label_widths: Vec<f64>,
   /// The sheet on screen and the item within it, zero-based as the viewer counts them.
   pub sheet: u32,
   pub record: u32,
@@ -46,7 +48,7 @@ impl Default for OfficeState {
       show_titles: true,
       title_row: 1,
       title_rows: 1,
-      label_width: None,
+      label_widths: Vec::new(),
       sheet: 0,
       record: 0,
     }
@@ -64,15 +66,14 @@ impl OfficeState {
     let cleaned = Self {
       title_row: self.title_row.clamp(1, MAX_TITLE_ROW),
       title_rows: self.title_rows.min(MAX_TITLE_ROW),
-      label_width: self.label_width.filter(|w| w.is_finite()).map(|w| {
-        if w < MIN_LABEL_WIDTH {
-          MIN_LABEL_WIDTH
-        } else if w > MAX_LABEL_WIDTH {
-          MAX_LABEL_WIDTH
-        } else {
-          w
-        }
-      }),
+      // A width the viewer cannot use is dropped, not clamped to a made-up one: `0` already
+      // means "not dragged", so the column keeps its measured width.
+      label_widths: self
+        .label_widths
+        .into_iter()
+        .filter(|w| w.is_finite() && *w >= MIN_LABEL_WIDTH)
+        .map(|w| w.min(MAX_LABEL_WIDTH))
+        .collect(),
       ..self
     };
     // The defaults are the absence of a state: a file nobody changed takes no entry, which is
@@ -238,26 +239,27 @@ mod tests {
     let cleaned = OfficeState {
       title_row: 0,
       title_rows: 9000,
-      label_width: Some(-10.0),
+      label_widths: vec![-10.0, 120.0],
       ..state(0, 0)
     }
     .cleaned()
     .expect("a state with a record is still a state");
     assert_eq!(cleaned.title_row, 1);
     assert_eq!(cleaned.title_rows, MAX_TITLE_ROW);
-    assert_eq!(cleaned.label_width, Some(MIN_LABEL_WIDTH));
+    // The width that cannot be a column is dropped; the one that can is kept as written.
+    assert_eq!(cleaned.label_widths, vec![120.0]);
 
     let wide = OfficeState {
-      label_width: Some(1e9),
+      label_widths: vec![1e9],
       ..state(0, 0)
     };
-    assert_eq!(wide.cleaned().unwrap().label_width, Some(MAX_LABEL_WIDTH));
+    assert_eq!(wide.cleaned().unwrap().label_widths, vec![MAX_LABEL_WIDTH]);
 
     let broken = OfficeState {
-      label_width: Some(f64::INFINITY),
+      label_widths: vec![f64::INFINITY],
       ..state(0, 0)
     };
-    assert_eq!(broken.cleaned().unwrap().label_width, None);
+    assert!(broken.cleaned().unwrap().label_widths.is_empty());
   }
 
   /// The keys are the same normalized paths the drafts and the PDF positions use.

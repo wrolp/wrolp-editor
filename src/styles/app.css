@@ -7405,8 +7405,11 @@ select {
 .office-record-field {
   display: contents;
 }
+/* A row's rule and the card's own frame are drawn a shade stronger than the hairlines used
+   between panes: this is a table of fields, and a two-level title is only readable as two
+   columns if the line between them can be seen at all. */
 .office-record-field > * {
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--border-strong);
 }
 .office-record-field:last-child > * {
   border-bottom: 0;
@@ -7441,14 +7444,26 @@ select {
   grid-column: 1;
   min-width: 0;
   padding: 10px 12px;
-  border-right: 1px solid var(--border);
+  /* The label sits on `--surface-active`, which is within a shade of `--border`: a hairline in
+     that colour vanishes between two label columns, and a two-level title then reads as one
+     wide one. The stronger tone is what keeps the levels apart. */
+  border-right: 1px solid var(--border-strong);
   background: var(--surface-active);
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
   line-height: 1.5;
+  /* Centred both ways: the titles are a header of their own, and a column of them reads as a
+     table only while the text sits in the middle of its cell instead of at the top edge. */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
   white-space: pre-wrap;
   word-break: break-word;
+  /* The window keeps selection off so a drag does not start one; a title is still something a
+     reader copies out of a sheet, so these cells put it back. */
+  user-select: text;
 }
 .office-record-value {
   grid-column: 2;

@@ -36,6 +36,27 @@ const MAX_SHEET_BYTES = 512 * 1024 * 1024;
 /** How much of a sheet is drawn. A spreadsheet can be longer than any screen can scroll. */
 const MAX_ROWS = 2000;
 const MAX_COLS = 80;
+/**
+ * How many title rows a record draws as label columns.
+ *
+ * A block of two or three rows is a group heading over a field name; a block deeper than this
+ * is a sheet that happens to have text at the top, and turning all of it into columns would
+ * leave the value a sliver.
+ */
+const MAX_TITLE_LEVELS = 4;
+
+/**
+ * One merged range, in the coordinates the viewer draws in.
+ *
+ * Rows are the sheet's own row numbers, because that is how a title row is named; columns are
+ * indices into `SheetView.rows`, which start at the sheet's first used column.
+ */
+interface SheetMerge {
+  r1: number;
+  c1: number;
+  r2: number;
+  c2: number;
+}
 
 /** One sheet as the viewer draws it: formatted cells, already bounded. */
 interface SheetView {
@@ -43,8 +64,29 @@ interface SheetView {
   rows: string[][];
   /** Zero-based sheet row of each drawn row; blank rows are left out of `rows`. */
   rowNumbers: number[];
+  /** The merged ranges, which is what a title block's headings really look like. */
+  merges: SheetMerge[];
   /** Whether rows or columns were left out, so the count is not mistaken for the whole. */
   truncated: boolean;
+}
+
+/** One field of a record: a cell's value and picture, and the title levels over it. */
+interface RecordField {
+  column: number;
+  value: string;
+  picture?: CellPicture;
+  levels: string[];
+}
+
+/** One cell of the record's title block. */
+interface HeadingCell {
+  /** False when a heading merged over this field covers the cell. */
+  draw: boolean;
+  /** Rows this cell covers: more than one when a heading was merged across several fields. */
+  span: number;
+  /** Label columns this cell covers: more than one when the levels below say nothing. */
+  cols: number;
+  text: string;
 }
 
 /** One sheet row read as a record; each of its cells is one line of the record. */
@@ -60,10 +102,15 @@ const DEFAULT_OFFICE_STATE: OfficeState = {
   showTitles: true,
   titleRow: 1,
   titleRows: 1,
-  labelWidth: null,
+  labelWidths: [],
   sheet: 0,
   record: 0,
 };
+
+/** The dragged widths, level by level: the same columns, the same numbers. */
+function sameWidths(a: number[], b: number[]): boolean {
+  return a.length === b.length && a.every((width, index) => width === b[index]);
+}
 
 /** Whether two views say the same thing; `null` stands for the defaults above. */
 function sameState(a: OfficeState | null, b: OfficeState | null): boolean {
@@ -74,7 +121,7 @@ function sameState(a: OfficeState | null, b: OfficeState | null): boolean {
     left.showTitles === right.showTitles &&
     left.titleRow === right.titleRow &&
     left.titleRows === right.titleRows &&
-    left.labelWidth === right.labelWidth &&
+    sameWidths(left.labelWidths, right.labelWidths) &&
     left.sheet === right.sheet &&
     left.record === right.record
   );
@@ -367,7 +414,16 @@ async function readWorkbook(raw: ArrayBuffer, images: SheetImages | null): Promi
         rowNumbers.push(row);
       }
     }
-    return { name, rows, rowNumbers, truncated };
+    // The merges as the record view needs them: nothing outside the drawn window can be
+    // reached, and a sheet with tens of thousands of merged cells is not worth carrying.
+    const start = sheet?.["!ref"] ? XLSX.utils.decode_range(sheet["!ref"]).s.c : 0;
+    const merges: SheetMerge[] = (sheet?.["!merges"] ?? []).slice(0, 500).map((range) => ({
+      r1: range.s.r,
+      c1: range.s.c - start,
+      r2: range.e.r,
+      c2: range.e.c - start,
+    }));
+    return { name, rows, rowNumbers, truncated, merges };
   });
 }
 
@@ -433,7 +489,7 @@ function readCsv(text: string): SheetView {
     }
   }
   if (field !== "" || row.length > 0) endRecord();
-  return { name: "CSV", rows, rowNumbers, truncated };
+  return { name: "CSV", rows, rowNumbers, truncated, merges: [] };
 }
 
 /**
@@ -472,10 +528,12 @@ export default function OfficeViewer({ path, kind, csvText, paper, onSavePaper }
   const [titleRows, setTitleRows] = useState(1);
   const recordsRef = useRef<HTMLDivElement>(null);
   /**
-   * Width of the title column, once the user has dragged it; null lets the column take the
-   * width of its longest title, which is the width it needs to be read without wrapping.
+   * Width of each label column, once the user has dragged it, by level; `0` lets that column
+   * take the width of its longest title, which is the width it needs to be read without
+   * wrapping. Every level has its own: a group heading merged over several fields is dragged
+   * by the same handle as the field names under it.
    */
-  const [labelWidth, setLabelWidth] = useState<number | null>(null);
+  const [labelWidths, setLabelWidths] = useState<number[]>([]);
 
   /** The Word page's own width in CSS pixels, measured once before any zoom is applied. */
   const [paperWidth, setPaperWidth] = useState(0);
@@ -541,7 +599,7 @@ export default function OfficeViewer({ path, kind, csvText, paper, onSavePaper }
     setShowTitles(true);
     setTitleRow(1);
     setTitleRows(1);
-    setLabelWidth(null);
+    setLabelWidths([]);
     setWordZoom(null);
     setWordGaps(false);
     setPaperWidth(0);
@@ -568,7 +626,7 @@ export default function OfficeViewer({ path, kind, csvText, paper, onSavePaper }
           setShowTitles(stored.showTitles);
           setTitleRow(stored.titleRow);
           setTitleRows(stored.titleRows);
-          setLabelWidth(stored.labelWidth);
+          setLabelWidths(stored.labelWidths ?? []);
           pendingState.current = stored;
           setActive(stored.sheet);
           setRestoreTick((n) => n + 1);
@@ -719,7 +777,7 @@ export default function OfficeViewer({ path, kind, csvText, paper, onSavePaper }
       showTitles,
       titleRow,
       titleRows,
-      labelWidth,
+      labelWidths,
       sheet: active,
       record,
     });
@@ -733,7 +791,7 @@ export default function OfficeViewer({ path, kind, csvText, paper, onSavePaper }
       saveDirty.current = false;
       if (savedState.current) void api.saveOfficeState(path, savedState.current).catch(() => {});
     }, 400);
-  }, [path, kind, mode, showTitles, titleRow, titleRows, labelWidth, active, record]);
+  }, [path, kind, mode, showTitles, titleRow, titleRows, labelWidths, active, record]);
 
   /**
    * The sheet a large workbook is showing.
@@ -767,7 +825,9 @@ export default function OfficeViewer({ path, kind, csvText, paper, onSavePaper }
         published = true;
         setImages(pictures);
         if (previous) releaseSheetImages(previous);
-        setLazySheet({ name, ...rows });
+        // The sheet-at-a-time reader keeps no merge table, so its records fall back to one
+        // cell per field — the same shape every record had before merges were read at all.
+        setLazySheet({ name, ...rows, merges: [] });
       } catch (e) {
         if (alive) setError(failure(e));
       } finally {
@@ -805,31 +865,57 @@ export default function OfficeViewer({ path, kind, csvText, paper, onSavePaper }
     return set;
   }, [cellImages]);
   /**
-   * The title of each column, taken from the title block above the records.
+   * The title block, column by column and row by row.
    *
-   * A title can be spelled over several rows — a group heading above a sub-heading, or one
-   * merged cell down the column — so the block is read row by row and the parts joined. A
-   * column whose cells are all empty simply has no title.
+   * The card draws one label column per title row of the setting — the sheet's own title row
+   * included: three title rows are three columns, whatever those rows hold. A heading stays on
+   * the level of the row it was written in: packing the names towards the top or the bottom
+   * would move a sub-heading out from under the group it belongs to — `后端` is written on the
+   * second row of `负责人`, and belongs beside `前端`, not above it. A column named on one
+   * level only keeps that one cell; the card widens it to the value column rather than leaving
+   * an empty level beside it.
    */
-  const titles = useMemo<string[]>(() => {
+  const titleBlock = useMemo(() => {
+    const empty = { levels: [] as string[][], rows: [] as number[] };
     // Titles off means the sheet has no title block at all; every row is data.
-    if (!showTitles || !sheet || sheetCols === 0) return [];
+    if (!showTitles || !sheet || sheetCols === 0 || titleRows === 0) return empty;
     const byRow = new Map<number, number>();
     sheet.rowNumbers.forEach((row, index) => byRow.set(row, index));
-    const parts: string[][] = Array.from({ length: sheetCols }, () => []);
-    for (let offset = 0; offset < titleRows; offset += 1) {
-      const index = byRow.get(titleRow - 1 + offset);
-      if (index === undefined) continue;
-      const row = sheet.rows[index] ?? [];
+    const depth = Math.min(titleRows, MAX_TITLE_LEVELS);
+    const rows = Array.from({ length: depth }, (_, offset) => titleRow - 1 + offset);
+    const levels: string[][] = Array.from({ length: sheetCols }, () =>
+      Array.from({ length: depth }, () => "")
+    );
+    rows.forEach((row, level) => {
+      const index = byRow.get(row);
+      if (index === undefined) return;
+      const cells = sheet.rows[index] ?? [];
       for (let column = 0; column < sheetCols; column += 1) {
-        const text = (row[column] ?? "").trim();
-        // A merged title writes its text in the first cell only; joining non-empty parts
-        // keeps it once instead of repeating the same line for every row it covers.
-        if (text && !parts[column].includes(text)) parts[column].push(text);
+        const text = (cells[column] ?? "").trim();
+        if (text) levels[column][level] = text;
       }
-    }
-    return parts.map((column) => column.join(" "));
+    });
+    return { levels, rows };
   }, [showTitles, sheet, sheetCols, titleRow, titleRows]);
+  const titleLevels = titleBlock.levels;
+  /** The label columns the card draws: one per title row the settings name. */
+  const titleDepth = titleBlock.rows.length;
+  /**
+   * The card's columns: the title levels, then the value.
+   *
+   * A column the user has dragged keeps its width; one nobody has takes the width its text
+   * needs — the field names under a group heading get a little more room than the headings
+   * above them, which usually say less.
+   */
+  const recordColumns = useMemo(() => {
+    if (titleDepth === 0) return "minmax(0, 1fr)";
+    const labels = Array.from({ length: titleDepth }, (_, level) => {
+      const width = labelWidths[level] ?? 0;
+      if (width > 0) return `${width}px`;
+      return level === titleDepth - 1 ? "fit-content(min(20%, 200px))" : "fit-content(min(12%, 140px))";
+    });
+    return [...labels, "minmax(0, 1fr)"].join(" ");
+  }, [titleDepth, labelWidths]);
   /**
    * The data rows, each one a record.
    *
@@ -862,6 +948,91 @@ export default function OfficeViewer({ path, kind, csvText, paper, onSavePaper }
       (image) => image.from.row <= item.row && item.row <= (image.to?.row ?? image.from.row)
     );
   }, [pictures, item]);
+
+  /**
+   * The fields this record draws.
+   *
+   * A column the sheet never uses is not a field. An empty cell under a title still is, so a
+   * record keeps the same shape from row to row — unless the titles are hidden, when an empty
+   * field says nothing.
+   */
+  const fields = useMemo<RecordField[]>(() => {
+    if (!item) return [];
+    const out: RecordField[] = [];
+    for (let column = 0; column < sheetCols; column += 1) {
+      const value = item.cells[column] ?? "";
+      const picture = cellImages[`${item.row}:${column}`];
+      const levels = titleLevels[column] ?? [];
+      if (!value && !picture && (!titleDepth || !levels.some((text) => text))) continue;
+      out.push({ column, value, picture, levels });
+    }
+    return out;
+  }, [item, sheetCols, cellImages, titleLevels, titleDepth]);
+
+  /**
+   * The label cells of one record.
+   *
+   * Excel writes a merged heading once, in the first cell of the merge, and leaves the cells it
+   * covers empty. Drawn as they arrive, every field but the first of a group looks untitled;
+   * read through the merge table, the heading is one cell over the fields it covers, which is
+   * what the merge meant.
+   *
+   * A level a field says nothing on is left undrawn, and the label above it widens to the value
+   * column instead: most of a sheet's fields are named on one level only, and an empty cell in
+   * the level they skip would be a column of nothing next to every name.
+   */
+  const headingCells = useMemo<HeadingCell[][]>(() => {
+    if (titleDepth === 0) return [];
+    const merges = sheet?.merges ?? [];
+    const out: HeadingCell[][] = [];
+    const coveredAny: boolean[] = fields.map(() => false);
+    for (let level = 0; level < titleDepth; level += 1) {
+      const row = titleBlock.rows[level] ?? titleRow - 1 + level;
+      const cells: HeadingCell[] = fields.map((field) => {
+        const text = (field.levels[level] ?? "").trim();
+        return { draw: text !== "", span: 1, cols: 1, text };
+      });
+      // A heading is drawn where its merge starts, and the fields the merge reaches are covered
+      // by that one cell.
+      const spans = new Map<number, number>();
+      const covered = new Set<number>();
+      for (const merge of merges) {
+        if (merge.r1 !== row || merge.c2 <= merge.c1) continue;
+        spans.set(merge.c1, merge.c2);
+        for (let column = merge.c1 + 1; column <= merge.c2; column += 1) covered.add(column);
+      }
+      fields.forEach((field, index) => {
+        if (covered.has(field.column)) {
+          cells[index] = { draw: false, span: 1, cols: 1, text: "" };
+          coveredAny[index] = true;
+          return;
+        }
+        const end = spans.get(field.column);
+        if (end === undefined) return;
+        const shared = fields.filter(
+          (other) => other.column > field.column && other.column <= end
+        ).length;
+        if (shared > 0) cells[index] = { ...cells[index], span: shared + 1 };
+      });
+      out.push(cells);
+    }
+    // Every field reaches the value column with one continuous block of labels: a field whose
+    // deepest label is above the last level widens it over the levels it leaves empty, and a
+    // field with no title at all keeps one empty cell so its rule is not broken.
+    fields.forEach((_field, index) => {
+      let last = -1;
+      for (let level = 0; level < titleDepth; level += 1) if (out[level][index].draw) last = level;
+      if (last < 0) {
+        if (!coveredAny[index]) {
+          out[0][index] = { draw: true, span: 1, cols: titleDepth, text: "" };
+        }
+        return;
+      }
+      if (last === titleDepth - 1) return;
+      out[last][index] = { ...out[last][index], cols: titleDepth - last };
+    });
+    return out;
+  }, [fields, titleDepth, sheet, titleBlock, titleRow]);
 
   /** Another sheet is another list; the record index does not carry over. */
   useEffect(() => {
@@ -914,19 +1085,33 @@ export default function OfficeViewer({ path, kind, csvText, paper, onSavePaper }
     setRecord((current + delta + records.length) % records.length);
   };
 
-  /** The divider between titles and data: drag it left or right to re-measure the column. */
-  const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
+  /**
+   * The divider on a label column's right edge: drag it to re-measure that column.
+   *
+   * Every level has a handle, so a group heading merged over several fields is widened by the
+   * same gesture as the field names under it. The width it starts from is the column's own —
+   * the card's resolved columns, not the cell's box, which may span two of them.
+   */
+  const startResize = (event: React.PointerEvent<HTMLDivElement>, level: number) => {
     const card = event.currentTarget.closest<HTMLElement>(".office-record-card");
-    const label = card?.querySelector<HTMLElement>(".office-record-label");
-    if (!card || !label) return;
+    if (!card) return;
     event.preventDefault();
     const startX = event.clientX;
-    const startWidth = label.getBoundingClientRect().width;
+    const columns = getComputedStyle(card).gridTemplateColumns.split(/\s+/);
+    const measured = parseFloat(columns[level] ?? "");
+    const startWidth = Number.isFinite(measured) ? measured : 0;
     // Keep a readable slice of the data side no matter how far the divider is dragged.
     const max = Math.max(60, card.clientWidth - 160);
     const move = (moveEvent: PointerEvent) => {
-      const width = startWidth + moveEvent.clientX - startX;
-      setLabelWidth(Math.round(Math.min(Math.max(width, 60), max)));
+      const width = Math.round(
+        Math.min(Math.max(startWidth + moveEvent.clientX - startX, 60), max)
+      );
+      setLabelWidths((current) => {
+        const out = [...current];
+        while (out.length <= level) out.push(0);
+        out[level] = width;
+        return out;
+      });
     };
     const stop = () => {
       window.removeEventListener("pointermove", move);
@@ -1000,6 +1185,35 @@ export default function OfficeViewer({ path, kind, csvText, paper, onSavePaper }
     drawn.rowNumbers.forEach((row, index) => map.set(row, index));
     return map;
   }, [drawn]);
+  /**
+   * The merged ranges, as the grid draws them.
+   *
+   * A merge is one cell spanning several columns and several rows, so the cells it covers are
+   * not rendered at all: `starts` holds the span each cell in the top-left of a merge takes,
+   * and `covered` holds the positions that cell already fills. Both are keyed by sheet row and
+   * drawn column, because a row the reader skipped takes up no room in the table.
+   */
+  const gridSpans = useMemo(() => {
+    const starts = new Map<string, { cols: number; rows: number }>();
+    const covered = new Set<string>();
+    let budget = 20_000;
+    for (const merge of sheet?.merges ?? []) {
+      const c1 = Math.max(merge.c1, 0);
+      const c2 = Math.min(merge.c2, drawn.cols - 1);
+      const rows = drawn.rowNumbers.filter((row) => row >= merge.r1 && row <= merge.r2).length;
+      if (c2 < c1 || rows === 0) continue;
+      starts.set(`${merge.r1}:${c1}`, { cols: c2 - c1 + 1, rows });
+      for (let row = merge.r1; row <= merge.r2 && budget > 0; row += 1) {
+        if (!drawnRow.has(row)) continue;
+        for (let column = c1; column <= c2 && budget > 0; column += 1) {
+          budget -= 1;
+          if (row === merge.r1 && column === c1) continue;
+          covered.add(`${row}:${column}`);
+        }
+      }
+    }
+    return { starts, covered };
+  }, [sheet, drawn, drawnRow]);
 
   const tableRef = useRef<HTMLTableElement>(null);
   const [placed, setPlaced] = useState<PlacedImage[]>([]);
@@ -1025,10 +1239,21 @@ export default function OfficeViewer({ path, kind, csvText, paper, onSavePaper }
       const corner = (col: number, row: number) => {
         const index = drawnRow.get(row);
         if (index === undefined) return null;
-        const cell = table.tBodies[0]?.rows[index]?.cells[col + 1] as HTMLElement | undefined;
-        if (!cell) return null;
-        const rect = cell.getBoundingClientRect();
-        return { left: rect.left - base.left, top: rect.top - base.top };
+        const tr = table.tBodies[0]?.rows[index];
+        if (!tr) return null;
+        // Columns are counted through the spans: a merged cell stands for several of them, so
+        // a cell's index in the row is not its column.
+        let at = 0;
+        for (let i = 1; i < tr.cells.length; i += 1) {
+          const cell = tr.cells[i];
+          const span = cell.colSpan || 1;
+          if (col < at + span) {
+            const rect = cell.getBoundingClientRect();
+            return { left: rect.left - base.left, top: rect.top - base.top };
+          }
+          at += span;
+        }
+        return null;
       };
       const out: PlacedImage[] = [];
       pictures.forEach((image, index) => {
@@ -1054,7 +1279,7 @@ export default function OfficeViewer({ path, kind, csvText, paper, onSavePaper }
     const observer = new ResizeObserver(measure);
     observer.observe(table);
     return () => observer.disconnect();
-  }, [pictures, drawnRow, drawn.cols, mode]);
+  }, [pictures, drawnRow, drawn.cols, gridSpans, mode]);
 
   /**
    * The page under the reading mark — a third of the way down the pane, so the indicator
@@ -1361,48 +1586,53 @@ export default function OfficeViewer({ path, kind, csvText, paper, onSavePaper }
             {item ? (
               <>
                 <div
-                  className={`office-record-card${showTitles ? "" : " no-titles"}`}
-                  style={
-                    labelWidth == null
-                      ? undefined
-                      : { gridTemplateColumns: `${labelWidth}px minmax(0, 1fr)` }
-                  }
+                  className={`office-record-card${titleDepth === 0 ? " no-titles" : ""}`}
+                  style={{ gridTemplateColumns: recordColumns }}
                 >
-                  {Array.from({ length: sheetCols }, (_, column) => {
-                    const value = item.cells[column] ?? "";
-                    const picture = cellImages[`${item.row}:${column}`];
-                    const title = titles[column] ?? "";
-                    // A column the sheet never uses is not a field. An empty cell under a
-                    // title still is, so a record keeps the same shape from row to row —
-                    // unless the titles are hidden, when an empty field says nothing.
-                    if (!value && !picture && (!showTitles || !title)) return null;
-                    return (
-                      <div className="office-record-field" key={column}>
-                        {showTitles && (
-                          <div className="office-record-label">
-                            {title}
-                            {/* The drag handle rides on the column's edge; every field carries
-                                one so the divider can be grabbed anywhere down the card. */}
+                  {fields.map((field, index) => (
+                    <div className="office-record-field" key={field.column}>
+                      {headingCells.map((cells, level) => {
+                        const cell = cells[index];
+                        if (!cell?.draw) return null;
+                        return (
+                          <div
+                            className="office-record-label"
+                            key={level}
+                            style={{
+                              // A label wider than one level covers the levels its field
+                              // leaves empty, so the block always reaches the value column.
+                              gridColumn: `${level + 1} / span ${cell.cols}`,
+                              // A heading merged over several fields covers their rows.
+                              gridRow: cell.span > 1 ? `span ${cell.span}` : undefined,
+                            }}
+                          >
+                            {cell.text}
+                            {/* Every label column carries its own handle, on the edge facing
+                                the next one: a heading merged over several fields is widened by
+                                the same gesture as the field names under it. */}
                             <div
                               className="office-record-divider"
                               role="separator"
                               aria-orientation="vertical"
-                              onPointerDown={startResize}
+                              onPointerDown={(event) => startResize(event, level + cell.cols - 1)}
                             />
                           </div>
+                        );
+                      })}
+                      <div
+                        className="office-record-value"
+                        style={titleDepth > 0 ? { gridColumn: titleDepth + 1 } : undefined}
+                      >
+                        {field.picture ? (
+                          <img className="office-record-image" src={field.picture.url} alt="" />
+                        ) : field.value ? (
+                          field.value
+                        ) : (
+                          <span className="office-record-blank">—</span>
                         )}
-                        <div className="office-record-value">
-                          {picture ? (
-                            <img className="office-record-image" src={picture.url} alt="" />
-                          ) : value ? (
-                            value
-                          ) : (
-                            <span className="office-record-blank">—</span>
-                          )}
-                        </div>
                       </div>
-                    );
-                  })}
+                    </div>
+                  ))}
                   {itemPictures.length > 0 && (
                     <div className="office-record-floats">
                       {itemPictures.map((picture) => (
@@ -1475,9 +1705,14 @@ export default function OfficeViewer({ path, kind, csvText, paper, onSavePaper }
                     <tr key={rowIndex}>
                       <th className="office-grid-gutter">{rowNumber + 1}</th>
                       {Array.from({ length: drawn.cols }, (_, cellIndex) => {
-                        const picture = cellImages[`${rowNumber}:${cellIndex}`];
+                        const at = `${rowNumber}:${cellIndex}`;
+                        // A cell inside a merge is drawn by the merge's own cell, which is
+                        // already spanning this position.
+                        if (gridSpans.covered.has(at)) return null;
+                        const span = gridSpans.starts.get(at);
+                        const picture = cellImages[at];
                         return (
-                          <td key={cellIndex}>
+                          <td key={cellIndex} colSpan={span?.cols} rowSpan={span?.rows}>
                             {picture ? (
                               <img className="office-cell-image" src={picture.url} alt="" />
                             ) : (
