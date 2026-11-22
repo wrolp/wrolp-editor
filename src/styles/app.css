@@ -6286,6 +6286,10 @@ select {
 .tab-dropdown,
 .grp-panel,
 .draft-list,
+/* The recent-folders panel is the one list that hangs off the sidebar as a floating popover:
+   without this it drew the platform's heavy bar, which is the only piece of chrome in that
+   panel the app did not paint itself. */
+.folder-menu-list,
 .md-toc,
 .md-preview,
 .md-body pre,
@@ -6317,6 +6321,7 @@ select {
 .tab-dropdown::-webkit-scrollbar,
 .grp-panel::-webkit-scrollbar,
 .draft-list::-webkit-scrollbar,
+.folder-menu-list::-webkit-scrollbar,
 .md-toc::-webkit-scrollbar,
 .md-preview::-webkit-scrollbar,
 .md-body pre::-webkit-scrollbar,
@@ -6340,6 +6345,7 @@ select {
 .tab-dropdown::-webkit-scrollbar-track,
 .grp-panel::-webkit-scrollbar-track,
 .draft-list::-webkit-scrollbar-track,
+.folder-menu-list::-webkit-scrollbar-track,
 .md-toc::-webkit-scrollbar-track,
 .md-preview::-webkit-scrollbar-track,
 .md-body pre::-webkit-scrollbar-track,
@@ -6370,6 +6376,7 @@ select {
 .tab-dropdown::-webkit-scrollbar-thumb,
 .grp-panel::-webkit-scrollbar-thumb,
 .draft-list::-webkit-scrollbar-thumb,
+.folder-menu-list::-webkit-scrollbar-thumb,
 .md-toc::-webkit-scrollbar-thumb,
 .md-preview::-webkit-scrollbar-thumb,
 .md-body pre::-webkit-scrollbar-thumb,
@@ -6397,6 +6404,7 @@ select {
 .tab-dropdown:hover::-webkit-scrollbar-thumb,
 .grp-panel:hover::-webkit-scrollbar-thumb,
 .draft-list:hover::-webkit-scrollbar-thumb,
+.folder-menu-list:hover::-webkit-scrollbar-thumb,
 .md-toc:hover::-webkit-scrollbar-thumb,
 .md-preview:hover::-webkit-scrollbar-thumb,
 .md-body pre:hover::-webkit-scrollbar-thumb,
