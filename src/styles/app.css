@@ -1672,10 +1672,12 @@ body.resizing .editor-host {
 .folder-item.gone:hover .ctx-icon {
   color: var(--text-faint);
 }
-/* Always there rather than waiting for the row to be hovered: a control that is invisible
-   until you happen to pass over its row is one nobody finds. It stays quiet by colour
-   (`--text-faint` on the panel is about 4:1, against the name's 9:1), so the folder name still
-   reads first and the cross does not have to be discovered by accident. */
+/* The cross waits for its row to be pointed at: a menu of folder paths is mostly read, and a
+   column of crosses down the right edge competes with the names it is there to forget. Hidden
+   by opacity rather than taken out of the row, so the path's width does not jump as the
+   pointer moves in; `pointer-events` is off while it is invisible, or an unseen target would
+   answer clicks meant for the row. Keyboard focus reveals it the same way, so Tab still
+   reaches it. */
 .folder-item-remove {
   flex: 0 0 auto;
   width: 18px;
@@ -1688,6 +1690,14 @@ body.resizing .editor-host {
   font-size: 14px;
   line-height: 1;
   cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 120ms ease;
+}
+.folder-item:hover .folder-item-remove,
+.folder-item-remove:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
 }
 /* The row's hover lays the accent down underneath the cross, and grey on indigo is what made it
    vanish a second time. `--on-accent` is the token the theme already carries for that surface —
