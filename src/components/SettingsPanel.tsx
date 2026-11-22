@@ -5,6 +5,7 @@ import logoUrl from "../../branding/logo.svg";
 import { formatWhen, LANGUAGES, t } from "../lib/i18n";
 import ArchivePasswordSettings from "./ArchivePasswordSettings";
 import { parseExtensionList } from "../lib/path";
+import { loadOcrLanguages } from "../lib/ocrSupport";
 import { LINE_ENDINGS } from "../lib/types";
 import SettingCheck from "./SettingCheck";
 import SettingField from "./SettingField";
@@ -151,6 +152,21 @@ export default function SettingsPanel({
 }: Props) {
   // The first entry in NAV, so opening Settings lands on it rather than on the second one.
   const [category, setCategory] = useState<Category>("general");
+  /** Whether an OCR engine and at least one recognizer language are available. */
+  const [ocrAvailable, setOcrAvailable] = useState(false);
+  useEffect(() => {
+    let live = true;
+    loadOcrLanguages()
+      .then(() => {
+        if (live) setOcrAvailable(true);
+      })
+      .catch(() => {
+        if (live) setOcrAvailable(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, []);
   const [version, setVersion] = useState("…");
   /**
    * Update check state. The `Update` handle is kept because installing needs the same object
@@ -1036,12 +1052,16 @@ export default function SettingsPanel({
                 />
               </SettingField>
               <p className="muted">{t("settings.imageBackdropDesc")}</p>
-              <SettingCheck
-                label={t("settings.ocrAuto")}
-                checked={settings.ocrAuto}
-                onChange={(v) => onSaveSettings({ ocrAuto: v })}
-                description={t("settings.ocrAutoDesc")}
-              />
+              {/* A switch that cannot work is not shown: the platform may lack the engine, or
+                  Windows may have no recognizer language installed. */}
+              {ocrAvailable && (
+                <SettingCheck
+                  label={t("settings.ocrAuto")}
+                  checked={settings.ocrAuto}
+                  onChange={(v) => onSaveSettings({ ocrAuto: v })}
+                  description={t("settings.ocrAutoDesc")}
+                />
+              )}
               <SettingField label={t("settings.archiveCache")}>
                 <select
                   className="select"

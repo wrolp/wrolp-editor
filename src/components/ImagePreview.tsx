@@ -11,6 +11,7 @@ import {
   type OcrLine,
   type OcrSource,
 } from "../lib/tauri";
+import { loadOcrLanguages } from "../lib/ocrSupport";
 import { useMenuPlacement } from "../hooks/useMenuPlacement";
 import { stepFrom, zoomText } from "../lib/zoom";
 import BackdropPicker from "./BackdropPicker";
@@ -119,18 +120,6 @@ function lineText(line: OcrLine): string {
     .trimEnd();
 }
 
-/** One language list for the whole window; the engine's list only changes with Windows. */
-let ocrLanguagesPromise: Promise<OcrLanguage[]> | null = null;
-function loadOcrLanguages(): Promise<OcrLanguage[]> {
-  if (!ocrLanguagesPromise) {
-    ocrLanguagesPromise = api.ocrLanguages().catch((error) => {
-      ocrLanguagesPromise = null;
-      throw error;
-    });
-  }
-  return ocrLanguagesPromise;
-}
-
 /**
  * Draws an image file — raster or SVG — instead of leaving its bytes in the editor.
  *
@@ -165,7 +154,7 @@ export default function ImagePreview({
   const [zoomDraft, setZoomDraft] = useState("");
   /** The tools take no room unless they are in use; the tab in the corner brings them back. */
   const [toolsOpen, setToolsOpen] = useState(false);
-  /** The installed recognizers, and whether this platform has the feature at all. */
+  /** The installed recognizers, and whether the engine can run at all. */
   const [ocrLanguages, setOcrLanguages] = useState<OcrLanguage[]>([]);
   const [ocrAvailable, setOcrAvailable] = useState(false);
   const [ocrLanguage, setOcrLanguage] = useState("");
@@ -371,16 +360,10 @@ export default function ImagePreview({
           list.some((language) => language.tag === current) ? current : ""
         );
       })
-      .catch((error) => {
+      .catch(() => {
         if (!live) return;
-        const raw =
-          typeof error === "string"
-            ? error
-            : error instanceof Error
-              ? error.message
-              : String(error);
         setOcrLanguages([]);
-        setOcrAvailable(!raw.startsWith("ocr_unsupported"));
+        setOcrAvailable(false);
       });
     return () => {
       live = false;
