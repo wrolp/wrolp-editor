@@ -13,6 +13,7 @@ mod gallery;
 mod git;
 mod group;
 mod name_order;
+mod office_state;
 mod pdf_position;
 mod rename;
 mod unlock;
@@ -176,6 +177,8 @@ pub fn run() {
       commands::get_groups,
       commands::save_groups,
       commands::transfer_tabs,
+      office_state::get_office_state,
+      office_state::save_office_state,
       pdf_position::get_pdf_position,
       pdf_position::save_pdf_position,
       commands::get_window_state,

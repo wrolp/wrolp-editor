@@ -10,6 +10,7 @@ use crate::commands::{self, protected_roots, refused_by_scope, HistoryEntry};
 use crate::draft;
 use crate::file_settings;
 use crate::group::GroupStore;
+use crate::office_state;
 use crate::pdf_position;
 use crate::unlock::{self, UnlockStore};
 use crate::versioning;
@@ -455,6 +456,9 @@ pub(crate) fn rekey_state(app: &AppHandle, old: &str, new: &str) -> Result<(), S
   file_settings::rekey_prefix(app, old, new)?;
   // A PDF's reading position belongs to the file, so it follows it across a rename too.
   pdf_position::rekey_prefix(app, old, new)?;
+  // So does the view an Office document was last left in: its sheet, its record view and the
+  // record inside it are properties of that document.
+  office_state::rekey_prefix(app, old, new)?;
   // Each version history stands for one path, recorded in the repository's own metadata, so a
   // rename walks the store instead of reading a single commit.
   versioning::rekey_prefix(&versioning::base_dir(app)?, old, new)?;

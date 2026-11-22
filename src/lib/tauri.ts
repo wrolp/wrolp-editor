@@ -856,6 +856,25 @@ export interface PdfPosition {
   ratio: number;
 }
 
+/**
+ * Where an Office document was left: the sheet on screen and the item within it, plus the
+ * settings of the records view that shows them. Unlike a PDF there is no fraction — one row is
+ * one record, so the place is the record itself.
+ */
+export interface OfficeState {
+  /** Records view rather than the grid. */
+  records: boolean;
+  /** The record view's title block: drawn or not, the row it starts at, how many rows it takes. */
+  showTitles: boolean;
+  titleRow: number;
+  titleRows: number;
+  /** The dragged width of the title column, in CSS pixels; `null` when never dragged. */
+  labelWidth: number | null;
+  /** Zero-based, as the viewer counts them. */
+  sheet: number;
+  record: number;
+}
+
 /** Where the window was left, in physical pixels. `maximized` is the state to enter with. */
 export interface WindowState {
   x: number;
@@ -1470,6 +1489,14 @@ export const api = {
   gitForgetCert: (host: string) => invoke<void>("git_forget_cert", { host }),
   getGroups: () => invoke<GroupStore>("get_groups"),
   saveGroups: (store: GroupStore) => invoke<GroupStore>("save_groups", { store }),
+  /**
+   * The view an Office document was last left in: the sheet, whether its records view was on,
+   * how that view was set up, and the item it was showing. `null` when never changed.
+   */
+  getOfficeState: (path: string) => invoke<OfficeState | null>("get_office_state", { path }),
+  /** Remember that view, or clear it when the state is the default one. */
+  saveOfficeState: (path: string, state: OfficeState) =>
+    invoke<void>("save_office_state", { path, state }),
   /** Where this PDF was last left; null when it has never been read on this machine. */
   getPdfPosition: (path: string) => invoke<PdfPosition | null>("get_pdf_position", { path }),
   savePdfPosition: (path: string, page: number, ratio: number) =>

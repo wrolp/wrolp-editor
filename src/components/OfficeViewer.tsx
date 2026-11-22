@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { t } from "../lib/i18n";
-import { api, errorMessage } from "../lib/tauri";
+import { api, errorMessage, type OfficeState } from "../lib/tauri";
 import type { OfficeKind } from "../lib/path";
 import { IconChevron, IconSliders } from "./icons";
 import {
@@ -51,6 +51,37 @@ interface SheetRecord {
   /** Zero-based sheet row this record came from. */
   row: number;
   cells: string[];
+}
+
+/** The view a sheet opens with, and the one the store keeps no entry for. */
+const DEFAULT_OFFICE_STATE: OfficeState = {
+  records: false,
+  showTitles: true,
+  titleRow: 1,
+  titleRows: 1,
+  labelWidth: null,
+  sheet: 0,
+  record: 0,
+};
+
+/** Whether two views say the same thing; `null` stands for the defaults above. */
+function sameState(a: OfficeState | null, b: OfficeState | null): boolean {
+  const left = a ?? DEFAULT_OFFICE_STATE;
+  const right = b ?? DEFAULT_OFFICE_STATE;
+  return (
+    left.records === right.records &&
+    left.showTitles === right.showTitles &&
+    left.titleRow === right.titleRow &&
+    left.titleRows === right.titleRows &&
+    left.labelWidth === right.labelWidth &&
+    left.sheet === right.sheet &&
+    left.record === right.record
+  );
+}
+
+/** The view as the store keeps it: the defaults are the absence of an entry. */
+function storable(state: OfficeState): OfficeState | null {
+  return sameState(state, null) ? null : state;
 }
 
 /** One picture of the sheet, measured onto the drawn table. */
@@ -417,6 +448,11 @@ export default function OfficeViewer({ path, kind, csvText, paper, onSavePaper }
   const [titleRow, setTitleRow] = useState(1);
   const [titleRows, setTitleRows] = useState(1);
   const recordsRef = useRef<HTMLDivElement>(null);
+  /**
+   * Width of the title column, once the user has dragged it; null lets the column take the
+   * width of its longest title, which is the width it needs to be read without wrapping.
+   */
+  const [labelWidth, setLabelWidth] = useState<number | null>(null);
 
   /** The Word page's own width in CSS pixels, measured once before any zoom is applied. */
   const [paperWidth, setPaperWidth] = useState(0);
@@ -437,6 +473,31 @@ export default function OfficeViewer({ path, kind, csvText, paper, onSavePaper }
   const scrollRef = useRef<HTMLDivElement>(null);
   /** Scroll fires far more often than a page count can be read; one frame is enough. */
   const pageFrame = useRef(0);
+
+  /**
+   * The view the file was left in, and the machinery that puts it back.
+   *
+   * `pendingState` holds a remembered sheet until that sheet is the one on screen: the effect
+   * that clears the record on a sheet switch runs first, and the record is put back after it.
+   */
+  const pendingState = useRef<OfficeState | null>(null);
+  const [restoreTick, setRestoreTick] = useState(0);
+  /** False until the file's own view has been asked for, so the defaults never overwrite it. */
+  const hydrated = useRef(false);
+  /** The view as it stands, and whether a write is still owed to the store. */
+  const savedState = useRef<OfficeState | null>(null);
+  const saveTimer = useRef(0);
+  const saveDirty = useRef(false);
+  /** What the store already holds for this file, so an unchanged view writes nothing. */
+  const storedState = useRef<OfficeState | null>(null);
+
+  /** Write the view back at once, when a debounced write is still owed. */
+  const flushState = () => {
+    if (!saveDirty.current) return;
+    saveDirty.current = false;
+    window.clearTimeout(saveTimer.current);
+    if (savedState.current) void api.saveOfficeState(path, savedState.current).catch(() => {});
+  };
 
   useEffect(() => {
     let alive = true;
@@ -464,6 +525,35 @@ export default function OfficeViewer({ path, kind, csvText, paper, onSavePaper }
     setWordTools(false);
     setWordPage({ index: 0, total: 0 });
 
+    // The view belongs to the file rather than to the tab: ask what it was before anything is
+    // decided. The answer may land before or after the sheet does, which `pendingState` covers.
+    pendingState.current = null;
+    hydrated.current = false;
+    saveDirty.current = false;
+    storedState.current = null;
+    window.clearTimeout(saveTimer.current);
+    if (kind === "sheet") {
+      void api
+        .getOfficeState(path)
+        .catch(() => null)
+        .then((stored) => {
+          if (!alive) return;
+          hydrated.current = true;
+          storedState.current = stored;
+          if (!stored) return;
+          setMode(stored.records ? "records" : "grid");
+          setShowTitles(stored.showTitles);
+          setTitleRow(stored.titleRow);
+          setTitleRows(stored.titleRows);
+          setLabelWidth(stored.labelWidth);
+          pendingState.current = stored;
+          setActive(stored.sheet);
+          setRestoreTick((n) => n + 1);
+        });
+    } else {
+      hydrated.current = true;
+    }
+
     // A CSV is text, and the text is already here: decoded for the editor, and the very
     // buffer behind this pane. Nothing to fetch, nothing to release.
     if (csvText !== undefined) {
@@ -472,6 +562,7 @@ export default function OfficeViewer({ path, kind, csvText, paper, onSavePaper }
       setLoading(false);
       return () => {
         alive = false;
+        flushState();
         box.replaceChildren();
       };
     }
@@ -579,6 +670,7 @@ export default function OfficeViewer({ path, kind, csvText, paper, onSavePaper }
 
     return () => {
       alive = false;
+      flushState();
       deck.current?.destroy();
       deck.current = null;
       releaseSheetImages(imagesRef.current);
@@ -586,6 +678,39 @@ export default function OfficeViewer({ path, kind, csvText, paper, onSavePaper }
       box.replaceChildren();
     };
   }, [path, kind, csvText]);
+
+  /**
+   * Remember the view this file is in.
+   *
+   * Written on a short debounce rather than on every key: the arrows walk a record at a time,
+   * and a JSON write per arrow would be a file write per arrow. A write still owed when the
+   * pane goes away is flushed by the cleanup above, so switching tabs does not lose the step.
+   */
+  useEffect(() => {
+    if (kind !== "sheet" || !hydrated.current) return;
+    // A remembered sheet has not landed yet: the record is still the one the sheet switch
+    // cleared, which is not a view the user asked to keep.
+    if (pendingState.current) return;
+    const next = storable({
+      records: mode === "records",
+      showTitles,
+      titleRow,
+      titleRows,
+      labelWidth,
+      sheet: active,
+      record,
+    });
+    // Applying the remembered view is not a change: it is what the store already says.
+    if (sameState(next, storedState.current)) return;
+    storedState.current = next;
+    savedState.current = next ?? DEFAULT_OFFICE_STATE;
+    saveDirty.current = true;
+    window.clearTimeout(saveTimer.current);
+    saveTimer.current = window.setTimeout(() => {
+      saveDirty.current = false;
+      if (savedState.current) void api.saveOfficeState(path, savedState.current).catch(() => {});
+    }, 400);
+  }, [path, kind, mode, showTitles, titleRow, titleRows, labelWidth, active, record]);
 
   /**
    * The sheet a large workbook is showing.
@@ -721,6 +846,26 @@ export default function OfficeViewer({ path, kind, csvText, paper, onSavePaper }
     setJump("1");
   }, [path, active]);
 
+  /**
+   * Land on the item a remembered file was showing.
+   *
+   * Declared after the effect above on purpose: a sheet switch clears the record in the same
+   * commit, and this runs second, so the remembered one is what the user sees. It waits for
+   * the sheet tabs because the remembered sheet may not exist any more — a workbook that lost
+   * a sheet opens on the nearest one that does.
+   */
+  useEffect(() => {
+    const stored = pendingState.current;
+    if (!stored || !sheetTabs || sheetTabs.length === 0) return;
+    const sheet = Math.min(Math.max(stored.sheet, 0), sheetTabs.length - 1);
+    if (active !== sheet) {
+      setActive(sheet);
+      return;
+    }
+    pendingState.current = null;
+    setRecord(stored.record);
+  }, [active, restoreTick, sheetTabs?.length]);
+
   // The page number is an input, so it follows whatever the arrows, keys or a jump select.
   useEffect(() => {
     if (current >= 0) setJump(String(current + 1));
@@ -745,12 +890,6 @@ export default function OfficeViewer({ path, kind, csvText, paper, onSavePaper }
     // record's "next" is the first, so neither arrow is a dead end.
     setRecord((current + delta + records.length) % records.length);
   };
-
-  /**
-   * Width of the title column, once the user has dragged it; null lets the column take the
-   * width of its longest title, which is the width it needs to be read without wrapping.
-   */
-  const [labelWidth, setLabelWidth] = useState<number | null>(null);
 
   /** The divider between titles and data: drag it left or right to re-measure the column. */
   const startResize = (event: React.PointerEvent<HTMLDivElement>) => {
