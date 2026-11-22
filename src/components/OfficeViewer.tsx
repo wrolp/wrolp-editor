@@ -726,6 +726,19 @@ export default function OfficeViewer({ path, kind, csvText, paper, onSavePaper }
     if (current >= 0) setJump(String(current + 1));
   }, [current]);
 
+  /**
+   * A record opens at the top of the pane.
+   *
+   * The records view is one column that scrolls as a whole, so without this the next record
+   * is drawn wherever the last one was left — halfway down a card that is no longer the one
+   * on screen. Laid out rather than written into each arrow's handler, so the keys and the
+   * page box land the same way, and so the reset happens once the new card has its height.
+   */
+  useLayoutEffect(() => {
+    const pane = scrollRef.current;
+    if (pane) pane.scrollTop = 0;
+  }, [record, active, mode]);
+
   const step = (delta: number) => {
     if (records.length === 0) return;
     // The counter walks a ring: the first record's "previous" is the last one and the last
