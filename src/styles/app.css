@@ -7252,12 +7252,15 @@ select {
   color: var(--text);
   font: 12px/1.5 var(--mono, ui-monospace, monospace);
 }
+/* Every cell is centred both ways, data and headers alike: the sheet is read as a table of
+   cells rather than retyped into, and a value that sits in the middle of its cell is easier to
+   line up with the row and column it belongs to. */
 .office-grid th,
 .office-grid td {
   border: 1px solid var(--border);
   padding: 2px 8px;
-  text-align: left;
-  vertical-align: top;
+  text-align: center;
+  vertical-align: middle;
   white-space: pre;
 }
 /* The column letters and row numbers stay on screen while the sheet scrolls: they are how a
@@ -7269,16 +7272,23 @@ select {
   background: var(--surface-active);
   color: var(--muted);
   font-weight: 600;
+  /* The letters and numbers that name a cell are the table's own titles: centred both ways,
+     the same way the record view centres its labels. The cells they name keep the sheet's
+     alignment — text left, numbers as the sheet formats them — because that is the data. */
   text-align: center;
+  vertical-align: middle;
 }
-.office-grid-gutter {
+/* `th.office-grid-gutter` rather than `.office-grid-gutter`: the rule above sets the cells'
+   own alignment on `.office-grid th`, which is more specific than a bare class and would win. */
+.office-grid th.office-grid-gutter {
   position: sticky;
   left: 0;
   z-index: 2;
   background: var(--surface-active);
   color: var(--muted);
   font-weight: 600;
-  text-align: right;
+  text-align: center;
+  vertical-align: middle;
   min-width: 40px;
 }
 /* A sticky cell is composited separately, so while a scrollbar is dragged its layer can trail
