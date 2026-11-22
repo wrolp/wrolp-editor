@@ -62,6 +62,11 @@ interface Props {
   onNewFile: () => void;
   onOpenFiles: () => void;
   onOpenSettings: () => void;
+  /** Whether the AI features are switched on; false hides the dock's toggle. */
+  aiEnabled: boolean;
+  /** Whether the right-hand chat dock is open. */
+  aiOpen: boolean;
+  onToggleAi: () => void;
 }
 
 export default function TitleBar(props: Props) {
@@ -264,6 +269,16 @@ export default function TitleBar(props: Props) {
         <button className="tb-icon" title={t("title.open")} onClick={props.onOpenFiles}>
           <IconOpenFolder />
         </button>
+        {props.aiEnabled && (
+          <button
+            className={`tb-icon${props.aiOpen ? " active" : ""}`}
+            title={t("title.toggleAi")}
+            aria-pressed={props.aiOpen}
+            onClick={props.onToggleAi}
+          >
+            <IconSidebar side="right" />
+          </button>
+        )}
         <button className="tb-icon" title={t("title.settings")} onClick={props.onOpenSettings}>
           <IconSettings />
         </button>

@@ -999,6 +999,9 @@ textarea.ver-note-body {
   background: rgba(255, 255, 255, 0.08);
   color: var(--text-strong);
 }
+.tb-icon.active {
+  color: var(--accent-soft);
+}
 
 /* ---------- Preview layout segmented control ---------- */
 .mode-seg {
@@ -1216,6 +1219,29 @@ textarea.ver-note-body {
   min-height: 0;
 }
 
+/* The AI chat docked to the right of the editor. A sibling of the editor rather than a
+   sidebar view: a conversation and the file it is about have to be readable at the same time. */
+.ai-dock {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  width: clamp(300px, 28vw, 420px);
+  min-height: 0;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+}
+/* The divider straddles the dock's inner edge instead of taking width from a narrow column. */
+.ai-dock > .sidebar-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 5px;
+  flex: none;
+  margin: 0;
+}
+
 .sidebar {
   flex: 0 0 auto;
   background: var(--surface);
@@ -1335,6 +1361,411 @@ body.resizing .editor-host {
   color: var(--muted);
   font-size: 12px;
   padding: 12px 14px;
+}
+
+/* ---------- AI chat ----------
+   The panel is a column of its own: the messages scroll, the context bar and the composer
+   stay at the bottom, so the input never leaves the screen while an answer grows. */
+.ai-panel {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+.ai-head {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.ai-session-select,
+.ai-rename {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 26px;
+  font-size: 12px;
+}
+.ai-icon-btn {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.ai-icon-btn:hover:enabled {
+  background: var(--surface-hover);
+  color: var(--text-strong);
+}
+.ai-icon-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+.ai-danger {
+  color: var(--danger);
+}
+.ai-messages {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px 8px;
+}
+.ai-empty {
+  padding: 18px 10px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.ai-empty-title {
+  margin-bottom: 4px;
+  color: var(--text);
+  font-size: 13px;
+}
+.ai-empty p {
+  margin: 0 0 10px;
+}
+.ai-msg {
+  display: flex;
+  margin-bottom: 10px;
+}
+.ai-msg.user {
+  justify-content: flex-end;
+}
+.ai-msg.assistant {
+  justify-content: flex-start;
+}
+.ai-bubble {
+  max-width: 92%;
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ai-msg.user .ai-bubble {
+  border-bottom-right-radius: 3px;
+  background: var(--accent-soft);
+  color: var(--text-strong);
+}
+.ai-msg.assistant .ai-bubble {
+  border: 1px solid var(--border);
+  border-bottom-left-radius: 3px;
+  background: var(--surface-2);
+  white-space: normal;
+}
+.ai-answer {
+  width: 100%;
+  max-width: 100%;
+  padding: 4px 8px;
+}
+/* The preview's prose rules, sized for a narrow column instead of a reading pane. */
+.ai-md.md-body {
+  max-width: none;
+  margin: 0;
+  padding: 4px 2px;
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+.ai-md.md-body pre {
+  position: relative;
+}
+.ai-code-tools {
+  position: absolute;
+  top: 4px;
+  right: 6px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 0.1s ease;
+}
+.ai-md.md-body pre:hover .ai-code-tools,
+.ai-md.md-body pre:focus-within .ai-code-tools {
+  opacity: 1;
+}
+.ai-code-btn {
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface-active);
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+}
+.ai-code-btn:hover {
+  background: var(--surface-2-hover);
+  color: var(--text-strong);
+}
+.ai-thinking {
+  color: var(--muted);
+  font-size: 12px;
+}
+.ai-answer-note {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.ai-error {
+  margin: 6px 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-size: 12px;
+}
+.ai-error-text {
+  color: var(--danger);
+  line-height: 1.5;
+}
+.ai-error-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+.ai-tool-card {
+  margin: 6px 0 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  background: var(--surface-2);
+  font-size: 12px;
+}
+.ai-tool-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ai-tool-title {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+.ai-tool-file {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-tool-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 6px 0;
+}
+.ai-tool-old,
+.ai-tool-new {
+  max-height: 140px;
+  margin: 0;
+  padding: 6px 8px;
+  overflow: auto;
+  border-radius: 6px;
+  color: var(--text);
+  font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+  font-size: 11.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ai-tool-old {
+  border-left: 3px solid var(--danger);
+  background: rgba(198, 40, 40, 0.12);
+}
+.ai-tool-new {
+  border-left: 3px solid var(--dirty);
+  background: rgba(26, 127, 55, 0.1);
+}
+.ai-tool-note {
+  margin: 4px 0 6px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.ai-tool-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.ai-context {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+}
+.ai-files-toggle {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.ai-files-toggle:hover {
+  background: var(--surface-hover);
+  color: var(--text-strong);
+}
+.ai-files-toggle.active {
+  border-color: var(--accent-soft);
+  background: var(--accent-soft);
+  color: var(--on-accent);
+}
+.ai-scope-select {
+  flex: 0 0 auto;
+  height: 24px;
+  padding: 0 4px;
+  font-size: 11px;
+}
+.ai-context-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ai-compose {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: flex-end;
+  gap: 6px;
+  padding: 6px 8px 8px;
+  border-top: 1px solid var(--border);
+}
+.ai-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-height: 160px;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.5;
+  resize: none;
+  overflow-y: auto;
+}
+.ai-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+.ai-send,
+.ai-stop {
+  flex: 0 0 auto;
+}
+.ai-stop {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* ---------- AI inline edit ----------
+   The original range is the red side of the diff; the replacement streams in the widget,
+   which is the green side. The document itself changes only when Apply is pressed. */
+.ai-edit-original {
+  background: rgba(198, 40, 40, 0.16);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  border-bottom: 1px dashed var(--danger);
+}
+.ai-edit-widget {
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(460px, 70vw);
+  padding: 9px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: 9px;
+  background: var(--surface-2);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  color: var(--text);
+  font-size: 12px;
+  outline: none;
+}
+.ai-edit-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ai-edit-title {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+.ai-edit-hint {
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.ai-edit-input {
+  width: 100%;
+  min-height: 44px;
+  max-height: 120px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+}
+.ai-edit-input:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+.ai-edit-preview {
+  max-height: 220px;
+  margin: 0;
+  padding: 6px 8px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--dirty);
+  border-radius: 7px;
+  background: rgba(26, 127, 55, 0.1);
+  background: color-mix(in srgb, var(--dirty) 10%, var(--bg));
+  color: var(--text);
+  font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.ai-edit-preview.is-empty {
+  color: var(--muted);
+  font-family: inherit;
+}
+.ai-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.ai-edit-error {
+  padding: 6px 8px;
+  border: 1px solid var(--danger);
+  border-radius: 7px;
+  line-height: 1.5;
+  color: var(--danger);
 }
 .side-btn {
   display: block;
@@ -5750,6 +6181,32 @@ select {
 .statusbar .sb-lang {
   text-transform: uppercase;
 }
+/* The inline-completion switch is where the cost of an automatic request is read: a green
+   dot while it is idle, a pulsing one while a request is in flight. */
+.statusbar .sb-ai {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+}
+.statusbar .sb-ai-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dirty);
+}
+.statusbar .sb-ai.is-busy {
+  color: var(--text-dim);
+}
+.statusbar .sb-ai.is-busy .sb-ai-dot {
+  background: var(--accent-soft);
+  animation: ai-pulse 1s ease-in-out infinite;
+}
+@keyframes ai-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
 /* Comparison totals: additions read green, removals red, so the two are countable at a
    glance without parsing the sign. */
 .statusbar .sb-diff {
@@ -6376,7 +6833,15 @@ select {
 /* The picture pane now scrolls too: fit-width makes a tall screenshot scroll down, and a
    zoomed picture can scroll both ways. It gets the same thin bar as the gallery around it. */
 .img-stage,
-.commit-list {
+.commit-list,
+/* The chat dock and the inline-edit widget scroll in the same thin bar as the panes
+   around them; without this they drew the platform's heavy gutter. */
+.ai-messages,
+.ai-tool-old,
+.ai-tool-new,
+.ai-input,
+.ai-edit-input,
+.ai-edit-preview {
   scrollbar-width: thin;
   scrollbar-color: var(--scroll-thumb) transparent;
 }
@@ -6400,7 +6865,13 @@ select {
 .gal-grid::-webkit-scrollbar,
 .gal-strip::-webkit-scrollbar,
 .img-stage::-webkit-scrollbar,
-.commit-list::-webkit-scrollbar {
+.commit-list::-webkit-scrollbar,
+.ai-messages::-webkit-scrollbar,
+.ai-tool-old::-webkit-scrollbar,
+.ai-tool-new::-webkit-scrollbar,
+.ai-input::-webkit-scrollbar,
+.ai-edit-input::-webkit-scrollbar,
+.ai-edit-preview::-webkit-scrollbar {
   width: var(--scroll-size);
   height: var(--scroll-size);
 }
@@ -6432,7 +6903,13 @@ select {
    needs the same transparent treatment as the PDF and office pages. */
 .img-stage::-webkit-scrollbar-track,
 .img-stage::-webkit-scrollbar-corner,
-.commit-list::-webkit-scrollbar-track {
+.commit-list::-webkit-scrollbar-track,
+.ai-messages::-webkit-scrollbar-track,
+.ai-tool-old::-webkit-scrollbar-track,
+.ai-tool-new::-webkit-scrollbar-track,
+.ai-input::-webkit-scrollbar-track,
+.ai-edit-input::-webkit-scrollbar-track,
+.ai-edit-preview::-webkit-scrollbar-track {
   background: transparent;
 }
 .sidebar::-webkit-scrollbar-thumb,
@@ -6455,7 +6932,13 @@ select {
 .gal-grid::-webkit-scrollbar-thumb,
 .gal-strip::-webkit-scrollbar-thumb,
 .img-stage::-webkit-scrollbar-thumb,
-.commit-list::-webkit-scrollbar-thumb {
+.commit-list::-webkit-scrollbar-thumb,
+.ai-messages::-webkit-scrollbar-thumb,
+.ai-tool-old::-webkit-scrollbar-thumb,
+.ai-tool-new::-webkit-scrollbar-thumb,
+.ai-input::-webkit-scrollbar-thumb,
+.ai-edit-input::-webkit-scrollbar-thumb,
+.ai-edit-preview::-webkit-scrollbar-thumb {
   background: var(--scroll-thumb);
   border: 2px solid transparent;
   background-clip: padding-box;
@@ -6483,7 +6966,13 @@ select {
 .gal-grid:hover::-webkit-scrollbar-thumb,
 .gal-strip:hover::-webkit-scrollbar-thumb,
 .img-stage:hover::-webkit-scrollbar-thumb,
-.commit-list:hover::-webkit-scrollbar-thumb {
+.commit-list:hover::-webkit-scrollbar-thumb,
+.ai-messages:hover::-webkit-scrollbar-thumb,
+.ai-tool-old:hover::-webkit-scrollbar-thumb,
+.ai-tool-new:hover::-webkit-scrollbar-thumb,
+.ai-input:hover::-webkit-scrollbar-thumb,
+.ai-edit-input:hover::-webkit-scrollbar-thumb,
+.ai-edit-preview:hover::-webkit-scrollbar-thumb {
   background-color: var(--scroll-thumb-hover);
 }
 

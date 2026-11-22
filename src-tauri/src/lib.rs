@@ -241,8 +241,14 @@ pub fn run() {
       ai::ai_models,
       ai::ai_cancel,
       ai::ai_commit_message,
+      ai::ai_chat,
+      ai::ai_complete,
+      ai::ai_edit,
+      ai::ai_files_turn,
       ocr::ocr_languages,
-      ocr::ocr_image
+      ocr::ocr_image,
+      ai::ai_sessions,
+      ai::ai_save_sessions
     ]);
 
   #[cfg(windows)]

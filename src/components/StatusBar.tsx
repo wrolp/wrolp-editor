@@ -30,6 +30,8 @@ interface Props {
   git: GitSummary | null;
   /** Opens the Source Control view when the git summary is clicked. */
   onGitClick?: () => void;
+  /** Inline-completion state; null while the AI features are off. */
+  ai: "ready" | "busy" | null;
   /** Where the PDF reader stands; null when the file on screen is not a PDF. */
   pdf: { page: number; total: number } | null;
   /** Take the PDF reader to a page the user typed. */
@@ -123,6 +125,7 @@ export default function StatusBar({
   diff,
   git,
   onGitClick,
+  ai,
   pdf,
   onPdfGo,
 }: Props) {
@@ -234,6 +237,15 @@ export default function StatusBar({
       )}
       {/* Only the ending itself, in the three letters every editor uses; a tab that is not a
           text file has none to show. */}
+      {ai && (
+        <span
+          className={`sb-ai${ai === "busy" ? " is-busy" : ""}`}
+          title={t("status.aiHint")}
+        >
+          <span className="sb-ai-dot" />
+          AI: {t(ai === "busy" ? "status.aiBusy" : "status.aiReady")}
+        </span>
+      )}
       {eol && <span className="sb-eol">{eol}</span>}
       {/* A drawn document's type is the format's own letters: `tab.language` is the editor's
           language, and for an extension it cannot parse that says plaintext rather than what

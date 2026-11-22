@@ -362,6 +362,16 @@ pub struct Settings {
   /// Whether the AI features are switched on at all. Off by default, so an install that never
   /// touches them shows no half-configured controls.
   pub ai_enabled: bool,
+  /// Whether the right-hand chat dock is open. Remembered like the sidebar's visibility, so the
+  /// window comes back the way it was left; the dock only appears while `ai_enabled` is on.
+  pub ai_open: bool,
+  /// Let the chat ask to read and change the file on screen. Off by default; each read and each
+  /// proposed replacement still needs its own approval, and nothing outside that one file is
+  /// reachable from the tools.
+  pub ai_files_enabled: bool,
+  /// Width of the right-hand chat dock in CSS pixels. A stored value below the readable
+  /// minimum is raised to it; there is no upper bound.
+  pub ai_width: f64,
   /// The OpenAI-compatible services the AI features can talk to, at least one. A list rather
   /// than one set of fields: a reader may keep a local Ollama, a work gateway and a cloud
   /// account side by side, each with its own model and key, and switch without retyping any.
@@ -369,7 +379,7 @@ pub struct Settings {
   /// reads as an empty list, which is what lets `filled` fold the legacy fields into it.
   #[serde(default)]
   pub ai_endpoints: Vec<AiEndpoint>,
-  /// The endpoint the commit-message generator uses, by id.
+  /// The endpoint the AI features use, by id.
   pub ai_active: String,
   /// Legacy single-endpoint fields from before the list existed. Read once, in [`Settings::filled`],
   /// to move an existing URL, model and key into `ai_endpoints`; cleared when that happens and
@@ -382,6 +392,9 @@ pub struct Settings {
   pub ai_key: String,
   /// How long one AI request may run, in milliseconds.
   pub ai_timeout_ms: u32,
+  /// What the chat attaches to a message by default: `selection`, `file` or `none`. The panel
+  /// shows the same choice, so a reader who never opens Settings still sees what will be sent.
+  pub ai_context_scope: String,
   /// Largest unpacked size one archive may occupy. Checked from the listing and again while
   /// writing, so a header that lies cannot get past it.
   pub archive_max_total_bytes: u64,
@@ -494,6 +507,9 @@ impl Default for Settings {
       backup_retain: crate::backup::DEFAULT_RETAIN,
       auto_check_updates: true,
       ai_enabled: false,
+      ai_open: false,
+      ai_files_enabled: false,
+      ai_width: AI_DOCK_DEFAULT_WIDTH,
       ai_endpoints: vec![AiEndpoint::default()],
       ai_active: "default".into(),
       // Legacy fields stay empty in a fresh install; `filled` folds them in when it finds them.
@@ -501,6 +517,7 @@ impl Default for Settings {
       ai_model: String::new(),
       ai_key: String::new(),
       ai_timeout_ms: 90_000,
+      ai_context_scope: "selection".into(),
       archive_max_total_bytes: 2 * 1024 * 1024 * 1024,
       archive_keep_days: 0,
       archive_open_after_extract: true,
@@ -517,6 +534,10 @@ fn is_loopback(url: &str) -> bool {
 
 const SIDEBAR_MIN_WIDTH: f64 = 180.0;
 const SIDEBAR_MAX_WIDTH: f64 = 640.0;
+/// The chat dock needs a readable bubble width. There is no upper bound of its own: the drag
+/// stops at the window, where only the sidebar is left beside it.
+const AI_DOCK_MIN_WIDTH: f64 = 300.0;
+const AI_DOCK_DEFAULT_WIDTH: f64 = 360.0;
 /// Sidebar text sizes, in CSS pixels. The low end is the smallest a file name is still read at
 /// rather than recognised by shape; the high end is where the tree stops fitting its own column.
 const SIDEBAR_FONT_MIN: f64 = 11.0;
@@ -878,6 +899,13 @@ impl Settings {
       },
       auto_check_updates: self.auto_check_updates,
       ai_enabled: self.ai_enabled,
+      ai_open: self.ai_open,
+      ai_files_enabled: self.ai_files_enabled,
+      ai_width: if self.ai_width <= 0.0 {
+        AI_DOCK_DEFAULT_WIDTH
+      } else {
+        self.ai_width.max(AI_DOCK_MIN_WIDTH)
+      },
       ai_endpoints: endpoints,
       ai_active: active,
       // The legacy copies were folded into the list above. Leaving them would append the old
@@ -890,6 +918,14 @@ impl Settings {
         90_000
       } else {
         self.ai_timeout_ms.clamp(10_000, 180_000)
+      },
+      ai_context_scope: if matches!(
+        self.ai_context_scope.as_str(),
+        "selection" | "file" | "none"
+      ) {
+        self.ai_context_scope
+      } else {
+        "selection".into()
       },
       // 0 would refuse every archive, which is a stray zero rather than a wish to unpack
       // nothing; the ceiling is the value the code was written against.

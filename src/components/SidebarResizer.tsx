@@ -3,6 +3,7 @@ import { t } from "../lib/i18n";
 
 const MIN_WIDTH = 180;
 const MAX_WIDTH = 640;
+const RESERVE = 420;
 
 interface Props {
   value: number;
@@ -11,14 +12,30 @@ interface Props {
   onChange: (width: number) => void;
   /** Final width when the drag ends, persisted by the caller. */
   onCommit: (width: number) => void;
+  /** The pane's inner edge. A right-hand dock grows as the pointer moves left. */
+  side?: "left" | "right";
+  min?: number;
+  max?: number;
+  /** Pixels the rest of the window keeps when the pane is pulled to its widest. */
+  reserve?: number;
 }
 
-function clamp(width: number) {
-  const limit = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, window.innerWidth - 420));
-  return Math.round(Math.min(limit, Math.max(MIN_WIDTH, width)));
+function clamp(width: number, min: number, max: number, reserve: number) {
+  const limit = Math.min(max, Math.max(min, window.innerWidth - reserve));
+  return Math.round(Math.min(limit, Math.max(min, width)));
 }
 
-export default function SidebarResizer({ value, defaultValue, onChange, onCommit }: Props) {
+/** The divider on a pane's inner edge: the sidebar's tree, or the AI chat dock. */
+export default function SidebarResizer({
+  value,
+  defaultValue,
+  onChange,
+  onCommit,
+  side = "left",
+  min = MIN_WIDTH,
+  max = MAX_WIDTH,
+  reserve = RESERVE,
+}: Props) {
   const drag = useRef<{ startX: number; startWidth: number; width: number } | null>(null);
   const [dragging, setDragging] = useState(false);
 
@@ -41,7 +58,8 @@ export default function SidebarResizer({ value, defaultValue, onChange, onCommit
     const move = (e: PointerEvent) => {
       const state = drag.current;
       if (!state) return;
-      state.width = clamp(state.startWidth + e.clientX - state.startX);
+      const delta = side === "right" ? state.startX - e.clientX : e.clientX - state.startX;
+      state.width = clamp(state.startWidth + delta, min, max, reserve);
       onChange(state.width);
     };
     const finish = () => {
@@ -59,7 +77,7 @@ export default function SidebarResizer({ value, defaultValue, onChange, onCommit
       window.removeEventListener("pointerup", finish);
       window.removeEventListener("pointercancel", finish);
     };
-  }, [dragging, onChange, onCommit]);
+  }, [dragging, max, min, onChange, onCommit, reserve, side]);
 
   return (
     <div

@@ -18,7 +18,15 @@ import { dirtyRanges } from "../lib/dirtyDiff";
 import { dirOf } from "../lib/markdownAsset";
 import { isMarkdown, isUntitled, modelUri } from "../lib/path";
 import { setImagePasteHandler } from "../lib/editorMenu";
-import { isFileTab, type CursorPos, type EditStats, type EditorHandle, type Tab } from "../lib/types";
+import {
+  isFileTab,
+  type AiSelection,
+  type AiSelectionAction,
+  type CursorPos,
+  type EditStats,
+  type EditorHandle,
+  type Tab,
+} from "../lib/types";
 
 interface Props {
   tab: Tab;
@@ -51,6 +59,11 @@ interface Props {
     defaultName: string,
     save: (name: string) => Promise<void>
   ) => Promise<boolean>;
+  /**
+   * Ask the AI about the selected text. The group appears only while a non-empty selection is
+   * under the right-click; a plain caret has nothing to ask about.
+   */
+  onAiAction?: (action: AiSelectionAction, selected: AiSelection) => void;
 }
 
 /**
@@ -124,6 +137,7 @@ export default function Editor({
   onLanguage,
   onError,
   onRequestImageSave,
+  onAiAction,
 }: Props) {
   const cursorRef = useRef(onCursor);
   cursorRef.current = onCursor;
@@ -142,6 +156,8 @@ export default function Editor({
   const [menuPage, setMenuPage] = useState<"main" | "language">("main");
   /** What narrows the language list; cleared every time the menu opens. */
   const [languageQuery, setLanguageQuery] = useState("");
+  /** What the AI group would ask about, captured when the menu opened. */
+  const [menuSelection, setMenuSelection] = useState<AiSelection | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuAt = useMenuPlacement(menu, menuRef);
   /** The tab as of this render, read by the callbacks that outlive the render that made them. */
@@ -387,6 +403,16 @@ export default function Editor({
     instance.trigger("editorMenu", "editor.action.selectAll", null);
   };
 
+  /** Hand the selection captured at open time to the AI, then give the keyboard back. */
+  const runAi = (action: AiSelectionAction) => {
+    const selected = menuSelection;
+    if (!selected || !onAiAction) return;
+    setMenu(null);
+    setMenuPage("main");
+    onAiAction(action, selected);
+    instanceRef.current?.focus();
+  };
+
   /**
    * Turn a clipboard picture into a named file beside the Markdown document, and a link
    * where the caret is.
@@ -536,6 +562,22 @@ export default function Editor({
         instance.setPosition(position);
       }
     }
+    // Captured after the caret may have moved, so a right-click outside the selection asks
+    // about nothing — the selection is gone by then.
+    const model = instance.getModel();
+    const filled = (instance.getSelections() ?? []).filter((selection) => !selection.isEmpty());
+    const selected = model
+      ? filled.map((selection) => model.getValueInRange(selection)).join("\n")
+      : "";
+    if (selected.trim()) {
+      setMenuSelection({
+        text: selected,
+        startLine: filled[0].startLineNumber,
+        endLine: filled[filled.length - 1].endLineNumber,
+      });
+    } else {
+      setMenuSelection(null);
+    }
     // Every open starts on the actions: the language list is a page of its own, and coming
     // back to a menu already holding ninety rows would bury the four that were wanted.
     setMenuPage("main");
@@ -673,6 +715,23 @@ export default function Editor({
               <div className="ctx-item" onClick={() => runMenu("selectAll")}>
                 {t("editor.selectAll")}
               </div>
+              {onAiAction && menuSelection && (
+                <>
+                  <div className="ws-sep" />
+                  <div className="ctx-item" onClick={() => runAi("explain")}>
+                    {t("editor.aiExplain")}
+                  </div>
+                  <div className="ctx-item" onClick={() => runAi("optimize")}>
+                    {t("editor.aiOptimize")}
+                  </div>
+                  <div className="ctx-item" onClick={() => runAi("comment")}>
+                    {t("editor.aiComment")}
+                  </div>
+                  <div className="ctx-item" onClick={() => runAi("translate")}>
+                    {t("editor.aiTranslate")}
+                  </div>
+                </>
+              )}
               <div className="ws-sep" />
               <div className="ctx-item" onClick={() => setMenuPage("language")}>
                 {t("editor.language")}

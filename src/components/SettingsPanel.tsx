@@ -24,7 +24,7 @@ import {
   type StoreDirs,
 } from "../lib/tauri";
 
-type Category =
+export type SettingsCategory =
   | "context"
   | "general"
   | "versions"
@@ -33,6 +33,8 @@ type Category =
   | "encryption"
   | "ai"
   | "about";
+
+type Category = SettingsCategory;
 
 interface Props {
   settings: Settings;
@@ -46,6 +48,13 @@ interface Props {
   onVersionsChanged?: () => void;
   /** Replaces the state with a snapshot; the app reloads when this resolves. */
   onRestoreBackup: (path: string) => Promise<void>;
+  /**
+   * A category asked for by a link outside this panel (the AI chat's settings shortcut).
+   * The sequence number is what lets the same category be asked for twice in a row.
+   */
+  focusCategory?: { category: SettingsCategory; seq: number } | null;
+  /** Called once the requested category is on screen, so the next open starts at the top. */
+  onFocusConsumed?: () => void;
 }
 
 const NAV: { cat: Category; key: string }[] = [
@@ -149,9 +158,16 @@ export default function SettingsPanel({
   onToast,
   onVersionsChanged,
   onRestoreBackup,
+  focusCategory,
+  onFocusConsumed,
 }: Props) {
   // The first entry in NAV, so opening Settings lands on it rather than on the second one.
   const [category, setCategory] = useState<Category>("general");
+  useEffect(() => {
+    if (!focusCategory) return;
+    setCategory(focusCategory.category);
+    onFocusConsumed?.();
+  }, [focusCategory, onFocusConsumed]);
   /** Whether an OCR engine and at least one recognizer language are available. */
   const [ocrAvailable, setOcrAvailable] = useState(false);
   useEffect(() => {
@@ -1359,6 +1375,12 @@ export default function SettingsPanel({
                 onChange={(v) => onSaveSettings({ aiEnabled: v })}
               />
               <p className="muted">{t("settings.aiEnabledDesc")}</p>
+              <SettingCheck
+                label={t("settings.aiFiles")}
+                checked={settings.aiFilesEnabled}
+                onChange={(v) => onSaveSettings({ aiFilesEnabled: v })}
+              />
+              <p className="muted">{t("settings.aiFilesDesc")}</p>
               <SettingField label={t("settings.aiEndpoint")}>
                 <select
                   className="select"
@@ -1455,6 +1477,22 @@ export default function SettingsPanel({
                   }}
                 />
               </SettingField>
+              <SettingField label={t("settings.aiContext")}>
+                <select
+                  className="select"
+                  value={settings.aiContextScope}
+                  onChange={(e) =>
+                    onSaveSettings({
+                      aiContextScope: e.target.value as Settings["aiContextScope"],
+                    })
+                  }
+                >
+                  <option value="selection">{t("settings.aiContextSelection")}</option>
+                  <option value="file">{t("settings.aiContextFile")}</option>
+                  <option value="none">{t("settings.aiContextNone")}</option>
+                </select>
+              </SettingField>
+              <p className="muted">{t("settings.aiContextDesc")}</p>
               <SettingField label={t("settings.aiKey")}>
                 <input
                   className="settings-text wide"

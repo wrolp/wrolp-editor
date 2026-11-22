@@ -440,11 +440,19 @@ export interface Settings {
   autoCheckUpdates: boolean;
   /** Whether the AI features are switched on at all. */
   aiEnabled: boolean;
+  /** Whether the right-hand chat dock is open, remembered across restarts. */
+  aiOpen: boolean;
+  /** Let the chat ask to read and change the file on screen, one approval at a time. */
+  aiFilesEnabled: boolean;
+  /** Width of the right-hand chat dock in CSS pixels, remembered across restarts. */
+  aiWidth: number;
   /** The configured services, at least one; `aiActive` names the one the commit generator uses. */
   aiEndpoints: AiEndpoint[];
   aiActive: string;
   /** How long one AI request may run, in milliseconds. */
   aiTimeoutMs: number;
+  /** What the chat attaches to a message by default. */
+  aiContextScope: AiContextScope;
 }
 
 /**
@@ -731,6 +739,70 @@ export type AiCommitEvent =
   | { type: "done"; text: string }
   | { type: "error"; code: string; detail: string };
 
+/** What the chat is allowed to attach to a message. */
+export type AiContextScope = "selection" | "file" | "none";
+
+/** One message as the chat sends it; the backend checks the role against its own list. */
+export interface AiChatTurn {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+/** One request to the chat endpoint. */
+export interface AiChatRequest {
+  /** Cancels this stream from the panel's stop button. */
+  opId: string;
+  messages: AiChatTurn[];
+  /** The active file or selection, captured when the send button was pressed. */
+  context: string | null;
+  /** What the context is, shown to the model (`src/main.rs, lines 4-9`). */
+  contextLabel: string | null;
+}
+
+/** One inline-edit request: what to change and the text around the selection. */
+export interface AiEditRequest {
+  opId: string;
+  instruction: string;
+  /** The selection, or the current line when nothing is selected. */
+  selected: string;
+  /** Everything before the selection; the backend keeps the nearest 100 lines. */
+  before: string;
+  /** Everything after the selection; the backend keeps the nearest 100 lines. */
+  after: string;
+  language: string;
+}
+
+/** One tool call the model proposed; the arguments stay the JSON string it wrote. */
+export interface AiToolCall {
+  id: string;
+  name: string;
+  arguments: string;
+}
+
+/** What one file-access turn produced: prose and the actions it wants the reader to approve. */
+export interface AiFilesTurn {
+  text: string;
+  toolCalls: AiToolCall[];
+}
+
+/** One message in the tool loop, in the shape the provider expects. */
+export interface AiWireToolCall {
+  id: string;
+  type: "function";
+  function: { name: string; arguments: string };
+}
+
+export type AiWireMessage =
+  | { role: "user" | "assistant"; content: string; tool_calls?: AiWireToolCall[] }
+  | { role: "tool"; tool_call_id: string; content: string };
+
+/** One event while a chat answer is being written. */
+export type AiChatEvent =
+  | { type: "delta"; text: string }
+  /** `reason` is the provider's finish reason: `stop` is the only clean ending. */
+  | { type: "done"; text: string; reason: string }
+  | { type: "error"; code: string; detail: string; retryable: boolean };
+
 /** Where an OCR request reads its picture from. */
 export type OcrSource =
   | { kind: "path"; path: string }
@@ -761,6 +833,31 @@ export interface OcrLanguage {
   tag: string;
   /** The name Windows shows for the language. */
   name: string;
+}
+
+/** One message kept in the chat history. */
+export interface AiStoredMessage {
+  role: "user" | "assistant";
+  content: string;
+  at: string;
+  /** The answer was stopped, cut off or interrupted; the text is what did arrive. */
+  partial?: boolean;
+}
+
+/** One conversation on disk. */
+export interface AiSession {
+  id: string;
+  /** Derived from the first question when empty. */
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: AiStoredMessage[];
+}
+
+/** The whole chat history: at most 20 sessions of 100 messages. */
+export interface AiSessionStore {
+  active: string;
+  items: AiSession[];
 }
 
 /** One step of a network operation, streamed while it runs. */
@@ -1488,11 +1585,34 @@ export const api = {
     channel.onmessage = onEvent;
     return invoke<void>("ai_commit_message", { root, opId, onEvent: channel });
   },
+  /** Stream one chat answer. Cancellable via `aiCancel`. */
+  aiChat: (request: AiChatRequest, onEvent: (event: AiChatEvent) => void) => {
+    const channel = new Channel<AiChatEvent>();
+    channel.onmessage = onEvent;
+    return invoke<void>("ai_chat", { request, onEvent: channel });
+  },
+  /** One non-streaming inline completion. Cancellable via `aiCancel`. */
+  aiComplete: (opId: string, prefix: string, suffix: string, language: string) =>
+    invoke<string>("ai_complete", { opId, prefix, suffix, language }),
+  /** Stream a replacement for the selection. Cancellable via `aiCancel`. */
+  aiEdit: (request: AiEditRequest, onEvent: (event: AiChatEvent) => void) => {
+    const channel = new Channel<AiChatEvent>();
+    channel.onmessage = onEvent;
+    return invoke<void>("ai_edit", { request, onEvent: channel });
+  },
+  /** One non-streaming turn with the current-file tools. Cancellable via `aiCancel`. */
+  aiFilesTurn: (opId: string, messages: AiWireMessage[]) =>
+    invoke<AiFilesTurn>("ai_files_turn", { opId, messages }),
   /** OCR languages Windows can recognize; `ocr_unsupported` off Windows. */
   ocrLanguages: () => invoke<OcrLanguage[]>("ocr_languages"),
   /** Recognize one picture. `language` is a tag from `ocrLanguages`, or null for the profile. */
   ocrImage: (source: OcrSource, language: string | null) =>
     invoke<OcrImage>("ocr_image", { source, language }),
+  /** The saved conversations; an empty store on a machine that never opened the panel. */
+  aiSessions: () => invoke<AiSessionStore>("ai_sessions"),
+  /** Replace the whole store; the backend applies the caps before writing. */
+  aiSaveSessions: (sessions: AiSessionStore) =>
+    invoke<void>("ai_save_sessions", { sessions }),
   aiCancel: (opId: string) => invoke<void>("ai_cancel", { opId }),
   gitConflictSides: (root: string, path: string) =>
     invoke<GitConflictSides>("git_conflict_sides", { root, path }),

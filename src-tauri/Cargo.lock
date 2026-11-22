@@ -6298,6 +6298,7 @@ dependencies = [
  "tauri-plugin-opener",
  "tauri-plugin-single-instance",
  "tauri-plugin-updater",
+ "tokio",
  "windows",
  "windows-native-keyring-store",
  "windows-sys 0.59.0",

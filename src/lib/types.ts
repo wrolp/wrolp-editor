@@ -279,6 +279,16 @@ export interface EditorHandle {
   monaco: Monaco;
 }
 
+/** The read-only AI actions the editor's right-click menu offers for a selection. */
+export type AiSelectionAction = "explain" | "optimize" | "comment" | "translate";
+
+/** A non-empty editor selection, handed to the AI as the context of one question. */
+export interface AiSelection {
+  text: string;
+  startLine: number;
+  endLine: number;
+}
+
 /** Monaco cursor position (structural, so it does not depend on internal type names). */
 export interface CursorPos {
   lineNumber: number;

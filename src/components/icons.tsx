@@ -13,11 +13,15 @@ const base = (size: number) => ({
   strokeLinejoin: "round" as const,
 });
 
-export function IconSidebar({ size = 18 }: IconProps) {
+export function IconSidebar({
+  size = 18,
+  side = "left",
+}: IconProps & { side?: "left" | "right" }) {
+  const divider = side === "right" ? 15 : 9;
   return (
     <svg {...base(size)}>
       <rect x="3" y="3" width="18" height="18" rx="2" />
-      <line x1="9" y1="3" x2="9" y2="21" />
+      <line x1={divider} y1="3" x2={divider} y2="21" />
     </svg>
   );
 }

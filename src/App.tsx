@@ -24,7 +24,7 @@ import PaneErrorBoundary from "./components/PaneErrorBoundary";
 import DraftRestoreDialog from "./components/DraftRestoreDialog";
 import NewGroupDialog from "./components/NewGroupDialog";
 import PasteImageDialog from "./components/PasteImageDialog";
-import SettingsPanel from "./components/SettingsPanel";
+import SettingsPanel, { type SettingsCategory } from "./components/SettingsPanel";
 import FileSettingsDialog from "./components/FileSettingsDialog";
 import Sidebar, { type EntryKind } from "./components/Sidebar";
 import SidebarResizer from "./components/SidebarResizer";
@@ -81,8 +81,18 @@ import {
   IconWhitespace,
   IconWordWrap,
 } from "./components/icons";
+import { createPortal } from "react-dom";
+import AiChatPanel from "./components/AiChatPanel";
+import AiInlineEditPanel from "./components/AiInlineEditPanel";
 import { useDraft } from "./hooks/useDraft";
+import {
+  useAiChat,
+  type AiContextSnippet,
+  type CurrentFileRef,
+} from "./hooks/useAiChat";
 import { useEditorTabs } from "./hooks/useEditorTabs";
+import { useInlineCompletion } from "./hooks/useInlineCompletion";
+import { useInlineEdit } from "./hooks/useInlineEdit";
 import { useGit } from "./hooks/useGit";
 import { useGitRepos } from "./hooks/useGitRepos";
 import { useGroups } from "./hooks/useGroups";
@@ -120,6 +130,8 @@ import {
   lineEndingFor,
   pathKey,
   sideKey,
+  type AiSelection,
+  type AiSelectionAction,
   type CompareRef,
   type DiffStats,
   type GitMark,
@@ -213,6 +225,10 @@ function gatheredGitFiles(
   }
   return [...byPath.values()];
 }
+
+/** The chat dock's draggable width; the backend only enforces the minimum. */
+const AI_DOCK_MIN_WIDTH = 300;
+const AI_DOCK_DEFAULT_WIDTH = 360;
 
 const DEFAULT_SETTINGS: Settings = {
   fontSize: 14,
@@ -341,6 +357,13 @@ const DEFAULT_SETTINGS: Settings = {
   // then the Source panel offers no AI entry. One endpoint to start with: the settings page has
   // something to show, and another can be added beside it.
   aiEnabled: false,
+  // The dock opens from the title bar, so a fresh install has no half-configured chat column.
+  aiOpen: false,
+  // File access is the one AI permission that can change a document; it stays off until asked.
+  aiFilesEnabled: false,
+  // Wide enough for a code block to be read without wrapping, and only as wide as the drag
+  // itself makes it: the stored value is clamped to the same range on the way back in.
+  aiWidth: AI_DOCK_DEFAULT_WIDTH,
   aiEndpoints: [
     {
       id: "default",
@@ -351,7 +374,18 @@ const DEFAULT_SETTINGS: Settings = {
   ],
   aiActive: "default",
   aiTimeoutMs: 90000,
+  // The chat starts by sending what is selected and nothing else: selecting text is the most
+  // deliberate way to say "this is what I mean", and an empty selection sends no file at all.
+  aiContextScope: "selection",
 }
+
+/** The question each AI selection action sends. */
+const AI_ACTION_PROMPT: Record<AiSelectionAction, string> = {
+  explain: "ai.askExplain",
+  optimize: "ai.askOptimize",
+  comment: "ai.askComment",
+  translate: "ai.askTranslate",
+};
 
 /**
  * The two tones a picture is drawn on behind its transparent pixels.
@@ -533,6 +567,11 @@ export default function App() {
   }, [scheduleHide]);
 
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  /** A settings category requested from outside the page (the AI dock's shortcut). */
+  const [settingsFocus, setSettingsFocus] = useState<{
+    category: SettingsCategory;
+    seq: number;
+  } | null>(null);
   // Asked on its own after startup and every six hours; a version it finds is announced, and
   // the install itself stays a click in Settings → About.
   useUpdateCheck(settings.autoCheckUpdates, (version) => {
@@ -551,6 +590,8 @@ export default function App() {
     document.documentElement.dataset.theme = theme;
   }, [theme]);
   const [sidebarVisible, setSidebarVisible] = useState(true);
+  const [aiOpen, setAiOpen] = useState(DEFAULT_SETTINGS.aiOpen);
+  const [aiWidth, setAiWidth] = useState(DEFAULT_SETTINGS.aiWidth);
   const [sidebarWidth, setSidebarWidth] = useState(DEFAULT_SETTINGS.sidebarWidth);
   const [sidebarView, setSidebarView] = useState<SidebarView>("explorer");
   const [rootDir, setRootDir] = useState<string | null>(null);
@@ -688,6 +729,8 @@ export default function App() {
   const exportAbort = useRef<AbortController | null>(null);
 
   const editorRef = useRef<EditorHandle | null>(null);
+  /** The same handle as state, because the inline provider is registered from an effect. */
+  const [editorHandle, setEditorHandle] = useState<EditorHandle | null>(null);
   const draft = useDraft(toast);
 
   // Stable callback for useEditorTabs: the real work needs the group plumbing below,
@@ -725,6 +768,206 @@ export default function App() {
           }
         : null,
   });
+
+  /**
+   * What the chat will attach, read at the moment the send button is pressed. A selection is
+   * sent as it stands; the whole-file mode sends the saved text when the buffer is dirty, so a
+   * message never carries edits the reader has not saved by accident.
+   */
+  const collectAiContext = useCallback((): AiContextSnippet | null => {
+    if (!settings.aiEnabled || settings.aiContextScope === "none") return null;
+    const tab = tabs.editorTab;
+    if (!tab || !isFileTab(tab) || tab.isBinary || tab.unopenable || tab.locked) return null;
+    if (settings.aiContextScope === "selection") {
+      const editor = editorRef.current?.editor;
+      const model = editor?.getModel();
+      const selection = editor?.getSelection();
+      if (!editor || !model || !selection || selection.isEmpty()) return null;
+      const text = model.getValueInRange(selection);
+      if (!text.trim()) return null;
+      const label =
+        selection.startLineNumber === selection.endLineNumber
+          ? t("ai.contextLine", {
+              name: tab.name,
+              line: String(selection.startLineNumber),
+            })
+          : t("ai.contextLines", {
+              name: tab.name,
+              from: String(selection.startLineNumber),
+              to: String(selection.endLineNumber),
+            });
+      return { label, text };
+    }
+    const text = tab.dirty ? tab.original : tabs.tabText(tab.id) ?? tab.original;
+    if (!text.trim()) return null;
+    return {
+      label: tab.dirty
+        ? t("ai.contextSaved", { name: tab.name })
+        : t("ai.contextFile", { name: tab.name }),
+      text,
+    };
+  }, [settings.aiEnabled, settings.aiContextScope, tabs.editorTab, tabs.tabText]);
+
+  /** The file a file-access turn may work on: the one the editor is showing. */
+  const aiCurrentFile = useCallback((): CurrentFileRef | null => {
+    const tab = tabs.fileTab;
+    if (!tab || !isFileTab(tab) || tab.isBinary || tab.unopenable || tab.locked) {
+      return null;
+    }
+    return { id: tab.id, path: tab.path, name: tab.name };
+  }, [tabs.fileTab]);
+
+  /** The captured tab's live text, read only after the reader approved. */
+  const aiReadFile = useCallback(
+    (id: number, path: string): { text: string; truncated: boolean } | { error: string } => {
+      const tab = tabs.tabs.find((item) => item.id === id);
+      if (
+        !tab ||
+        tab.path !== path ||
+        !isFileTab(tab) ||
+        tab.isBinary ||
+        tab.unopenable ||
+        tab.locked
+      ) {
+        return { error: t("ai.filesNotReadable") };
+      }
+      const text = tabs.tabText(id) ?? tab.original;
+      const limit = 32_768;
+      if (text.length > limit) {
+        return { text: text.slice(0, limit), truncated: true };
+      }
+      return { text, truncated: false };
+    },
+    [tabs.tabText, tabs.tabs]
+  );
+
+  /** An approved exact replacement, applied as one ordinary undoable edit. */
+  const aiApplyFileEdit = useCallback(
+    (
+      id: number,
+      path: string,
+      oldText: string,
+      newText: string
+    ): { ok: true } | { error: string } => {
+      const tab = tabs.tabs.find((item) => item.id === id);
+      if (!tab || tab.path !== path || !isFileTab(tab) || tab.locked) {
+        return { error: t("ai.filesNotEditable") };
+      }
+      const handle = editorRef.current;
+      const editor = handle?.editor;
+      const model = editor?.getModel();
+      const expected = handle
+        ? handle.monaco.editor.getModel(handle.monaco.Uri.parse(modelUri(path)))
+        : null;
+      if (!handle || !editor || !model || !expected || model !== expected) {
+        return { error: t("ai.filesSwitchBack") };
+      }
+      const text = model.getValue();
+      const at = text.indexOf(oldText);
+      if (at < 0) return { error: t("ai.filesOldMissing") };
+      if (text.indexOf(oldText, at + 1) >= 0) {
+        return { error: t("ai.filesOldMultiple") };
+      }
+      const start = model.getPositionAt(at);
+      const end = model.getPositionAt(at + oldText.length);
+      try {
+        editor.pushUndoStop();
+        editor.executeEdits("ai-file-edit", [
+          {
+            range: new handle.monaco.Range(
+              start.lineNumber,
+              start.column,
+              end.lineNumber,
+              end.column
+            ),
+            text: newText,
+            forceMoveMarkers: true,
+          },
+        ]);
+        editor.pushUndoStop();
+      } catch {
+        return { error: t("ai.filesNotEditable") };
+      }
+      return { ok: true };
+    },
+    [tabs.tabs]
+  );
+
+  const ai = useAiChat({
+    enabled: settings.aiEnabled,
+    collectContext: collectAiContext,
+    onError: toast,
+    filesEnabled: settings.aiFilesEnabled,
+    currentFile: aiCurrentFile,
+    readFile: aiReadFile,
+    applyFileEdit: aiApplyFileEdit,
+  });
+
+  const inlineAi = useInlineCompletion({
+    enabled: settings.aiEnabled,
+    handle: editorHandle,
+    maxFileSize: settings.versioningMaxFileSize,
+  });
+
+  const inlineEdit = useInlineEdit({
+    enabled: settings.aiEnabled,
+    handle: editorHandle,
+  });
+
+  /** The same choice, worded for the bar above the composer; no text is read for it. */
+  const aiContextLabel = useMemo(() => {
+    if (!settings.aiEnabled || settings.aiContextScope === "none") return null;
+    const tab = tabs.editorTab;
+    if (!tab || !isFileTab(tab) || tab.isBinary || tab.unopenable || tab.locked) {
+      return t("ai.contextNoFile");
+    }
+    if (settings.aiContextScope === "selection") {
+      const selection = editorRef.current?.editor.getSelection();
+      if (stats.selectionChars === 0 || !selection || selection.isEmpty()) {
+        return t("ai.contextNoSelection");
+      }
+      return selection.startLineNumber === selection.endLineNumber
+        ? t("ai.contextLine", {
+            name: tab.name,
+            line: String(selection.startLineNumber),
+          })
+        : t("ai.contextLines", {
+            name: tab.name,
+            from: String(selection.startLineNumber),
+            to: String(selection.endLineNumber),
+          });
+    }
+    return tab.dirty
+      ? t("ai.contextSaved", { name: tab.name })
+      : t("ai.contextFile", { name: tab.name });
+  }, [
+    settings.aiEnabled,
+    settings.aiContextScope,
+    settings.language,
+    tabs.editorTab,
+    stats,
+  ]);
+
+  /** Put a code block into the buffer as a normal edit: dirty, drafted, undoable. */
+  const insertAiText = useCallback(
+    (text: string) => {
+      const handle = editorRef.current;
+      const editor = handle?.editor;
+      const selection = editor?.getSelection();
+      if (!editor || !selection || !editor.getModel()) {
+        toast(t("ai.insertUnavailable"));
+        return;
+      }
+      editor.pushUndoStop();
+      editor.executeEdits("ai-insert", [
+        { range: selection, text, forceMoveMarkers: true },
+      ]);
+      editor.pushUndoStop();
+      editor.focus();
+    },
+    [toast]
+  );
+
   const groups = useGroups({ onError: toast });
   const activeGroup = useMemo(
     () => groups.store.items.find((item) => item.id === groups.store.active) ?? null,
@@ -992,6 +1235,8 @@ export default function App() {
       setSettings(loadedSettings);
       setPreviewPref(storedPreviewModes(loadedSettings.previewModes));
       setSidebarVisible(loadedSettings.sidebarVisible);
+      setAiOpen(loadedSettings.aiOpen);
+      setAiWidth(loadedSettings.aiWidth);
       setSidebarView(
         loadedSettings.sidebarView === "history"
           ? "history"
@@ -1474,6 +1719,39 @@ export default function App() {
     [menuTarget, reapplyMenu, settings, toast]
   );
   saveSettingsRef.current = saveSettings;
+
+  /**
+   * One selection action from the editor's menu: open the dock if it is closed, then ask the
+   * model about exactly the text that was selected. The panel's context setting does not apply
+   * here — the reader pointed at this text and asked about it.
+   */
+  const askAiAboutSelection = useCallback(
+    (action: AiSelectionAction, selected: AiSelection) => {
+      if (!settings.aiEnabled) return;
+      if (ai.busy) {
+        toast(t("ai.busy"));
+        return;
+      }
+      const name = tabs.fileTab?.name ?? "";
+      const label =
+        selected.startLine === selected.endLine
+          ? t("ai.contextLine", {
+              name,
+              line: String(selected.startLine),
+            })
+          : t("ai.contextLines", {
+              name,
+              from: String(selected.startLine),
+              to: String(selected.endLine),
+            });
+      if (!aiOpen) {
+        setAiOpen(true);
+        void saveSettings({ aiOpen: true });
+      }
+      ai.ask(t(AI_ACTION_PROMPT[action]), { label, text: selected.text });
+    },
+    [ai, aiOpen, saveSettings, settings.aiEnabled, tabs.fileTab, toast]
+  );
 
   /**
    * Replace the per-file layout map and write it back.
@@ -2387,10 +2665,24 @@ export default function App() {
     saveSettings({ sidebarVisible: next });
   }, [saveSettings, sidebarVisible]);
 
+  const toggleAi = useCallback(() => {
+    const next = !aiOpen;
+    setAiOpen(next);
+    saveSettings({ aiOpen: next });
+  }, [aiOpen, saveSettings]);
+
   const commitSidebarWidth = useCallback(
     (width: number) => {
       setSidebarWidth(width);
       saveSettings({ sidebarWidth: width });
+    },
+    [saveSettings]
+  );
+
+  const commitAiWidth = useCallback(
+    (width: number) => {
+      setAiWidth(width);
+      saveSettings({ aiWidth: width });
     },
     [saveSettings]
   );
@@ -2651,6 +2943,20 @@ export default function App() {
   );
 
   const { openUntitled, openSettings } = tabs;
+
+  /** Open Settings on one category, asked for by a link outside the page. */
+  const requestSettings = useCallback(
+    (category: SettingsCategory) => {
+      setSettingsFocus((previous) => ({
+        category,
+        seq: (previous?.seq ?? 0) + 1,
+      }));
+      openSettings();
+    },
+    [openSettings]
+  );
+  const clearSettingsFocus = useCallback(() => setSettingsFocus(null), []);
+
   /**
    * The latest answer to "does a dialog own the window", read by the shortcut handler below.
    * A ref rather than a dependency so that answering a prompt does not tear the listener down
@@ -3533,6 +3839,9 @@ const defaultModeFor = useCallback(
         onNewFile={openUntitled}
         onOpenFiles={openFiles}
         onOpenSettings={openSettings}
+        aiEnabled={settings.aiEnabled}
+        aiOpen={aiOpen}
+        onToggleAi={toggleAi}
       />
 
       <div className="main">
@@ -3713,6 +4022,7 @@ const defaultModeFor = useCallback(
                 onScrollRatio={onEditorScrollRatio}
                 onReady={(handle) => {
                   editorRef.current = handle;
+                  setEditorHandle(handle);
                 }}
                 onLanguage={(language) => {
                   // Keyed by id rather than taken from the active tab: the editor stays mounted
@@ -3721,6 +4031,9 @@ const defaultModeFor = useCallback(
                 }}
                 onError={toast}
                 onRequestImageSave={requestImageSave}
+                onAiAction={
+                  settings.aiEnabled && ai.ready ? askAiAboutSelection : undefined
+                }
               />
               {lockedTab && (
                 <div
@@ -3964,9 +4277,42 @@ const defaultModeFor = useCallback(
               onToast={toast}
               onVersionsChanged={refreshVersions}
               onRestoreBackup={restoreBackup}
+              focusCategory={settingsFocus}
+              onFocusConsumed={clearSettingsFocus}
             />
           )}
         </div>
+
+        {settings.aiEnabled && aiOpen && (
+          <aside className="ai-dock" style={{ width: aiWidth }}>
+            <SidebarResizer
+              value={aiWidth}
+              defaultValue={DEFAULT_SETTINGS.aiWidth}
+              side="right"
+              min={AI_DOCK_MIN_WIDTH}
+              max={Number.POSITIVE_INFINITY}
+              // The drag stops at the window edge, leaving only the sidebar beside the dock.
+              // The sidebar's 5px handle overlaps its edge by 3px, so 2px of it sits in the
+              // row; reserve that too. Settings may hide the sidebar, but the width is kept
+              // for its return, so closing Settings does not push the dock off the window.
+              reserve={sidebarVisible ? sidebarWidth + 2 : 0}
+              onChange={setAiWidth}
+              onCommit={commitAiWidth}
+            />
+            <AiChatPanel
+              chat={ai}
+              contextLabel={aiContextLabel}
+              contextScope={settings.aiContextScope}
+              onContextScope={(scope) => void saveSettings({ aiContextScope: scope })}
+              onInsert={insertAiText}
+              onOpenSettings={() => requestSettings("ai")}
+              filesEnabled={settings.aiFilesEnabled}
+              onToggleFiles={() =>
+                void saveSettings({ aiFilesEnabled: !settings.aiFilesEnabled })
+              }
+            />
+          </aside>
+        )}
       </div>
 
       {settings.showStatusBar && (
@@ -3992,6 +4338,7 @@ const defaultModeFor = useCallback(
               : null
           }
           onGitClick={() => changeView("git")}
+          ai={settings.aiEnabled ? (inlineAi.busy ? "busy" : "ready") : null}
           pdf={
             pdfPath && pdfPlace?.path === pdfPath
               ? { page: pdfPlace.page, total: pdfPlace.total }
@@ -4813,6 +5160,11 @@ const defaultModeFor = useCallback(
           cancelDisabled={exportJob.stage === "print"}
         />
       )}
+
+      {/* The inline-edit panel lives in a Monaco content widget; the portal is what puts
+          React's markup inside the editor's own DOM node. */}
+      {inlineEdit.node &&
+        createPortal(<AiInlineEditPanel edit={inlineEdit} />, inlineEdit.node)}
 
       {/* The one hover bubble for the whole app: takes over every `title`, so no OS-drawn
           tooltip draws itself in the middle of the dark UI. */}

@@ -42,6 +42,9 @@ git2 = { version = "0.21.0", default-features = false, features = ["vendored-lib
 # SSE path, `json` the request body.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
 futures-util = "0.3"
+# The chat stream's idle timeout: a long answer must not be cut off by a total deadline, but a
+# service that has stopped sending must be named instead of waiting forever.
+tokio = { version = "1", features = ["time"] }
 # Archive browsing: `zip` reads the central directory (so a listing costs no unpacking) and
 # deflate entries; `tar` + `flate2` cover `.tar` and `.tar.gz`. All three are pure Rust, so the
 # build keeps the same Windows story as the rest of the tree.
