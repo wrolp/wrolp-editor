@@ -169,6 +169,11 @@ export default function FileSettingsDialog({
                 }
                 onChange={(v) => set({ minimap: v })}
               />
+              <SettingCheck
+                label={t("fileSettings.aiCompletion")}
+                checked={overrides.aiCompletion === true}
+                onChange={(v) => set({ aiCompletion: v ? true : null })}
+              />
               <FollowSelect
                 label={t("settings.encoding")}
                 value={overrides.encoding}

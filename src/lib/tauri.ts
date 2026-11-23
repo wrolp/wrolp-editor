@@ -1080,6 +1080,11 @@ export interface FileSettings {
    */
   versioning: string | null;
   /**
+   * Whether inline completion is on for this file: true turns it on; null (the default) and
+   * false leave it off. Each file opts in on its own.
+   */
+  aiCompletion: boolean | null;
+  /**
    * The language this file is highlighted as, or null to detect it from the name and the first
    * line. There is no global default here: what a file is depends on the file.
    */
@@ -1097,6 +1102,7 @@ export const EMPTY_FILE_SETTINGS: FileSettings = {
   encoding: null,
   lineEnding: null,
   versioning: null,
+  aiCompletion: null,
   language: null,
 };
 

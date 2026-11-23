@@ -55,6 +55,11 @@ pub struct FileSettings {
   /// a store of its own so a rename re-keys it with everything else about the file.
   #[serde(skip_serializing_if = "Option::is_none")]
   pub versioning: Option<String>,
+  /// Whether inline completion is on for this file: `Some(true)` turns it on, and the absence
+  /// of a value (the default) leaves it off. Each file opts in on its own; there is no global
+  /// switch to follow any more, which is why only the yes is worth storing.
+  #[serde(skip_serializing_if = "Option::is_none")]
+  pub ai_completion: Option<bool>,
   /// The Monaco language this file is highlighted as. `None` means "detect", which is the
   /// normal case: the extension and the first line are right far more often than a hand-picked
   /// mode, and a file must not look hand-configured when nobody configured it.
@@ -86,6 +91,7 @@ impl FileSettings {
       && self.encoding.is_none()
       && self.line_ending.is_none()
       && self.versioning.is_none()
+      && self.ai_completion.is_none()
       && self.language.is_none()
   }
 
@@ -107,6 +113,8 @@ impl FileSettings {
       encoding: self.encoding.filter(|v| encoding::is_known(v)),
       line_ending: self.line_ending.filter(|v| encoding::is_line_ending(v)),
       versioning: self.versioning.filter(|v| VERSIONING.contains(&v.as_str())),
+      // Only the yes is stored: `Some(false)` is the same as the default and is dropped.
+      ai_completion: self.ai_completion.filter(|enabled| *enabled),
       language: self.language.filter(|v| is_language_id(v)),
     }
   }
@@ -282,6 +290,8 @@ pub fn file_settings_view(app: AppHandle, path: String) -> Result<FileSettingsVi
     } else {
       "off".to_string()
     }),
+    // Inline completion is per file now, so nothing is inherited: the default is off.
+    ai_completion: None,
     // There is no global language: what a file is depends on the file, so the absence of an
     // override is the whole of the default.
     language: None,
@@ -379,6 +389,13 @@ mod tests {
         },
       ),
       (
+        "ai_completion",
+        FileSettings {
+          ai_completion: Some(false),
+          ..Default::default()
+        },
+      ),
+      (
         "language",
         FileSettings {
           language: Some("python".into()),
@@ -438,6 +455,7 @@ mod tests {
         encoding: Some("klingon".into()),
         line_ending: Some("martian".into()),
         versioning: Some("sometimes".into()),
+        ai_completion: Some(true),
         language: Some("Not A Language".into()),
       },
     )])
@@ -447,6 +465,7 @@ mod tests {
     assert_eq!(got.encoding, None);
     assert_eq!(got.line_ending, None);
     assert_eq!(got.versioning, None);
+    assert_eq!(got.ai_completion, None);
     assert_eq!(got.language, None);
     assert_eq!(got.word_wrap, Some(true));
     assert_eq!(got.sticky_scroll, Some(false));

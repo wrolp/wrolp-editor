@@ -523,6 +523,7 @@ const FILE_SETTING_ROWS = [
   { key: "insertSpaces", label: "settings.insertSpaces", icon: IconTabStop },
   { key: "detectIndentation", label: "settings.detectIndentation", icon: IconDetect },
   { key: "minimap", label: "settings.minimap", icon: IconMinimap },
+  { key: "aiCompletion", label: "fileSettings.aiCompletion", icon: IconPencil },
   { key: "encoding", label: "settings.encoding", icon: IconFile },
   { key: "lineEnding", label: "settings.lineEnding", icon: IconLineEnding },
   { key: "versioning", label: "fileSettingsMenu.versioning", icon: IconVersions },
@@ -905,8 +906,26 @@ export default function App() {
     applyFileEdit: aiApplyFileEdit,
   });
 
+  const aiCompletionFile = tabs.editorTab;
+  const aiCompletionToggleAvailable =
+    settings.aiEnabled &&
+    !!aiCompletionFile &&
+    !isUntitled(aiCompletionFile.path);
+  // Per file, with no global switch to follow: only a file that was switched on completes.
+  const inlineCompletionOn =
+    aiCompletionToggleAvailable && aiCompletionFile?.fileSettings.aiCompletion === true;
+
+  const toggleInlineCompletion = useCallback(() => {
+    const tab = tabs.editorTab;
+    if (!tab || isUntitled(tab.path)) return;
+    void tabs.setFileSettings(tab.path, {
+      ...tab.fileSettings,
+      aiCompletion: tab.fileSettings.aiCompletion === true ? null : true,
+    });
+  }, [tabs]);
+
   const inlineAi = useInlineCompletion({
-    enabled: settings.aiEnabled,
+    enabled: inlineCompletionOn,
     handle: editorHandle,
     maxFileSize: settings.versioningMaxFileSize,
   });
@@ -3403,6 +3422,7 @@ export default function App() {
       insertSpaces: onOff(own.insertSpaces ?? settings.insertSpaces),
       detectIndentation: onOff(own.detectIndentation ?? settings.detectIndentation),
       minimap: onOff(own.minimap ?? settings.minimap),
+      aiCompletion: onOff(own.aiCompletion === true),
       // Without an override the file is read in whatever its bytes turned out to be, which is
       // the honest answer here: the global "auto" says nothing about this one document.
       encoding: encodingName(own.encoding ?? menuTab.encoding),
@@ -3413,7 +3433,9 @@ export default function App() {
           : "ver.off"
       ),
     };
-    return FILE_SETTING_ROWS.map((row) => ({ ...row, value: values[row.key] }));
+    return FILE_SETTING_ROWS
+      .filter((row) => row.key !== "aiCompletion" || settings.aiEnabled)
+      .map((row) => ({ ...row, value: values[row.key] }));
   })();
 
   /**
@@ -3443,6 +3465,12 @@ export default function App() {
           follow,
           { value: true, label: t("fileSettingsMenu.on") },
           { value: false, label: t("fileSettingsMenu.off") },
+        ];
+      case "aiCompletion":
+        // Off is the default, so choosing it drops the file's yes instead of storing a no.
+        return [
+          { value: true, label: t("fileSettingsMenu.on") },
+          { value: null, label: t("fileSettingsMenu.off") },
         ];
       case "tabSize":
         return [follow, ...[2, 4, 8].map((size) => ({ value: size, label: String(size) }))];
@@ -4372,7 +4400,12 @@ const defaultModeFor = useCallback(
               : null
           }
           onGitClick={() => changeView("git")}
-          ai={settings.aiEnabled ? (inlineAi.busy ? "busy" : "ready") : null}
+          ai={
+            aiCompletionToggleAvailable
+              ? { on: inlineCompletionOn, busy: inlineAi.busy }
+              : null
+          }
+          onToggleAi={toggleInlineCompletion}
           pdf={
             pdfPath && pdfPlace?.path === pdfPath
               ? { page: pdfPlace.page, total: pdfPlace.total }

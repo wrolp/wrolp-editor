@@ -6255,18 +6255,32 @@ select {
   text-transform: uppercase;
 }
 /* The inline-completion switch is where the cost of an automatic request is read: a green
-   dot while it is idle, a pulsing one while a request is in flight. */
+   dot while it is idle, a pulsing one while a request is in flight, and a muted one when this
+   file's switch is off. The whole chip is the switch. */
 .statusbar .sb-ai {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  padding: 0 4px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
   color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+}
+.statusbar .sb-ai:hover {
+  background: var(--surface-hover);
+  color: var(--text-strong);
 }
 .statusbar .sb-ai-dot {
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: var(--dirty);
+}
+.statusbar .sb-ai.is-off .sb-ai-dot {
+  background: var(--text-faint);
 }
 .statusbar .sb-ai.is-busy {
   color: var(--text-dim);

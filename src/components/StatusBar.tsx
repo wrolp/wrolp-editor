@@ -30,8 +30,10 @@ interface Props {
   git: GitSummary | null;
   /** Opens the Source Control view when the git summary is clicked. */
   onGitClick?: () => void;
-  /** Inline-completion state; null while the AI features are off. */
-  ai: "ready" | "busy" | null;
+  /** Inline-completion state for the file on screen; null when there is no file to switch. */
+  ai: { on: boolean; busy: boolean } | null;
+  /** Turns this file's inline completion on or off. */
+  onToggleAi?: () => void;
   /** Where the PDF reader stands; null when the file on screen is not a PDF. */
   pdf: { page: number; total: number } | null;
   /** Take the PDF reader to a page the user typed. */
@@ -126,6 +128,7 @@ export default function StatusBar({
   git,
   onGitClick,
   ai,
+  onToggleAi,
   pdf,
   onPdfGo,
 }: Props) {
@@ -238,13 +241,16 @@ export default function StatusBar({
       {/* Only the ending itself, in the three letters every editor uses; a tab that is not a
           text file has none to show. */}
       {ai && (
-        <span
-          className={`sb-ai${ai === "busy" ? " is-busy" : ""}`}
-          title={t("status.aiHint")}
+        <button
+          type="button"
+          className={`sb-ai${ai.busy ? " is-busy" : ""}${ai.on ? "" : " is-off"}`}
+          title={t(ai.on ? "status.aiHint" : "status.aiOffHint")}
+          aria-pressed={ai.on}
+          onClick={onToggleAi}
         >
           <span className="sb-ai-dot" />
-          AI: {t(ai === "busy" ? "status.aiBusy" : "status.aiReady")}
-        </span>
+          AI: {t(ai.busy ? "status.aiBusy" : ai.on ? "status.aiReady" : "status.aiOff")}
+        </button>
       )}
       {eol && <span className="sb-eol">{eol}</span>}
       {/* A drawn document's type is the format's own letters: `tab.language` is the editor's
