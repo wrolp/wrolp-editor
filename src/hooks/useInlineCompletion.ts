@@ -47,7 +47,14 @@ export function useInlineCompletion({
   useEffect(() => {
     const setInline = (on: boolean) => {
       try {
-        handle?.editor.updateOptions({ inlineSuggest: { enabled: on } });
+        handle?.editor.updateOptions({
+          inlineSuggest: {
+            enabled: on,
+            // The ordinary suggest list opens on most keystrokes; without this the ghost text
+            // would be suppressed by it, which reads as "inline completion never works".
+            experimental: { showOnSuggestConflict: "always" },
+          } as unknown as monacoEditor.IEditorOptions["inlineSuggest"],
+        });
       } catch {
         // The editor was disposed in the same commit that made the handle null.
       }
@@ -113,18 +120,33 @@ export function useInlineCompletion({
       disposeInlineCompletions() {},
     });
 
+    const triggerManual = () => {
+      manual.current = true;
+      editor.focus();
+      editor.trigger("wrolp.ai", "editor.action.inlineSuggest.trigger", null);
+    };
     const action = editor.addAction({
       id: "wrolp.ai.inlineCompletion",
       label: "AI inline completion",
-      keybindings: [monaco.KeyMod.Alt | monaco.KeyCode.Backslash],
-      run: () => {
-        manual.current = true;
-        editor.trigger("wrolp.ai", "editor.action.inlineSuggest.trigger", null);
-      },
+      run: triggerManual,
     });
+    // Bind Alt+\ while a key belongs to this editor. A capture listener on the window is
+    // deliberately above Monaco's keybinding service and the suggest widget: both can swallow
+    // the shortcut, and the action added above then never runs.
+    const dom = editor.getDomNode();
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+      if (event.code !== "Backslash" && event.key !== "\\") return;
+      if (!editor.hasTextFocus() && !dom?.contains(document.activeElement)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      triggerManual();
+    };
+    window.addEventListener("keydown", onKeyDown, true);
 
     return () => {
       disposed = true;
+      window.removeEventListener("keydown", onKeyDown, true);
       action.dispose();
       provider.dispose();
       setInline(false);
