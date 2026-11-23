@@ -4157,6 +4157,21 @@ body.tree-dragging * {
   min-height: 0;
 }
 
+/* In the unified view the two gutters sit flush against each other, so a row's pair of
+   numbers reads as one. The original column is dimmed and seamed off, which is what tells
+   the reader which number belongs to which file. Fixed colours because the diff editor is
+   always vs-dark, whatever the app theme is. */
+.diff-host .monaco-diff-editor .editor.original .margin {
+  background: rgba(0, 0, 0, 0.18);
+  border-right: 1px solid rgba(255, 255, 255, 0.14);
+}
+.diff-host .monaco-diff-editor .editor.original .line-numbers {
+  color: #6e6e6e;
+}
+.diff-host .monaco-diff-editor .editor.modified .line-numbers {
+  color: #9d9d9d;
+}
+
 /* ---------- Commit diff tab ---------- */
 .commit-view {
   display: flex;
