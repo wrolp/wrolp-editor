@@ -4113,6 +4113,28 @@ body.tree-dragging * {
 .diff-name + .diff-name {
   border-left: 1px solid var(--border);
 }
+/* A name that opens its file. A real button, reset back to the chip it sits in; the divider
+   between the two names is restored below because the reset clears it. */
+.diff-name-open {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  font: inherit;
+  font-size: 11px;
+  color: var(--muted);
+  cursor: pointer;
+  text-align: left;
+}
+.diff-name-open:hover {
+  color: var(--text-strong);
+  text-decoration: underline;
+}
+.diff-name + .diff-name-open,
+.diff-name-open + .diff-name,
+.diff-name-open + .diff-name-open {
+  border-left: 1px solid var(--border);
+}
 .diff-tools {
   display: flex;
   align-items: center;

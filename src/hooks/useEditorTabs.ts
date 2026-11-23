@@ -893,6 +893,49 @@ export function useEditorTabs({
   }, [activate, applyLineEnding]);
 
   /**
+   * A snapshot's text as a scratch buffer.
+   *
+   * One side of a git comparison is a version no file holds any more — the file may be gone
+   * from the working tree altogether — so "open" that side means putting its text under the
+   * editor as a buffer with no path. `untitled` gives exactly that: saving asks for a name
+   * instead of writing anything back, and nothing here can touch the working tree.
+   *
+   * `key` (the side's oid) keeps two versions of one name apart; opening the same snapshot
+   * twice lands on the buffer already holding it.
+   */
+  const openSnapshotView = useCallback(
+    async (name: string, language: string, content: string, key: string) => {
+      const path = `untitled://${name} · ${key}`;
+      const existing = tabsRef.current.find((t) => t.path === path);
+      if (existing) {
+        await activate(existing.id);
+        return;
+      }
+      const tab: Tab = {
+        id: nextId(),
+        path,
+        name,
+        language,
+        // The text is the buffer's whole content, not a file's baseline: nothing on disk
+        // backs it, so the tab starts clean and turns dirty only when the reader types.
+        original: "",
+        dirty: false,
+        initialValue: content,
+        encoding: "UTF-8",
+        bom: false,
+        bytes: null,
+        fileSettings: EMPTY_FILE_SETTINGS,
+      };
+      setTabs((prev) => [...prev, tab]);
+      await activate(tab.id);
+      // The text says which line ending it was written with; a snapshot has one even when
+      // an empty scratch buffer does not.
+      void applyLineEnding(tab.path, content, tab.fileSettings);
+    },
+    [activate, applyLineEnding]
+  );
+
+  /**
    * Move a tab to another position in the strip. Only the order changes: the active tab is
    * tracked by id, so dropping it elsewhere does not disturb what is on screen.
    *
@@ -3048,6 +3091,8 @@ export function useEditorTabs({
       tabText,
       swapCompare,
       openUntitled,
+      /** A comparison side's text (a version no file holds) as a scratch buffer. */
+      openSnapshotView,
       openSettings,
       openGallery,
       openGalleryArchive,
@@ -3109,6 +3154,8 @@ export function useEditorTabs({
       tabText,
       swapCompare,
       openUntitled,
+      /** A comparison side's text (a version no file holds) as a scratch buffer. */
+      openSnapshotView,
       openSettings,
       openGallery,
       openGalleryArchive,

@@ -4124,6 +4124,24 @@ const defaultModeFor = useCallback(
                 detectIndentation={detectIndentation}
                 scrollBeyondLastLine={settings.scrollBeyondLastLine}
                 onStats={setDiffStats}
+                // The pair's two files, back under the editor: a working-tree or buffer side
+                // opens (or reuses) its file tab; a snapshot side — a commit or index version
+                // that no file holds — opens its text as a scratch buffer, so a file deleted
+                // from the working tree can still be read whole instead of failing to open.
+                onOpenSide={(side) => {
+                  const target = editorTab.compare?.[side];
+                  if (!target) return;
+                  if (target.kind === "disk" || target.kind === "buffer") {
+                    void tabs.openPath(target.path);
+                  } else {
+                    void tabs.openSnapshotView(
+                      target.name,
+                      target.language,
+                      target.content,
+                      target.oid ?? target.path
+                    );
+                  }
+                }}
                 onFoldChange={(value) => saveSettings({ compareFold: value })}
                 onWrapChange={(value) => saveSettings({ compareWrap: value })}
               />
@@ -4142,6 +4160,16 @@ const defaultModeFor = useCallback(
                 insertSpaces={insertSpaces}
                 detectIndentation={detectIndentation}
                 scrollBeyondLastLine={settings.scrollBeyondLastLine}
+                // A commit side is a version the working tree may no longer hold, so its
+                // text opens as a scratch buffer; saving it asks for a name.
+                onOpenSide={(side) =>
+                  void tabs.openSnapshotView(
+                    side.name,
+                    side.language,
+                    side.content,
+                    side.oid ?? side.path
+                  )
+                }
               />
             </div>
           )}

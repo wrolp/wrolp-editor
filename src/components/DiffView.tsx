@@ -52,6 +52,11 @@ interface Props {
    * the version dialog and the conflict comparison, whose layout stays exactly as it was.
    */
   layout?: boolean;
+  /**
+   * A click on one side's name in the header. What opening means is the caller's: the diff
+   * only knows the two texts, not where the sides came from.
+   */
+  onOpenSide?: (side: "left" | "right") => void;
 }
 
 /**
@@ -78,6 +83,7 @@ export default function DiffView({
   wrap,
   lineNumbers,
   layout,
+  onOpenSide,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   /** The pane is too narrow for two columns, measured rather than guessed. */
@@ -217,12 +223,22 @@ export default function DiffView({
   return (
     <div className="diff-view">
       <div className="diff-head">
-        <span className="diff-name" title={pair.left.path}>
-          {pair.left.name}
-        </span>
-        <span className="diff-name" title={pair.right.path}>
-          {pair.right.name}
-        </span>
+        {(["left", "right"] as const).map((side) =>
+          onOpenSide ? (
+            <button
+              key={side}
+              className="diff-name diff-name-open"
+              title={pair[side].path}
+              onClick={() => onOpenSide(side)}
+            >
+              {pair[side].name}
+            </button>
+          ) : (
+            <span key={side} className="diff-name" title={pair[side].path}>
+              {pair[side].name}
+            </span>
+          )
+        )}
         {(fold || wrap || layout) && (
           <div className="diff-tools">
             {fold?.hidden && (

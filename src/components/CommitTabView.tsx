@@ -4,7 +4,7 @@ import { basename, langOf } from "../lib/path";
 import { api, errorMessage, type GitCommitFile, type GitDiffText } from "../lib/tauri";
 import { badgeTone } from "../lib/gitStatus";
 import { foldPair, type FoldChange } from "../lib/diffFold";
-import type { CommitTabData, ComparePair } from "../lib/types";
+import type { CommitTabData, ComparePair, CompareSide } from "../lib/types";
 import DiffView from "./DiffView";
 import { IconChevron, IconFold } from "./icons";
 
@@ -16,6 +16,8 @@ interface ViewProps {
   insertSpaces: boolean;
   detectIndentation: boolean;
   scrollBeyondLastLine: boolean;
+  /** Open one snapshot side's text — the version this diff is showing — as a buffer. */
+  onOpenSide?: (side: CompareSide) => void;
 }
 
 interface Props extends ViewProps {
@@ -49,6 +51,7 @@ export default function CommitTabView({
   insertSpaces,
   detectIndentation,
   scrollBeyondLastLine,
+  onOpenSide,
 }: Props) {
   const [files, setFiles] = useState<GitCommitFile[] | null>(null);
   const [filesError, setFilesError] = useState<string | null>(null);
@@ -212,6 +215,7 @@ export default function CommitTabView({
                         insertSpaces={insertSpaces}
                         detectIndentation={detectIndentation}
                         scrollBeyondLastLine={scrollBeyondLastLine}
+                        onOpenSide={onOpenSide}
                       />
                     ))}
                 </div>
@@ -255,6 +259,7 @@ function CommitFileDiff({
   insertSpaces,
   detectIndentation,
   scrollBeyondLastLine,
+  onOpenSide,
 }: FileDiffProps) {
   // Folded by default: "show only changes" is the view people open this tab for. Until the
   // diff's changed ranges arrive the whole text is shown and the ranges are collected, then the
@@ -362,6 +367,17 @@ function CommitFileDiff({
           detectIndentation={detectIndentation}
           scrollBeyondLastLine={scrollBeyondLastLine}
           onStats={ignoreStats}
+          // Both sides are snapshots of one file, so each name opens the version it stands
+          // for. The full text, not `source`: a folded diff holds only its changed hunks.
+          onOpenSide={
+            onOpenSide
+              ? (which) =>
+                  onOpenSide({
+                    ...pair[which],
+                    content: which === "left" ? full.left : full.right,
+                  })
+              : undefined
+          }
           onChanges={fold && ready ? undefined : setChanges}
           layout
         />

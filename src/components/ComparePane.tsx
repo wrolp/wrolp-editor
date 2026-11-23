@@ -25,6 +25,8 @@ interface Props {
   /** Remember a switch when it is flipped: how a diff is read is a habit, not a property. */
   onFoldChange: (value: boolean) => void;
   onWrapChange: (value: boolean) => void;
+  /** A click on one side's name: the caller opens whatever that side stands for. */
+  onOpenSide?: (side: "left" | "right") => void;
 }
 
 /**
@@ -49,6 +51,7 @@ export default function ComparePane({
   onStats,
   onFoldChange,
   onWrapChange,
+  onOpenSide,
 }: Props) {
   const [fold, setFold] = useState(foldDefault);
   const [changes, setChanges] = useState<readonly FoldChange[] | null>(null);
@@ -114,6 +117,7 @@ export default function ComparePane({
       detectIndentation={detectIndentation}
       scrollBeyondLastLine={scrollBeyondLastLine}
       onStats={onStats}
+      onOpenSide={onOpenSide}
       onChanges={fold && ready ? undefined : setChanges}
       // The editor-like reading layout: unchanged regions fold away, and the header gains the
       // split/unified switch (a narrow pane opens in one column on its own).
