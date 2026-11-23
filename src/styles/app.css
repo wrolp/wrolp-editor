@@ -6151,9 +6151,15 @@ select {
 }
 .sb-git-repo {
   color: var(--text-faint);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .sb-git-branch {
   color: var(--text-dim);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .sb-git-changes {
   min-width: 15px;
@@ -6174,8 +6180,24 @@ select {
   font-size: 12px;
   color: var(--muted);
   border-top: 1px solid var(--border);
+  /* The bar is one row high: an item with no room is shortened, never folded onto a second
+     line that the fixed height would then cut through. */
+  white-space: nowrap;
+  overflow: hidden;
+}
+/* Counters and labels are short facts; they keep their width rather than shrinking into a
+   clipped or wrapped sliver. The path and git summary yield instead, with ellipses. */
+.statusbar > * {
+  flex: 0 0 auto;
+}
+/* The repository and branch are the two names that can be arbitrarily long, so the button
+   is what gives way when the bar runs out of room. */
+.statusbar .sb-git {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 .statusbar .sb-path {
+  flex: 0 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
