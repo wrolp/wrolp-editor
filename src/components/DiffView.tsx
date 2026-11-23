@@ -215,7 +215,7 @@ export default function DiffView({
   }, [wordWrap, sideBySide]);
 
   return (
-    <div className="diff-view" title={t("cmp.readOnly")}>
+    <div className="diff-view">
       <div className="diff-head">
         <span className="diff-name" title={pair.left.path}>
           {pair.left.name}
