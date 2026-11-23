@@ -56,8 +56,8 @@ const CHAT_TURN_COUNT: usize = 40;
 /// but the continuation itself — a fence, a preamble — would be typed into the document.
 const COMPLETE_SYSTEM_PROMPT: &str = "You are an inline code completion engine inside a text \
 editor. Continue the text at the cursor. Reply with only the text to insert: no explanation, no \
-code fences, no quotes. Keep it short. If nothing useful can be continued, reply with an empty \
-string.";
+code fences, no quotes. Continue for as many lines as the text naturally needs and stop at a \
+natural point. If nothing useful can be continued, reply with an empty string.";
 
 /// What the caret can see: 2,000 characters behind it and 500 ahead.
 const COMPLETE_PREFIX_LIMIT: usize = 2_000;
@@ -1356,7 +1356,7 @@ async fn complete(
     ],
     "stream": false,
     "temperature": 0.2,
-    "max_tokens": 256,
+    "max_tokens": 512,
   });
 
   let client = reqwest::Client::builder()
@@ -1387,7 +1387,7 @@ async fn complete(
     .and_then(|choices| choices.first())
     .and_then(|choice| choice["message"]["content"].as_str())
     .unwrap_or("");
-  Ok(clean_completion(text))
+  Ok(dedupe_completion(prefix, suffix, clean_completion(text)))
 }
 
 /// The last `limit` characters, which is the part of the prefix the caret can see. The marker
@@ -1405,6 +1405,33 @@ fn truncate_tail(text: &str, limit: usize) -> String {
 /// A completion cleaned to the inline-completion limit.
 fn clean_completion(text: &str) -> String {
   clean_streamed(text, COMPLETE_MAX_CHARS)
+}
+
+/// Drop the parts of a completion that are already in the document: a model often begins by
+/// repeating the word or line the caret sits after, and ends by repeating what follows the
+/// caret. Inserting those would duplicate text, so the overlap is removed before the ghost text
+/// ever reaches Monaco. Multi-line continuations keep their internal breaks.
+fn dedupe_completion(prefix: &str, suffix: &str, completion: String) -> String {
+  let mut chars: Vec<char> = completion.chars().collect();
+  let before: Vec<char> = {
+    let mut tail: Vec<char> = prefix.chars().rev().take(COMPLETE_PREFIX_LIMIT).collect();
+    tail.reverse();
+    tail
+  };
+  let overlap = (1..=before.len().min(chars.len()))
+    .rev()
+    .find(|&length| before[before.len() - length..] == chars[..length]);
+  if let Some(length) = overlap {
+    chars.drain(..length);
+  }
+  let after: Vec<char> = suffix.chars().take(COMPLETE_SUFFIX_LIMIT).collect();
+  let overlap = (1..=after.len().min(chars.len()))
+    .rev()
+    .find(|&length| chars[chars.len() - length..] == after[..length]);
+  if let Some(length) = overlap {
+    chars.truncate(chars.len() - length);
+  }
+  chars.into_iter().collect()
 }
 
 /// The text to insert, with a fence the model added anyway taken off, a trailing newline
@@ -1705,6 +1732,32 @@ mod tests {
         .count(),
       COMPLETE_MAX_CHARS
     );
+    assert_eq!(
+      clean_completion("if (ready) {\n  run();\n}\n"),
+      "if (ready) {\n  run();\n}"
+    );
+  }
+
+  #[test]
+  fn a_completion_drops_what_was_already_typed() {
+    assert_eq!(
+      dedupe_completion("  return ", "", "  return a + b;".into()),
+      "a + b;"
+    );
+    assert_eq!(
+      dedupe_completion("const value = foo", "", "foo(1);".into()),
+      "(1);"
+    );
+    assert_eq!(
+      dedupe_completion("if (ready) {\n", "", "if (ready) {\n  run();\n}".into()),
+      "  run();\n}"
+    );
+  }
+
+  #[test]
+  fn a_completion_drops_text_that_is_already_after_the_cursor() {
+    assert_eq!(dedupe_completion("", ";\n}", "a + b;\n}".into()), "a + b");
+    assert_eq!(dedupe_completion("", "}", "}".into()), "");
   }
 
   #[test]
