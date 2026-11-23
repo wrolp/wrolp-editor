@@ -6857,16 +6857,34 @@ select {
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.25s;
-  max-width: 80vw;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  max-width: min(80vw, 640px);
+  /* A pathological message — a whole stderr — grows a scroll box rather than a toast taller
+     than the window. */
+  max-height: 40vh;
+  overflow-y: auto;
+  /* A message worth reading is worth copying: the text is selectable (the page turns
+     selection off), and a long one wraps instead of ending in an ellipsis that no copying
+     can reach. Hovering already holds the toast up, so a slow drag does not lose it. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  cursor: text;
 }
 .toast.show {
   opacity: 1;
   /* Hovering can only hold the toast up if the pointer can reach it, and a transparent toast
      must not sit over the content and swallow clicks. */
   pointer-events: auto;
+}
+/* What a double-click did, said beside the message rather than in a toast of its own: the
+   message that was copied is still the thing on screen. */
+.toast-note {
+  margin-left: 10px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.toast-note.failed {
+  color: var(--del);
 }
 
 /* ---------- Custom scrollbars ----------
