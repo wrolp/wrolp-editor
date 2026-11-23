@@ -12,6 +12,10 @@ interface ViewProps {
   fontSize: number;
   renderWhitespace: "none" | "boundary" | "selection" | "all" | "trailing";
   wordWrap: boolean;
+  /** The remembered side-by-side choice; null lets each diff's width decide. */
+  splitDefault: boolean | null;
+  /** A layout-switch click, reported so the next diff opens the same way. */
+  onSplitChange: (sideBySide: boolean) => void;
   tabSize: number;
   insertSpaces: boolean;
   detectIndentation: boolean;
@@ -47,6 +51,8 @@ export default function CommitTabView({
   fontSize,
   renderWhitespace,
   wordWrap,
+  splitDefault,
+  onSplitChange,
   tabSize,
   insertSpaces,
   detectIndentation,
@@ -211,6 +217,8 @@ export default function CommitTabView({
                         fontSize={fontSize}
                         renderWhitespace={renderWhitespace}
                         wordWrap={wordWrap}
+                        splitDefault={splitDefault}
+                        onSplitChange={onSplitChange}
                         tabSize={tabSize}
                         insertSpaces={insertSpaces}
                         detectIndentation={detectIndentation}
@@ -255,6 +263,8 @@ function CommitFileDiff({
   fontSize,
   renderWhitespace,
   wordWrap,
+  splitDefault,
+  onSplitChange,
   tabSize,
   insertSpaces,
   detectIndentation,
@@ -380,6 +390,8 @@ function CommitFileDiff({
           }
           onChanges={fold && ready ? undefined : setChanges}
           layout
+          splitDefault={splitDefault}
+          onSplitChange={onSplitChange}
         />
       </div>
     </div>

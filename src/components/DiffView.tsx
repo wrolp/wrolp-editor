@@ -53,6 +53,13 @@ interface Props {
    */
   layout?: boolean;
   /**
+   * The remembered side-by-side choice; null lets the pane's width decide. Absent behaves like
+   * null, with the choice living only as long as this view.
+   */
+  splitDefault?: boolean | null;
+  /** A click on the layout switch, reported so the next diff opens the same way. */
+  onSplitChange?: (sideBySide: boolean) => void;
+  /**
    * A click on one side's name in the header. What opening means is the caller's: the diff
    * only knows the two texts, not where the sides came from.
    */
@@ -83,6 +90,8 @@ export default function DiffView({
   wrap,
   lineNumbers,
   layout,
+  splitDefault,
+  onSplitChange,
   onOpenSide,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
@@ -90,9 +99,10 @@ export default function DiffView({
   const [narrow, setNarrow] = useState(false);
   /**
    * The reader's own choice, or null while the width decides. Clicking the switch takes over;
-   * a narrow pane opens unified without anybody asking, which is what the width is for.
+   * a remembered choice counts the same as a click, and a narrow pane opens unified without
+   * anybody asking, which is what the width is for.
    */
-  const [splitChoice, setSplitChoice] = useState<boolean | null>(null);
+  const [splitChoice, setSplitChoice] = useState<boolean | null>(splitDefault ?? null);
   const sideBySide = splitChoice ?? !narrow;
 
   useEffect(() => {
@@ -278,7 +288,11 @@ export default function DiffView({
             {layout && (
               <button
                 className={`diff-tool${sideBySide ? " on" : ""}`}
-                onClick={() => setSplitChoice(!sideBySide)}
+                onClick={() => {
+                  const next = !sideBySide;
+                  setSplitChoice(next);
+                  onSplitChange?.(next);
+                }}
                 // The picture is what the click will switch *to*, like the other two switches.
                 title={t(sideBySide ? "cmp.unifiedView" : "cmp.splitView")}
                 aria-label={t(sideBySide ? "cmp.unifiedView" : "cmp.splitView")}

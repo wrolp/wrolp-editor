@@ -195,6 +195,10 @@ pub struct Settings {
   /// `None` means "keep following `word_wrap`", so an install that never touched the switch
   /// behaves exactly as it did before this setting existed.
   pub compare_wrap: Option<bool>,
+  /// Side-by-side or one column. `None` lets the pane's width decide, which is how a fresh
+  /// install and a narrow pane behave; `Some` is the reader's own choice, remembered like the
+  /// other two switches because how somebody reads a diff is not a property of one diff.
+  pub compare_split: Option<bool>,
   /// What a reopened session does with a draft that differs from the file on disk: `auto`
   /// loads it without asking, `ask` raises the Restore / Discard dialog for each file.
   /// `auto` is the default because the draft is the only copy of that typing, and a dialog
@@ -455,6 +459,7 @@ impl Default for Settings {
       compare_reuse_tab: true,
       compare_fold: false,
       compare_wrap: None,
+      compare_split: None,
       draft_restore: "auto".into(),
       sidebar_root: String::new(),
       expand_folders: false,
@@ -728,6 +733,7 @@ impl Settings {
       compare_reuse_tab: self.compare_reuse_tab,
       compare_fold: self.compare_fold,
       compare_wrap: self.compare_wrap,
+      compare_split: self.compare_split,
       draft_restore: if DRAFT_RESTORE.contains(&self.draft_restore.as_str()) {
         self.draft_restore.clone()
       } else {

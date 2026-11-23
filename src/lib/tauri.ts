@@ -272,6 +272,11 @@ export interface Settings {
   /** `null` keeps following `wordWrap`; a boolean is an explicit choice of its own. */
   compareWrap: boolean | null;
   /**
+   * Side-by-side or one column, remembered globally. `null` lets the pane's width decide — what
+   * a fresh install does — and a boolean is the reader's own choice, applied to every diff.
+   */
+  compareSplit: boolean | null;
+  /**
    * What a reopened session does with a draft the file on disk does not have: `auto` loads
    * it without asking, `ask` raises the Restore / Discard dialog per file. `auto` is the
    * default because the draft is the only copy of that typing and a dialog is one reflex

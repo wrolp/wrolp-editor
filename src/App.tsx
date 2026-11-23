@@ -256,9 +256,11 @@ const DEFAULT_SETTINGS: Settings = {
   // the setting is there for reading two diffs side by side.
   compareReuseTab: true,
   // The comparison opens unfolded and, until its own switch is touched, follows the global
-  // wrap: both are remembered once the user makes them a choice.
+  // wrap: both are remembered once the user makes them a choice. The split/unified switch is
+  // remembered the same way, and starts out decided by the pane's width.
   compareFold: false,
   compareWrap: null,
+  compareSplit: null,
   // A draft is the only copy of typing that never reached the disk, so startup puts it back
   // and stays out of the way; `ask` is for users who want to see each one first.
   draftRestore: "auto",
@@ -4119,6 +4121,7 @@ const defaultModeFor = useCallback(
                 // Remembered per user, not per pair: the diff opens the way it was last left.
                 foldDefault={settings.compareFold}
                 wrapDefault={settings.compareWrap ?? wordWrap}
+                splitDefault={settings.compareSplit}
                 tabSize={tabSize}
                 insertSpaces={insertSpaces}
                 detectIndentation={detectIndentation}
@@ -4144,6 +4147,7 @@ const defaultModeFor = useCallback(
                 }}
                 onFoldChange={(value) => saveSettings({ compareFold: value })}
                 onWrapChange={(value) => saveSettings({ compareWrap: value })}
+                onSplitChange={(value) => saveSettings({ compareSplit: value })}
               />
             </div>
           )}
@@ -4184,6 +4188,8 @@ const defaultModeFor = useCallback(
                 fontSize={settings.fontSize}
                 renderWhitespace={renderWhitespaceMode}
                 wordWrap={wordWrap}
+                splitDefault={settings.compareSplit}
+                onSplitChange={(value) => saveSettings({ compareSplit: value })}
                 tabSize={tabSize}
                 insertSpaces={insertSpaces}
                 detectIndentation={detectIndentation}

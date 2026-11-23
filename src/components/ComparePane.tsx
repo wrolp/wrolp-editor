@@ -17,6 +17,8 @@ interface Props {
   foldDefault: boolean;
   /** The wrap state to start from: the remembered choice, or the global setting if none. */
   wrapDefault: boolean;
+  /** The remembered side-by-side choice; null lets the pane's width decide. */
+  splitDefault: boolean | null;
   tabSize: number;
   insertSpaces: boolean;
   detectIndentation: boolean;
@@ -25,6 +27,7 @@ interface Props {
   /** Remember a switch when it is flipped: how a diff is read is a habit, not a property. */
   onFoldChange: (value: boolean) => void;
   onWrapChange: (value: boolean) => void;
+  onSplitChange: (value: boolean) => void;
   /** A click on one side's name: the caller opens whatever that side stands for. */
   onOpenSide?: (side: "left" | "right") => void;
 }
@@ -44,6 +47,7 @@ export default function ComparePane({
   renderWhitespace,
   foldDefault,
   wrapDefault,
+  splitDefault,
   tabSize,
   insertSpaces,
   detectIndentation,
@@ -51,6 +55,7 @@ export default function ComparePane({
   onStats,
   onFoldChange,
   onWrapChange,
+  onSplitChange,
   onOpenSide,
 }: Props) {
   const [fold, setFold] = useState(foldDefault);
@@ -120,8 +125,11 @@ export default function ComparePane({
       onOpenSide={onOpenSide}
       onChanges={fold && ready ? undefined : setChanges}
       // The editor-like reading layout: unchanged regions fold away, and the header gains the
-      // split/unified switch (a narrow pane opens in one column on its own).
+      // split/unified switch (a narrow pane opens in one column on its own unless a remembered
+      // choice says otherwise).
       layout
+      splitDefault={splitDefault}
+      onSplitChange={onSplitChange}
       fold={{
         on: fold,
         canFold: ready,
