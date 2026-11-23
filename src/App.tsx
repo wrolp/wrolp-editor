@@ -4188,6 +4188,8 @@ const defaultModeFor = useCallback(
                 fontSize={settings.fontSize}
                 renderWhitespace={renderWhitespaceMode}
                 wordWrap={wordWrap}
+                splitDefault={settings.compareSplit}
+                onSplitChange={(value) => saveSettings({ compareSplit: value })}
                 tabSize={tabSize}
                 insertSpaces={insertSpaces}
                 detectIndentation={detectIndentation}
@@ -4216,8 +4218,6 @@ const defaultModeFor = useCallback(
                 fontSize={settings.fontSize}
                 renderWhitespace={renderWhitespaceMode}
                 wordWrap={wordWrap}
-                splitDefault={settings.compareSplit}
-                onSplitChange={(value) => saveSettings({ compareSplit: value })}
                 tabSize={tabSize}
                 insertSpaces={insertSpaces}
                 detectIndentation={detectIndentation}
