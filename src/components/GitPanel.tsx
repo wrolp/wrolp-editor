@@ -18,7 +18,7 @@ import type {
   GitProgress,
   GitStatusEntry,
 } from "../lib/tauri";
-import { api, errorMessage, parentOf } from "../lib/tauri";
+import { api, copyText, errorMessage, parentOf } from "../lib/tauri";
 import { badgeTone } from "../lib/gitStatus";
 import { basename } from "../lib/path";
 import { useMenuPlacement } from "../hooks/useMenuPlacement";
@@ -35,6 +35,7 @@ import {
   IconBranch,
   IconChevron,
   IconCommit,
+  IconCopy,
   IconFetch,
   IconFile,
   IconFolder,
@@ -306,6 +307,10 @@ export default function GitPanel({
   } | null>(null);
   const commitMenuRef = useRef<HTMLDivElement>(null);
   const commitMenuAt = useMenuPlacement(commitMenu, commitMenuRef);
+  /** A name badge on a history row, with the branch or tag it stands for already resolved. */
+  const [refMenu, setRefMenu] = useState<{ name: string; x: number; y: number } | null>(null);
+  const refMenuRef = useRef<HTMLDivElement>(null);
+  const refMenuAt = useMenuPlacement(refMenu, refMenuRef);
   /** The recent-folders menu under the switch button, plus "pick another folder" behind it. */
   const [folderMenu, setFolderMenu] = useState<{ x: number; y: number } | null>(null);
   const folderMenuRef = useRef<HTMLDivElement>(null);
@@ -569,6 +574,24 @@ export default function GitPanel({
     };
   }, [commitMenu]);
 
+  useEffect(() => {
+    if (!refMenu) return;
+    const close = () => setRefMenu(null);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("wheel", close, { passive: true });
+    window.addEventListener("blur", close);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("wheel", close);
+      window.removeEventListener("blur", close);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [refMenu]);
+
   const openCommit = async (entry: GitLogEntry) => {
     if (commitOpen === entry.oid) {
       setCommitOpen(null);
@@ -708,6 +731,13 @@ export default function GitPanel({
     if (head.detached) return `${t("git.detached")} ${head.short ?? ""}`.trim();
     return head.branch ?? "HEAD";
   })();
+
+  const copyBranchName = (name: string) => {
+    void copyText(name).then((ok) => {
+      if (ok) onNotice(t("side.copied", { value: name }));
+      else onError(t("side.copyFailed"));
+    });
+  };
 
   /** The recent-folders menu, opened under whichever control asked for it. */
   const openFolderMenu = (anchor: HTMLElement) => {
@@ -858,6 +888,18 @@ export default function GitPanel({
                   key={`${ref.kind}:${ref.name}`}
                   className={`git-ref ${ref.kind}`}
                   title={ref.name}
+                  onContextMenu={(event) => {
+                    // The row's menu is about the commit; the badge's is about this one name,
+                    // so it must not fall through and open the commit menu on top of it.
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setRefMenu({
+                      // HEAD itself says nothing in a terminal; the branch it points at does.
+                      name: ref.kind === "head" ? (head?.branch ?? ref.name) : ref.name,
+                      x: event.clientX,
+                      y: event.clientY,
+                    });
+                  }}
                 >
                   {ref.name}
                 </span>
@@ -1256,6 +1298,14 @@ export default function GitPanel({
               >
                 {b.current ? "●" : ""} {b.name}
               </button>
+              <button
+                className="git-icon-btn"
+                title={t("git.copyBranch")}
+                aria-label={t("git.copyBranch")}
+                onClick={() => copyBranchName(b.name)}
+              >
+                <IconCopy size={12} />
+              </button>
               {!b.current &&
                 (deleteAsk === b.name ? (
                   <button
@@ -1301,6 +1351,14 @@ export default function GitPanel({
                 }}
               >
                 {b.name}
+              </button>
+              <button
+                className="git-icon-btn"
+                title={t("git.copyBranch")}
+                aria-label={t("git.copyBranch")}
+                onClick={() => copyBranchName(b.name)}
+              >
+                <IconCopy size={12} />
               </button>
             </div>
           ))}
@@ -1882,6 +1940,29 @@ export default function GitPanel({
           onClose={() => setRemotesOpen(false)}
           onError={onError}
         />
+      )}
+
+      {refMenu && (
+        <div
+          className="ctx-menu"
+          ref={refMenuRef}
+          style={{ display: "block", left: refMenuAt.left, top: refMenuAt.top }}
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <div
+            className="ctx-item"
+            onClick={() => {
+              const name = refMenu.name;
+              setRefMenu(null);
+              copyBranchName(name);
+            }}
+          >
+            <span className="ctx-icon">
+              <IconCopy size={14} />
+            </span>
+            {t("git.copyBranch")}
+          </div>
+        </div>
       )}
 
       {commitMenu && (
