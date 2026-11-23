@@ -1985,6 +1985,24 @@ export default function GitPanel({
             </span>
             {t("git.log.openCommitTab")}
           </div>
+          {/* The full hash rather than the short one on the row: a hash off the screen is
+              something to paste into a terminal, and the full one is the same string there. */}
+          <div
+            className="ctx-item"
+            onClick={() => {
+              const entry = commitMenu.entry;
+              setCommitMenu(null);
+              void copyText(entry.oid).then((ok) => {
+                if (ok) onNotice(t("side.copied", { value: entry.oid }));
+                else onError(t("side.copyFailed"));
+              });
+            }}
+          >
+            <span className="ctx-icon">
+              <IconCopy size={14} />
+            </span>
+            {t("git.log.copyHash")}
+          </div>
         </div>
       )}
 
