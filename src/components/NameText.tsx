@@ -79,6 +79,15 @@ function flushFits() {
     const { box, target, name, exact, tooltip } = jobs[i];
     if (!box.isConnected) continue;
     const width = widths[i];
+    // A pinned label is sized by its whole name, so the box already holds the text and only a
+    // flex squeeze overflows it. Ask the layout rather than the canvas: at some DPIs the two
+    // disagree by a pixel, and that disagreement used to cut a name that was fully on screen —
+    // the box kept its width for the whole name, the cut copy silently got shorter.
+    if (exact && width > 1 && box.scrollWidth <= Math.ceil(width) + 1) {
+      if (target.textContent !== name) target.textContent = name;
+      if (tooltip && box.title) box.title = "";
+      continue;
+    }
     // A row keeps a pixel so its own cut never touches the edge; a pinned tab is already sized
     // by the whole name, and taking one away there would cut a name that fits.
     const next = width > 1 ? cutMiddle(box, name, exact ? width : width - 1) : name;

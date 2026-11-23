@@ -40,6 +40,13 @@ function blockedKey(diff: GitDiffText): string | null {
 /** `DiffView` reports totals for the status bar; this view has no status bar of its own. */
 const ignoreStats = () => {};
 
+/** Split a repository path into the file's name and the folder holding it. */
+function splitPath(path: string): { name: string; dir: string } {
+  const cut = path.lastIndexOf("/");
+  if (cut < 0) return { name: path, dir: "" };
+  return { name: path.slice(cut + 1), dir: path.slice(0, cut) };
+}
+
 /**
  * One commit's changed files, folded by file. A file's header is expanded on demand, and its diff
  * is read the first time that happens, then cached: the commit is immutable, and a commit that
@@ -187,6 +194,7 @@ export default function CommitTabView({
             {files.map((file) => {
               const isOpen = open.has(file.path);
               const diff = diffs.get(file.path);
+              const { name, dir } = splitPath(file.path);
               return (
                 <div className="commit-file-section" key={file.path}>
                   <button
@@ -199,7 +207,8 @@ export default function CommitTabView({
                       <IconChevron size={11} />
                     </span>
                     <span className={`git-badge ${badgeTone(file.status)}`}>{file.status}</span>
-                    <span className="commit-file-name">{file.path}</span>
+                    <span className="commit-file-name">{name}</span>
+                    {dir && <span className="commit-file-dir">{dir}</span>}
                     {file.oldPath && <span className="commit-file-old">{file.oldPath} →</span>}
                   </button>
                   {isOpen &&

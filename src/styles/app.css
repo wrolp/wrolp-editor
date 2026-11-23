@@ -3063,7 +3063,9 @@ body.tree-dragging * {
   white-space: nowrap;
 }
 .git-dir {
-  flex: 1 1 auto;
+  /* The folder is the part that gives way: a row short of room shrinks the path before it takes
+     a pixel from the file name beside it, which is what the reader scans for. */
+  flex: 1 1000 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -4309,16 +4311,28 @@ body.tree-dragging * {
   font-size: 12px;
   text-align: left;
   cursor: pointer;
+  overflow: hidden;
 }
 .commit-file-head:hover {
   background: var(--surface-hover);
 }
+/* The name is what a reader scans for, so it keeps its width and never folds; the folder
+   behind it is the part that shortens when the row runs out of room. */
 .commit-file-name {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.commit-file-dir {
+  flex: 1 1000 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-faint);
+  font-size: 11px;
 }
 .commit-file-old {
   flex: 0 0 auto;
