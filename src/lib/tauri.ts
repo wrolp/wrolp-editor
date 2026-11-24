@@ -439,6 +439,12 @@ export interface Settings {
   backupDir: string;
   /** Where notes live; empty means the app's own `wrolp/notes` folder. */
   notesDir: string;
+  /** Percent opacity a sticky note keeps while the pointer is not over it; 100 is opaque. */
+  stickyIdleOpacity: number;
+  /** Whether the writing stays opaque while the paper fades. */
+  stickyTextOpaque: boolean;
+  /** Seconds the pointer has to be away before a sticky note fades. */
+  stickyFadeDelay: number;
   /** Run OCR as soon as a picture is shown; off by default. */
   ocrAuto: boolean;
   /** How many snapshots are kept. Older ones are removed when a new one is written. */

@@ -352,6 +352,9 @@ const DEFAULT_SETTINGS: Settings = {
   // few weeks of daily ones.
   backupDir: "",
   notesDir: "",
+  stickyIdleOpacity: 100,
+  stickyTextOpaque: true,
+  stickyFadeDelay: 2,
   ocrAuto: false,
   backupRetain: 20,
   // Checking costs one request and tells the user a new version exists; installing still waits

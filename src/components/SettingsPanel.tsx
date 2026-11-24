@@ -1134,6 +1134,50 @@ export default function SettingsPanel({
               </SettingField>
               <p className="muted">{t("settings.notesDirDesc")}</p>
             </div>
+            <div className="setting-group">
+              <SettingField label={t("settings.stickyIdleOpacity")}>
+                <input
+                  type="number"
+                  step={5}
+                  min={0}
+                  max={100}
+                  value={settings.stickyIdleOpacity}
+                  onChange={(e) => {
+                    const n = Math.trunc(Number(e.target.value));
+                    if (Number.isNaN(n)) return;
+                    onSaveSettings({
+                      stickyIdleOpacity: Math.min(Math.max(n, 0), 100),
+                    });
+                  }}
+                />
+                <span className="muted">%</span>
+              </SettingField>
+              <p className="muted">{t("settings.stickyIdleOpacityDesc")}</p>
+              <SettingCheck
+                label={t("settings.stickyTextOpaque")}
+                checked={settings.stickyTextOpaque}
+                onChange={(v) => onSaveSettings({ stickyTextOpaque: v })}
+              />
+              <p className="muted">{t("settings.stickyTextOpaqueDesc")}</p>
+              <SettingField label={t("settings.stickyFadeDelay")}>
+                <input
+                  type="number"
+                  step={1}
+                  min={0}
+                  max={60}
+                  value={settings.stickyFadeDelay}
+                  onChange={(e) => {
+                    const n = Math.trunc(Number(e.target.value));
+                    if (Number.isNaN(n)) return;
+                    onSaveSettings({
+                      stickyFadeDelay: Math.min(Math.max(n, 0), 60),
+                    });
+                  }}
+                />
+                <span className="muted">{t("settings.stickyFadeDelayUnit")}</span>
+              </SettingField>
+              <p className="muted">{t("settings.stickyFadeDelayDesc")}</p>
+            </div>
           </div>
         )}
 

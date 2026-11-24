@@ -360,6 +360,14 @@ pub struct Settings {
   /// Where notes live. Empty means the app's own `wrolp/notes` folder. Changing it moves the
   /// pointer, not the files: the old folder keeps everything it had.
   pub notes_dir: String,
+  /// Opacity of a sticky note while the pointer is not over it, in percent. Hover restores full
+  /// opacity, and 100 turns the fade off.
+  pub sticky_idle_opacity: u32,
+  /// Whether the writing stays opaque while the paper fades. On by default: the paper can go
+  /// fully transparent and the note still reads.
+  pub sticky_text_opaque: bool,
+  /// Seconds after the pointer leaves a sticky board before its note fades.
+  pub sticky_fade_delay: u32,
   /// How many backups are kept. Older snapshots are deleted when a newer one is written, which is
   /// also what keeps an automatic snapshot from growing the folder without bound.
   pub backup_retain: u32,
@@ -513,6 +521,9 @@ impl Default for Settings {
       git_tree_view: false,
       backup_dir: String::new(),
       notes_dir: String::new(),
+      sticky_idle_opacity: 100,
+      sticky_text_opaque: true,
+      sticky_fade_delay: 2,
       backup_retain: crate::backup::DEFAULT_RETAIN,
       auto_check_updates: true,
       ai_enabled: false,
@@ -901,6 +912,13 @@ impl Settings {
       git_tree_view: self.git_tree_view,
       backup_dir: self.backup_dir.trim().to_string(),
       notes_dir: self.notes_dir.trim().to_string(),
+      // Zero is a real choice: the paper can vanish and leave only the writing.
+      sticky_idle_opacity: self.sticky_idle_opacity.clamp(0, 100),
+      // A completely transparent paper cannot also lose its text, or the note would vanish
+      // with nothing left to click.
+      sticky_text_opaque: self.sticky_text_opaque || self.sticky_idle_opacity == 0,
+      // A minute is already longer than anyone waits to see a note fade.
+      sticky_fade_delay: self.sticky_fade_delay.min(60),
       // A zero would leave no snapshot at all after the next write, and a hundred is already more
       // history than a configuration needs.
       backup_retain: if self.backup_retain == 0 {
