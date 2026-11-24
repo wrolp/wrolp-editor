@@ -357,6 +357,9 @@ pub struct Settings {
   /// folder; a path the user picked is kept as given. The folder is created when a backup is
   /// taken or the list is read, so a choice that cannot be reached yet is still remembered.
   pub backup_dir: String,
+  /// Where notes live. Empty means the app's own `wrolp/notes` folder. Changing it moves the
+  /// pointer, not the files: the old folder keeps everything it had.
+  pub notes_dir: String,
   /// How many backups are kept. Older snapshots are deleted when a newer one is written, which is
   /// also what keeps an automatic snapshot from growing the folder without bound.
   pub backup_retain: u32,
@@ -509,6 +512,7 @@ impl Default for Settings {
       // folder row per file would be more indentation than information.
       git_tree_view: false,
       backup_dir: String::new(),
+      notes_dir: String::new(),
       backup_retain: crate::backup::DEFAULT_RETAIN,
       auto_check_updates: true,
       ai_enabled: false,
@@ -896,6 +900,7 @@ impl Settings {
       git_scan_depth: self.git_scan_depth.min(5),
       git_tree_view: self.git_tree_view,
       backup_dir: self.backup_dir.trim().to_string(),
+      notes_dir: self.notes_dir.trim().to_string(),
       // A zero would leave no snapshot at all after the next write, and a hundred is already more
       // history than a configuration needs.
       backup_retain: if self.backup_retain == 0 {

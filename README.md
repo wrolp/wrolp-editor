@@ -24,6 +24,7 @@ A small local text editor for Windows: tabs, Markdown preview, PDF and Office do
 | Pictures | A whole folder in a gallery tab: stacked, one by one, slideshow or grid. Inside an archive, pictures open in the gallery without unpacking anything first. A screenshot pasted into a Markdown file is saved beside it and linked; pasted into the Explorer, it becomes a PNG. Windows' own OCR makes the text on a picture selectable and copyable, with no download |
 | Archives | zip, tar, tar.gz and 7z are browsed in the Explorer, unpacked into a read-only cache that every viewer can use. Encrypted archives take a password from the session, a rule on the name, the default password, or a prompt |
 | Files | Batch rename by pattern or regular expression, side-by-side comparison of any two contents, and configuration backup snapshots |
+| Notes | A sidebar view over ordinary markdown files in one folder: pin, tags and a due date in a small front-matter header drive the order and the colour, and a note opens as a normal tab. Scratch tabs can be saved as notes, and the folder may live on a sync drive |
 | Version history | Off by default. Once on, every save by hand records the file, and any two versions — or a version and what is open — can be compared or brought back |
 | Source control | A real Git view: staged and unstaged changes, diffs, commits and history, branches, a three-way merge editor, and fetch / pull / push over HTTPS or SSH |
 | Encryption | A self-describing AES-256-GCM container keyed from a password, with an idle lock; drafts are sealed with the same key |

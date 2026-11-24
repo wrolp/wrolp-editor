@@ -174,11 +174,10 @@ export interface MergeTabData {
 }
 
 /**
- * What the sidebar shows. Three rather than two, and every place that used to ask
- * `view === "history" ? … : …` has to name the third one: a pair of ternaries would file
- * versions under explorer and say nothing about it.
+ * What the sidebar shows. Every place that used to ask `view === "history" ? … : …` has to
+ * name the extra views: a fallback would file one under explorer and say nothing about it.
  */
-export type SidebarView = "explorer" | "history" | "versions" | "git";
+export type SidebarView = "explorer" | "history" | "notes" | "versions" | "git";
 
 /**
  * How a git status letter is coloured in the Explorer. `ignored` is not a change: it says the

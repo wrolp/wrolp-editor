@@ -437,6 +437,8 @@ export interface Settings {
   askNoteOnSave: boolean;
   /** Where configuration snapshots are written; empty means `wrolp/backups`. */
   backupDir: string;
+  /** Where notes live; empty means the app's own `wrolp/notes` folder. */
+  notesDir: string;
   /** Run OCR as soon as a picture is shown; off by default. */
   ocrAuto: boolean;
   /** How many snapshots are kept. Older ones are removed when a new one is written. */
@@ -812,6 +814,25 @@ export type AiChatEvent =
 export type OcrSource =
   | { kind: "path"; path: string }
   | { kind: "archive"; archive: string; entry: string };
+
+/** One note in the sidebar: an ordinary markdown file plus its small header. */
+export interface NoteMeta {
+  path: string;
+  title: string;
+  pinned: boolean;
+  tags: string[];
+  /** `YYYY-MM-DD`, or null. */
+  due: string | null;
+  /** Epoch milliseconds. */
+  modifiedAt: number;
+}
+
+/** The three header keys the sidebar writes. */
+export interface NoteMetaUpdate {
+  pinned: boolean;
+  tags: string[];
+  due: string | null;
+}
 
 /** One recognized word, in the coordinate space of the bitmap the engine saw. */
 export interface OcrWord {
@@ -1614,6 +1635,16 @@ export const api = {
   /** One non-streaming turn with the current-file tools. Cancellable via `aiCancel`. */
   aiFilesTurn: (opId: string, messages: AiWireMessage[]) =>
     invoke<AiFilesTurn>("ai_files_turn", { opId, messages }),
+  /** The effective notes folder: the chosen one, or the app's own. */
+  notesDir: () => invoke<string>("notes_dir"),
+  /** Every top-level `.md` in that folder, newest first. */
+  listNotes: () => invoke<NoteMeta[]>("list_notes"),
+  createNote: (title: string) => invoke<NoteMeta>("create_note", { title }),
+  /** Rewrite only the header; the body is left byte for byte. */
+  setNoteMeta: (path: string, meta: NoteMetaUpdate) =>
+    invoke<NoteMeta>("set_note_meta", { path, meta }),
+  /** Remove the file and its draft; false when it was already gone. */
+  deleteNote: (path: string) => invoke<boolean>("delete_note", { path }),
   /** OCR languages Windows can recognize; `ocr_unsupported` off Windows. */
   ocrLanguages: () => invoke<OcrLanguage[]>("ocr_languages"),
   /** Recognize one picture. `language` is a tag from `ocrLanguages`, or null for the profile. */

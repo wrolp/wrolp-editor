@@ -13,6 +13,7 @@ mod gallery;
 mod git;
 mod group;
 mod name_order;
+mod notes;
 mod ocr;
 mod office_state;
 mod pdf_position;
@@ -247,6 +248,11 @@ pub fn run() {
       ai::ai_files_turn,
       ocr::ocr_languages,
       ocr::ocr_image,
+      notes::notes_dir,
+      notes::list_notes,
+      notes::create_note,
+      notes::set_note_meta,
+      notes::delete_note,
       ai::ai_sessions,
       ai::ai_save_sessions
     ]);
