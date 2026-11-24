@@ -928,6 +928,8 @@ interface Props extends Omit<
    * panel's own, and Sidebar only owns the column it sits in.
    */
   gitPanel: ReactNode;
+  /** The Notes view, mounted here for the same reason as `gitPanel`. */
+  notesPanel: ReactNode;
 }
 
 /** A byte count in the short form a note row can hold: `1.4 MB`, `812 KB`, `97 B`. */
@@ -2170,6 +2172,12 @@ export default function Sidebar(props: Props) {
           {t("side.history")}
         </button>
         <button
+          className={`side-tab${view === "notes" ? " active" : ""}`}
+          onClick={() => onSetView("notes")}
+        >
+          {t("side.notes")}
+        </button>
+        <button
           className={`side-tab${view === "versions" ? " active" : ""}`}
           onClick={() => onSetView("versions")}
         >
@@ -2630,6 +2638,12 @@ export default function Sidebar(props: Props) {
           </>
         )}
       </div>
+      )}
+
+      {view === "notes" && (
+        <div className={`side-view notes-view${view === "notes" ? " active" : ""}`} ref={viewHost}>
+          {props.notesPanel}
+        </div>
       )}
 
       {view === "git" && (

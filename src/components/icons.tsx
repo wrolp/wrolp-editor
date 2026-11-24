@@ -713,6 +713,45 @@ export function IconCheck({ size = 14 }: IconProps) {
   );
 }
 
+export function IconPlus({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={2}>
+      <line x1="12" y1="5" x2="12" y2="19" />
+      <line x1="5" y1="12" x2="19" y2="12" />
+    </svg>
+  );
+}
+
+export function IconSearch({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.9}>
+      <circle cx="11" cy="11" r="6.3" />
+      <line x1="15.7" y1="15.7" x2="20.2" y2="20.2" />
+    </svg>
+  );
+}
+
+/** The pill a sticky window folds down to. */
+export function IconCapsule({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.8}>
+      <rect x="3.5" y="9" width="17" height="7" rx="3.5" />
+      <line x1="9" y1="12.5" x2="15" y2="12.5" />
+    </svg>
+  );
+}
+
+/** A pushpin: the window is pinned above the others, not a bookmark in a list. */
+export function IconPushpin({ size = 14 }: IconProps) {
+  return (
+    <svg {...base(size)} strokeWidth={1.7}>
+      <line x1="8.5" y1="4" x2="15.5" y2="4" />
+      <path d="M10 4l-.6 5.4L6.5 12h11l-2.9-2.6L14 4" />
+      <line x1="12" y1="12" x2="12" y2="19.5" />
+    </svg>
+  );
+}
+
 /**
  * Fetch: ask the remote for its refs and bring them down into this repository.
  *

@@ -23,6 +23,7 @@ import MarkdownPreview from "./components/MarkdownPreview";
 import PaneErrorBoundary from "./components/PaneErrorBoundary";
 import DraftRestoreDialog from "./components/DraftRestoreDialog";
 import NewGroupDialog from "./components/NewGroupDialog";
+import NotesPanel from "./components/NotesPanel";
 import PasteImageDialog from "./components/PasteImageDialog";
 import SettingsPanel, { type SettingsCategory } from "./components/SettingsPanel";
 import FileSettingsDialog from "./components/FileSettingsDialog";
@@ -350,6 +351,7 @@ const DEFAULT_SETTINGS: Settings = {
   // Empty is `wrolp/backups`, one folder away from the state it protects. Twenty snapshots is a
   // few weeks of daily ones.
   backupDir: "",
+  notesDir: "",
   ocrAuto: false,
   backupRetain: 20,
   // Checking costs one request and tells the user a new version exists; installing still waits
@@ -1261,11 +1263,13 @@ export default function App() {
       setSidebarView(
         loadedSettings.sidebarView === "history"
           ? "history"
-          : loadedSettings.sidebarView === "versions"
-            ? "versions"
-            : loadedSettings.sidebarView === "git"
-              ? "git"
-              : "explorer"
+          : loadedSettings.sidebarView === "notes"
+            ? "notes"
+            : loadedSettings.sidebarView === "versions"
+              ? "versions"
+              : loadedSettings.sidebarView === "git"
+                ? "git"
+                : "explorer"
       );
       setSidebarWidth(loadedSettings.sidebarWidth);
 
@@ -2723,6 +2727,83 @@ export default function App() {
     [saveSettings]
   );
 
+  /** The untitled tabs with text, which the Notes view can turn into note files. */
+  const scratchNotes = useMemo(
+    () =>
+      tabs.tabs.filter(
+        (tab) => isFileTab(tab) && isUntitled(tab.path) && (tabs.tabText(tab.id) ?? "").trim()
+      ),
+    [tabs.tabs, tabs.tabText]
+  );
+
+  const saveScratchNotes = useCallback(async () => {
+    let saved = 0;
+    for (const tab of scratchNotes) {
+      const text = tabs.tabText(tab.id);
+      if (!text?.trim()) continue;
+      const firstLine = text.split(/\r?\n/).find((line) => line.trim()) ?? tab.name;
+      const title = firstLine.replace(/^#+\s*/, "").trim() || tab.name;
+      const content = /^#\s+/m.test(text) ? text : `# ${title}\n\n${text}`;
+      try {
+        const note = await api.createNote(title);
+        // A note is written by this app, in this app's own encoding; `save_file` refuses a
+        // write that does not name one, and "auto" only describes reading.
+        await api.saveFile(note.path, content, "UTF-8", false);
+        await tabs.closeTab(tab.id);
+        saved += 1;
+      } catch (error) {
+        toast(errorMessage(error));
+        break;
+      }
+    }
+    if (saved > 0) toast(t("note.savedFromScratch", { n: String(saved) }));
+  }, [scratchNotes, tabs, toast]);
+
+  /** A clean open note gets the header the Notes view just wrote. */
+  const noteMetaChanged = useCallback(
+    (path: string) => {
+      const tab = tabs.tabs.find(
+        (candidate) => isFileTab(candidate) && pathKey(candidate.path) === pathKey(path)
+      );
+      if (tab && !tab.dirty) void tabs.reloadTab(tab.id);
+    },
+    [tabs.reloadTab, tabs.tabs]
+  );
+
+  const noteDeleted = useCallback(
+    (path: string) => {
+      const tab = tabs.tabs.find(
+        (candidate) => isFileTab(candidate) && pathKey(candidate.path) === pathKey(path)
+      );
+      if (tab && !tab.dirty) void tabs.closeTab(tab.id);
+    },
+    [tabs.closeTab, tabs.tabs]
+  );
+
+  const showNotesFolder = useCallback(
+    (dir: string) => {
+      setSidebarRoot(dir);
+      changeView("explorer");
+    },
+    [changeView, setSidebarRoot]
+  );
+
+  const copyNotePath = useCallback(
+    (path: string) => {
+      void copyText(path).then((ok) => {
+        if (!ok) toast(t("side.copyFailed"));
+      });
+    },
+    [toast]
+  );
+
+  const revealNote = useCallback(
+    (path: string) => {
+      revealItemInDir(path).catch((error) => toast(errorMessage(error)));
+    },
+    [toast]
+  );
+
   /**
    * Closing is asked for rather than assumed: a tab with unsaved edits has to be answered for
    * first. Everything clean — and a comparison or the Settings panel, which have no buffer at
@@ -3953,6 +4034,21 @@ const defaultModeFor = useCallback(
               // The same value the tree and the tab strip read; neither ever reaches a third
               // mode, so the panel falls back to the middle too.
               nameEllipsis={settings.explorerNameEllipsis === "end" ? "end" : "middle"}
+            />
+          }
+          notesPanel={
+            <NotesPanel
+              dirtyPaths={dirtyPaths}
+              scratchCount={scratchNotes.length}
+              onOpenPath={(path) => void tabs.openPath(path)}
+              onReveal={revealNote}
+              onCopyPath={copyNotePath}
+              onSetFolder={showNotesFolder}
+              onOpenSettings={() => requestSettings("notes")}
+              onSaveScratch={saveScratchNotes}
+              onMetaChanged={noteMetaChanged}
+              onNoteDeleted={noteDeleted}
+              onError={toast}
             />
           }
           onRemoveHistory={(path) =>

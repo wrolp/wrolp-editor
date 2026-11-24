@@ -27,6 +27,7 @@ import {
 export type SettingsCategory =
   | "context"
   | "general"
+  | "notes"
   | "versions"
   | "git"
   | "backups"
@@ -60,6 +61,7 @@ interface Props {
 const NAV: { cat: Category; key: string }[] = [
   { cat: "general", key: "settings.catGeneral" },
   { cat: "context", key: "settings.catContext" },
+  { cat: "notes", key: "settings.catNotes" },
   { cat: "versions", key: "ver.category" },
   { cat: "git", key: "settings.catGit" },
   { cat: "backups", key: "settings.catBackups" },
@@ -1095,6 +1097,43 @@ export default function SettingsPanel({
               <p className="muted">{t("settings.archiveCacheDesc")}</p>
             </div>
             <p className="muted">{t("settings.persisted")}</p>
+          </div>
+        )}
+
+        {category === "notes" && (
+          <div className="settings-cat">
+            <h2>{t("settings.catNotes")}</h2>
+            <div className="setting-group">
+              <SettingField label={t("settings.notesDir")}>
+                <input
+                  className="settings-text wide"
+                  type="text"
+                  readOnly
+                  value={settings.notesDir}
+                  placeholder={t("settings.notesDefault")}
+                />
+                <button
+                  className="btn small"
+                  onClick={() => {
+                    void pickFolder()
+                      .then((dir) => {
+                        if (dir) void onSaveSettings({ notesDir: dir });
+                      })
+                      .catch((error) => onToast(errorMessage(error)));
+                  }}
+                >
+                  {t("settings.notesChoose")}
+                </button>
+                <button
+                  className="btn small"
+                  disabled={!settings.notesDir}
+                  onClick={() => void onSaveSettings({ notesDir: "" })}
+                >
+                  {t("settings.notesDefault")}
+                </button>
+              </SettingField>
+              <p className="muted">{t("settings.notesDirDesc")}</p>
+            </div>
           </div>
         )}
 

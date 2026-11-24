@@ -166,6 +166,17 @@ body {
   overflow: hidden;
   user-select: none;
 }
+/* The board window is transparent: only the paper should be opaque. Both elements carry
+   the class because the canvas html paints is separate from the body's box. */
+html.sticky-window,
+body.sticky-window {
+  background: transparent;
+  overflow: hidden;
+}
+body.sticky-window *::-webkit-scrollbar,
+body.sticky-window::-webkit-scrollbar {
+  display: none;
+}
 
 .app {
   display: flex;
@@ -1361,6 +1372,860 @@ body.resizing .editor-host {
   color: var(--muted);
   font-size: 12px;
   padding: 12px 14px;
+}
+
+/* ---------- Notes ----------
+   The header stays put; only the note rows scroll, so a long list never takes the new-note
+   field away. */
+.side-view.notes-view.active {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 0;
+}
+.notes-panel {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+.notes-head {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+}
+/* Two short rows: compose, then search + the Done filter. The folder line is the quiet
+   footer; anything taller pushes the list itself below the fold. */
+.notes-new {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.notes-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 27px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+.notes-input::placeholder {
+  color: var(--muted);
+}
+.notes-input:focus {
+  border-color: var(--accent);
+}
+.notes-input:disabled {
+  opacity: 0.55;
+}
+.notes-add {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  width: 27px;
+  height: 27px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: var(--accent-soft);
+  color: #fff;
+  cursor: pointer;
+}
+.notes-add:not(:disabled):hover {
+  filter: brightness(1.08);
+}
+.notes-add:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.notes-tools {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.notes-search {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 27px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--muted);
+}
+.notes-search:focus-within {
+  border-color: var(--accent);
+}
+.notes-search svg {
+  flex: 0 0 auto;
+}
+.notes-search input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  outline: none;
+}
+.notes-search input::placeholder {
+  color: var(--muted);
+}
+.notes-done {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  height: 27px;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+.notes-done svg {
+  opacity: 0.5;
+}
+.notes-done:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+}
+.notes-done.on {
+  border-color: var(--accent-soft);
+  background: color-mix(in srgb, var(--accent-soft) 16%, transparent);
+  color: var(--text-strong);
+}
+.notes-done.on svg {
+  opacity: 1;
+  color: var(--accent-soft);
+}
+.notes-scratch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  color: var(--accent-soft);
+  font: inherit;
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+}
+.notes-scratch:hover {
+  text-decoration: underline;
+}
+.notes-scratch:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.notes-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.notes-overdue {
+  flex: 0 0 auto;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--danger);
+  font-size: 10px;
+  font-weight: 600;
+}
+.notes-folder {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+  overflow: hidden;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 10.5px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.notes-folder:hover {
+  color: var(--text-strong);
+}
+.notes-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.notes-empty {
+  padding: 14px 12px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.notes-empty p {
+  margin: 4px 0 10px;
+}
+.note-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border-soft);
+  border-left: 3px solid transparent;
+  cursor: pointer;
+}
+.note-row:hover {
+  background: var(--surface-hover);
+}
+.note-row.pinned {
+  border-left-color: var(--accent-soft);
+}
+.note-row.overdue {
+  background: rgba(198, 40, 40, 0.07);
+  background: color-mix(in srgb, var(--danger) 7%, transparent);
+}
+.note-row.done {
+  opacity: 0.55;
+}
+.note-title-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--text);
+}
+.note-title-line svg {
+  flex: 0 0 auto;
+  color: var(--accent-soft);
+}
+.note-title {
+  overflow: hidden;
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.note-dirty {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--dirty);
+  font-size: 10px;
+}
+.note-sub {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  font-size: 10.5px;
+}
+.note-due {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--surface-active);
+  color: var(--muted);
+}
+.note-due.overdue {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.note-due.today {
+  background: var(--accent-soft);
+  color: var(--on-accent);
+}
+.note-tag {
+  max-width: 120px;
+  padding: 0 6px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.note-updated {
+  color: var(--muted);
+  font-size: 10.5px;
+}
+.note-check {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 12px;
+  font-size: 12px;
+}
+.note-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+  color: var(--text-dim);
+  font-size: 12px;
+}
+.note-field .note-tags-input {
+  box-sizing: border-box;
+  width: 100%;
+}
+.note-due-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.settings-text.note-due-input {
+  width: 150px;
+}
+/* The editor carries the text itself, so it scrolls rather than growing past a short window. */
+.modal.note-edit-modal {
+  width: 480px;
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+}
+.note-body-input {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 150px;
+  max-height: 45vh;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  outline: none;
+  resize: vertical;
+}
+.note-body-input:focus {
+  border-color: var(--accent);
+}
+.note-body-missing {
+  padding: 10px;
+  border: 1px dashed var(--border);
+  border-radius: 7px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* Choosing the notes for a board. It is a question, not a workspace, so it keeps the
+   blocking overlay while the board itself lives in its own window. */
+.note-pick {
+  width: 460px;
+}
+.note-pick-list {
+  max-height: 46vh;
+  overflow-y: auto;
+  margin: 8px 0 4px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.note-pick-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.note-pick-row:hover {
+  background: var(--surface-hover);
+}
+.note-pick-row.on {
+  background: color-mix(in srgb, var(--accent-soft) 14%, transparent);
+}
+.note-pick-row input {
+  accent-color: var(--accent);
+}
+.note-pick-title {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- Sticky board (its own OS window) ----------
+   The window is sized to the paper and nothing else: a thin dark margin, the note itself, and
+   two controls over its top-right corner. The board only shows text; editing stays in the
+   editor window. */
+.sticky-board {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  background: transparent;
+  color: var(--text);
+}
+.sticky-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 10;
+  display: flex;
+  gap: 4px;
+}
+/* The whole margin drags too, but a hairline is hard to catch; this is the handle the eye
+   finds. It sits on the paper, so the drop lands where the note already is. */
+.sticky-grip {
+  position: absolute;
+  top: 5px;
+  left: 50%;
+  z-index: 10;
+  width: 34px;
+  height: 5px;
+  transform: translateX(-50%);
+  border-radius: 3px;
+  background: rgba(58, 56, 46, 0.18);
+  cursor: grab;
+}
+.sticky-grip:hover {
+  background: rgba(58, 56, 46, 0.35);
+}
+.sticky-top,
+.sticky-close,
+.sticky-collapse {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  /* Paper ink, not a window token: these glyphs live on the note, not on the app surface. */
+  color: rgba(58, 56, 46, 0.45);
+  cursor: pointer;
+  opacity: 0.35;
+}
+.sticky-board:hover .sticky-top,
+.sticky-board:hover .sticky-close,
+.sticky-board:hover .sticky-collapse,
+.sticky-top.on {
+  opacity: 1;
+}
+/* No button chrome over the paper: hover darkens the glyph to full ink. */
+.sticky-top:hover,
+.sticky-close:hover,
+.sticky-collapse:hover {
+  color: #1f2937;
+}
+/* Pinning shows in the pin itself; a filled button would fight the paper. */
+.sticky-top.on {
+  border-color: transparent;
+  background: transparent;
+  color: #4f46e5;
+}
+.sticky-top.on:hover {
+  background: transparent;
+  color: #3730a3;
+}
+.sticky-close:hover {
+  color: #c0392b;
+}
+.sticky-grid {
+  display: grid;
+  flex: 1 1 auto;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  align-content: start;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px;
+  /* A paper does not carry a scrollbar; the content still scrolls when capped. */
+  scrollbar-width: none;
+}
+.sticky-grid::-webkit-scrollbar {
+  display: none;
+}
+.sticky-empty {
+  padding: 18px;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+/* A lone paper is the window: it stretches with whatever size the user drags it to. */
+.sticky-grid.single {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+  align-content: stretch;
+}
+.sticky-grid.single .sticky-note {
+  height: 100%;
+  min-width: 0;
+}
+/* After the first fit the window is the paper, so any later resize hands the new space to
+   the papers rather than leaving a dark strip at the bottom. */
+.sticky-grid.settled {
+  grid-auto-rows: 1fr;
+  align-content: stretch;
+}
+/* Used only while the window is being fitted: rows go back to their content height so the
+   measurement sees the paper, not the window it is stretched to. */
+.sticky-grid.measuring {
+  grid-auto-rows: auto;
+  align-content: start;
+}
+.sticky-grid.measuring.single {
+  grid-template-rows: auto;
+}
+.sticky-grid.measuring.single .sticky-note {
+  height: auto;
+}
+.sticky-note {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 120px;
+  padding: 12px 13px 10px;
+  border-radius: 3px;
+  color: #3a382e;
+  cursor: default;
+  transition: opacity 0.15s ease;
+}
+/* The paper lives on its own layer so the fade can be applied to the sheet alone. */
+.sticky-note::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.28), 0 6px 14px rgba(0, 0, 0, 0.16);
+  transition: opacity 0.15s ease;
+}
+.sticky-note > * {
+  position: relative;
+  z-index: 1;
+}
+.sticky-note.tone-0::before {
+  background: #f6f0c7;
+}
+.sticky-note.tone-1::before {
+  background: #f2ded2;
+}
+.sticky-note.tone-2::before {
+  background: #e3edd9;
+}
+.sticky-note.tone-3::before {
+  background: #dbe6f1;
+}
+.sticky-note.tone-4::before {
+  background: #e9ddef;
+}
+/* Settings → Notes decides which of the two fades this board uses. */
+.fade-text.idle .sticky-note {
+  opacity: var(--sticky-idle-opacity, 1);
+  /* Going idle is the slow part; coming back is quick (the rules above). */
+  transition-duration: 1s;
+}
+.fade-text .sticky-note:hover {
+  opacity: 1;
+}
+.fade-paper.idle .sticky-note::before {
+  opacity: var(--sticky-idle-opacity, 1);
+  transition-duration: 1s;
+}
+.fade-paper .sticky-note:hover::before {
+  opacity: 1;
+}
+.sticky-note-text {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  overflow-wrap: break-word;
+  font-size: 12.5px;
+  line-height: 1.55;
+  cursor: text;
+}
+/* The same paper, with the markdown source in it while the note is being edited. */
+.sticky-note-editor {
+  flex: 1 1 auto;
+  width: 100%;
+  min-height: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: #3a382e;
+  font-family: inherit;
+  font-size: 12.5px;
+  line-height: 1.55;
+  outline: none;
+  resize: none;
+}
+.sticky-note-error {
+  margin-top: 6px;
+  color: #a32020;
+  font-size: 10.5px;
+}
+.sticky-note-text > :first-child {
+  margin-top: 0;
+}
+.sticky-note-text > :last-child {
+  margin-bottom: 0;
+}
+.sticky-note-text h1 {
+  margin: 0 0 6px;
+  font-size: 15px;
+  line-height: 1.3;
+}
+.sticky-note-text h2 {
+  margin: 0 0 6px;
+  font-size: 13.5px;
+  line-height: 1.35;
+}
+.sticky-note-text h3,
+.sticky-note-text h4,
+.sticky-note-text h5,
+.sticky-note-text h6 {
+  margin: 0 0 6px;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+.sticky-note-text p,
+.sticky-note-text ul,
+.sticky-note-text ol,
+.sticky-note-text blockquote,
+.sticky-note-text pre,
+.sticky-note-text table {
+  margin: 0 0 6px;
+}
+.sticky-note-text ul,
+.sticky-note-text ol {
+  padding-left: 18px;
+}
+.sticky-note-text li {
+  margin: 2px 0;
+}
+.sticky-note-text code {
+  padding: 0 3px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.07);
+  font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
+  font-size: 11px;
+}
+.sticky-note-text pre {
+  padding: 6px 8px;
+  overflow: auto;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.06);
+}
+.sticky-note-text pre code {
+  padding: 0;
+  background: none;
+}
+.sticky-note-text blockquote {
+  padding-left: 8px;
+  border-left: 2px solid rgba(58, 56, 46, 0.25);
+  color: rgba(58, 56, 46, 0.75);
+}
+.sticky-note-text a {
+  color: #2b4a8a;
+}
+.sticky-note-text table {
+  border-collapse: collapse;
+  font-size: 11.5px;
+}
+.sticky-note-text th,
+.sticky-note-text td {
+  padding: 2px 5px;
+  border: 1px solid rgba(58, 56, 46, 0.2);
+}
+.sticky-note-text hr {
+  margin: 6px 0;
+  border: none;
+  border-top: 1px solid rgba(58, 56, 46, 0.2);
+}
+.sticky-note-text img {
+  max-width: 100%;
+  height: auto;
+}
+.sticky-note-missing {
+  flex: 1 1 auto;
+  padding: 8px;
+  color: rgba(58, 56, 46, 0.6);
+  font-size: 12px;
+}
+.sticky-note-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+  color: rgba(58, 56, 46, 0.6);
+  font-size: 10px;
+}
+.sticky-tag {
+  padding: 0 5px;
+  border: 1px solid rgba(58, 56, 46, 0.2);
+  border-radius: 999px;
+}
+.sticky-due {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+/* The collapsed window is a pill: one line of title, cut with an ellipsis when the note's
+   name would run past the cap. */
+.sticky-capsule {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  height: 100%;
+  padding: 0 11px;
+  overflow: hidden;
+  border-radius: 999px;
+  color: #3a382e;
+  cursor: grab;
+  transition: opacity 0.15s ease;
+}
+.sticky-capsule:active {
+  cursor: grabbing;
+}
+/* The pill is a background layer like the paper, so the same fade modes apply to it. */
+.sticky-capsule::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  border-radius: inherit;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.28), 0 4px 10px rgba(0, 0, 0, 0.18);
+  transition: opacity 0.15s ease;
+}
+.sticky-capsule > * {
+  position: relative;
+  z-index: 1;
+}
+.sticky-capsule:hover {
+  filter: brightness(1.03);
+}
+.sticky-capsule.tone-0::before {
+  background: #f6f0c7;
+}
+.sticky-capsule.tone-1::before {
+  background: #f2ded2;
+}
+.sticky-capsule.tone-2::before {
+  background: #e3edd9;
+}
+.sticky-capsule.tone-3::before {
+  background: #dbe6f1;
+}
+.sticky-capsule.tone-4::before {
+  background: #e9ddef;
+}
+.fade-text.idle .sticky-capsule {
+  opacity: var(--sticky-idle-opacity, 1);
+  transition-duration: 1s;
+}
+.fade-text.idle .sticky-capsule:hover {
+  opacity: 1;
+}
+.fade-paper.idle .sticky-capsule::before {
+  opacity: var(--sticky-idle-opacity, 1);
+  transition-duration: 1s;
+}
+.fade-paper.idle .sticky-capsule:hover::before {
+  opacity: 1;
+}
+.sticky-capsule-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(58, 56, 46, 0.45);
+}
+.sticky-capsule-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 11.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sticky-capsule-more {
+  flex: 0 0 auto;
+  color: rgba(58, 56, 46, 0.6);
+  font-size: 10px;
+}
+/* The edges of the paper are the window's handles. */
+.sticky-resize {
+  position: absolute;
+  z-index: 9;
+}
+.sticky-resize.n {
+  top: 0;
+  right: 8px;
+  left: 8px;
+  height: 5px;
+  cursor: ns-resize;
+}
+.sticky-resize.s {
+  right: 8px;
+  bottom: 0;
+  left: 8px;
+  height: 5px;
+  cursor: ns-resize;
+}
+.sticky-resize.e {
+  top: 8px;
+  right: 0;
+  bottom: 8px;
+  width: 5px;
+  cursor: ew-resize;
+}
+.sticky-resize.w {
+  top: 8px;
+  bottom: 8px;
+  left: 0;
+  width: 5px;
+  cursor: ew-resize;
+}
+.sticky-resize.ne {
+  top: 0;
+  right: 0;
+  width: 10px;
+  height: 10px;
+  cursor: nesw-resize;
+}
+.sticky-resize.nw {
+  top: 0;
+  left: 0;
+  width: 10px;
+  height: 10px;
+  cursor: nwse-resize;
+}
+.sticky-resize.se {
+  right: 0;
+  bottom: 0;
+  width: 10px;
+  height: 10px;
+  cursor: nwse-resize;
+}
+.sticky-resize.sw {
+  bottom: 0;
+  left: 0;
+  width: 10px;
+  height: 10px;
+  cursor: nesw-resize;
 }
 
 /* ---------- AI chat ----------
@@ -6349,6 +7214,20 @@ select {
   justify-content: center;
   z-index: 100;
 }
+/* A dialog that does not own the window. The layer never takes a pointer, so everything
+   underneath stays clickable; only the panel itself does. */
+.modal-float {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  pointer-events: none;
+}
+.modal-float > .modal {
+  pointer-events: auto;
+}
 .modal {
   width: 420px;
   max-width: 90vw;
@@ -8037,7 +8916,7 @@ select {
   grid-template-columns: fit-content(min(20%, 200px)) minmax(0, 1fr);
   align-content: start;
   min-height: 120px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
   background: var(--surface);
   overflow: hidden;

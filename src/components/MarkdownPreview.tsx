@@ -85,6 +85,18 @@ interface Props {
  * script-execution vector — and with `csp: null` in tauri.conf.json there is no CSP
  * backstop either.
  */
+/**
+ * The editable front matter of a note is not document prose. The editor shows it (it is real
+ * text, and the only way to edit it by hand), while the preview hides a header it can recognize
+ * as a note's: `pinned`/`tags`/`due` between two `---` lines.
+ */
+function withoutNoteHeader(text: string): string {
+  const header = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(text);
+  if (!header) return text;
+  if (!/^(?:pinned|tags|due)\s*:/m.test(header[1])) return text;
+  return text.slice(header[0].length);
+}
+
 export default function MarkdownPreview({
   text,
   path,
@@ -159,9 +171,10 @@ export default function MarkdownPreview({
   const [resolved, setResolved] = useState(0);
 
   /** Every fence in the document, collected without rendering any of it. */
+  const displayText = useMemo(() => withoutNoteHeader(text), [text]);
   const fences = useMemo(() => {
     const found: { key: string; lang: string; text: string; diagram: DiagramKind | null }[] = [];
-    for (const token of marked.lexer(text)) {
+    for (const token of marked.lexer(displayText)) {
       if (token.type !== "code") continue;
       const lang = fenceLang(token.lang);
       const source = token.text;
@@ -169,7 +182,7 @@ export default function MarkdownPreview({
       found.push({ key: fenceKey(lang, source), lang, text: source, diagram: kind });
     }
     return found;
-  }, [text]);
+  }, [displayText]);
 
   /**
    * The asynchronous pass. Highlighting and diagram rendering both cost something — one
@@ -247,7 +260,7 @@ export default function MarkdownPreview({
       return `<pre><code${cls}>${escapeHtml(source)}</code></pre>\n`;
     };
     // `async: false` keeps this a plain string; marked would otherwise hand back a promise.
-    const raw = marked.parse(text, {
+    const raw = marked.parse(displayText, {
       async: false,
       gfm: true,
       breaks: true,
@@ -269,7 +282,7 @@ export default function MarkdownPreview({
     });
     inlineSvgRef.current = found;
     return DOMPurify.sanitize(withHoles, SANITIZE);
-  }, [text, resolved, theme]);
+  }, [displayText, resolved, theme]);
 
   /**
    * Folders the document points embedded assets into, resolved to absolute paths. `..` is allowed
