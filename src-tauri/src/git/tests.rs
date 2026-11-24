@@ -6,7 +6,7 @@
 
 use super::auth::AuthStore;
 use super::branch::{branches_of, create_branch, delete_branch, switch_branch};
-use super::diff::diff_of;
+use super::diff::{diff_of, promisor_remote};
 use super::history::{commit_files, head_commit, log_page};
 use super::index::{amend_commit, commit, discard, stage, unstage};
 use super::local::{
@@ -465,6 +465,209 @@ fn unstaging_a_rename_restores_both_paths() {
       ("b.txt", "untracked", Some("?"))
     ]
   );
+}
+
+#[test]
+fn a_commit_on_another_branch_diffs_from_its_own_tree() {
+  let fixture = fixture("other-branch-diff");
+  let _repo = init(&fixture);
+  let base_file = write(&fixture, "base.txt", "one\n");
+  stage(&root(&fixture), &[base_file], &locks()).unwrap();
+  commit(&root(&fixture), "first", None, &locks()).unwrap();
+  let base = status_of(&root(&fixture))
+    .unwrap()
+    .repo
+    .head
+    .branch
+    .unwrap();
+
+  create_branch(&root(&fixture), "dev", true, &locks()).unwrap();
+  write(&fixture, "base.txt", "one\ntwo\n");
+  write(&fixture, "dev.txt", "only on dev\n");
+  let changed = fixture.dir.join("base.txt").to_string_lossy().into_owned();
+  let added = fixture.dir.join("dev.txt").to_string_lossy().into_owned();
+  stage(&root(&fixture), &[changed, added], &locks()).unwrap();
+  let dev_commit = commit(&root(&fixture), "dev work", None, &locks()).unwrap();
+
+  switch_branch(&root(&fixture), &base, &locks()).unwrap();
+
+  // The list and the diff are two different reads: the list only needs trees, and only the diff
+  // reads blob contents, so a commit on a branch this checkout is not on must still answer.
+  let files = commit_files(&root(&fixture), &dev_commit.oid).unwrap();
+  let by_path = |name: &str| files.iter().find(|f| f.path == name).cloned().expect(name);
+  let modified = by_path("base.txt");
+  let diff = diff_of(
+    &root(&fixture),
+    &modified.abs,
+    modified.old_path.as_deref(),
+    "commit",
+    Some(&dev_commit.oid),
+    "auto",
+  )
+  .unwrap();
+  assert_eq!(diff.left.text, "one\n");
+  assert_eq!(diff.right.text, "one\ntwo\n");
+  assert!(!diff.left.missing && !diff.right.missing);
+
+  let added = by_path("dev.txt");
+  let diff = diff_of(
+    &root(&fixture),
+    &added.abs,
+    added.old_path.as_deref(),
+    "commit",
+    Some(&dev_commit.oid),
+    "auto",
+  )
+  .unwrap();
+  assert!(diff.left.missing);
+  assert_eq!(diff.right.text, "only on dev\n");
+}
+
+#[test]
+fn a_missing_blob_without_a_promisor_remote_keeps_the_plain_error() {
+  let fixture = fixture("missing-blob");
+  let repo = init(&fixture);
+  let file = write(&fixture, "a.txt", "one\n");
+  stage(&root(&fixture), &[file], &locks()).unwrap();
+  let result = commit(&root(&fixture), "first", None, &locks()).unwrap();
+
+  // Loose object, written by the commit above; removing it leaves a tree that names a blob the
+  // odb no longer holds. Nothing about that repository promises a download, so it must stay an
+  // error rather than reach for the network.
+  let head = repo.head().unwrap().peel_to_commit().unwrap();
+  let oid = head.tree().unwrap().get_name("a.txt").unwrap().id();
+  let hex = oid.to_string();
+  let loose = fixture
+    .dir
+    .join(".git")
+    .join("objects")
+    .join(&hex[..2])
+    .join(&hex[2..]);
+  assert!(loose.exists(), "expected a loose object at {}", loose.display());
+  fs::remove_file(&loose).unwrap();
+
+  let error = diff_of(
+    &root(&fixture),
+    &fixture.dir.join("a.txt").to_string_lossy().into_owned(),
+    None,
+    "commit",
+    Some(&result.oid),
+    "auto",
+  )
+  .err()
+  .expect("the blob object is gone, so the read must fail");
+  assert!(error.starts_with("git_blob:"), "unexpected error: {error}");
+}
+
+#[test]
+fn a_promisor_remote_is_read_from_the_repository_config() {
+  let fixture = fixture("promisor-config");
+  let repo = init(&fixture);
+  assert!(!promisor_remote(&repo));
+  repo
+    .remote("origin", "https://example.invalid/repo.git")
+    .unwrap();
+  let mut config = repo.config().unwrap();
+  config.set_bool("remote.origin.promisor", true).unwrap();
+  assert!(promisor_remote(&repo));
+  config.set_bool("remote.origin.promisor", false).unwrap();
+  assert!(!promisor_remote(&repo));
+}
+
+/// A partial clone can only be made by git itself, so this is the one test that runs the git
+/// binary; a machine without it says so instead of passing quietly.
+#[test]
+fn a_missing_blob_is_downloaded_through_the_promisor_remote() {
+  if std::process::Command::new("git")
+    .arg("--version")
+    .output()
+    .is_err()
+  {
+    eprintln!("skipped: git is not installed");
+    return;
+  }
+  let fixture = fixture("partial-clone");
+  let git = |dir: &Path, args: &[&str]| {
+    let output = std::process::Command::new("git")
+      .arg("-C")
+      .arg(dir)
+      .args(args)
+      .output()
+      .unwrap();
+    assert!(
+      output.status.success(),
+      "git {args:?} failed: {}",
+      String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+  };
+  let origin = fixture.dir.join("origin.git");
+  fs::create_dir_all(&origin).unwrap();
+  git(&origin, &["init", "--bare", "--quiet"]);
+  git(&origin, &["config", "uploadpack.allowFilter", "true"]);
+  // Lazy fetching wants one object by id, without a ref that advertises it.
+  git(&origin, &["config", "uploadpack.allowAnySHA1InWant", "true"]);
+
+  let seed = fixture.dir.join("seed");
+  fs::create_dir_all(&seed).unwrap();
+  git(&seed, &["init", "--quiet", "-b", "main"]);
+  git(&seed, &["config", "user.name", "Test"]);
+  git(&seed, &["config", "user.email", "test@example.com"]);
+  fs::write(seed.join("base.txt"), "one\n").unwrap();
+  git(&seed, &["add", "base.txt"]);
+  git(&seed, &["commit", "--quiet", "-m", "first"]);
+  git(&seed, &["checkout", "--quiet", "-b", "dev"]);
+  fs::write(seed.join("dev.txt"), "only on dev\n").unwrap();
+  git(&seed, &["add", "dev.txt"]);
+  git(&seed, &["commit", "--quiet", "-m", "dev work"]);
+  let url = format!(
+    "file:///{}",
+    origin.to_string_lossy().replace('\\', "/")
+  );
+  git(&seed, &["remote", "add", "origin", &url]);
+  git(&seed, &["push", "--quiet", "origin", "main", "dev"]);
+
+  let clone = fixture.dir.join("clone");
+  let clone_root = clone.to_string_lossy().into_owned();
+  let output = std::process::Command::new("git")
+    .args(["clone", "--quiet", "--no-local", "--filter=blob:none", &url])
+    .arg(&clone)
+    .output()
+    .unwrap();
+  assert!(
+    output.status.success(),
+    "clone failed: {}",
+    String::from_utf8_lossy(&output.stderr)
+  );
+
+  let dev_commit = git(&clone, &["rev-parse", "origin/dev"]);
+  let repo = Repository::open(&clone).unwrap();
+  let commit = repo
+    .revparse_single(&dev_commit)
+    .unwrap()
+    .peel_to_commit()
+    .unwrap();
+  let blob = commit.tree().unwrap().get_name("dev.txt").unwrap().id();
+  assert!(
+    repo.find_blob(blob).is_err(),
+    "the fixture is wrong: the clone already holds dev.txt"
+  );
+
+  // The checkout only ever needed main's blobs; this one lives only on the other branch, so
+  // reading it is the exact click the panel makes from the history.
+  let diff = diff_of(
+    &clone_root,
+    &clone.join("dev.txt").to_string_lossy().into_owned(),
+    None,
+    "commit",
+    Some(&dev_commit),
+    "auto",
+  )
+  .unwrap();
+  assert!(diff.left.missing);
+  assert_eq!(diff.right.text, "only on dev\n");
+  // The download is kept: the next read of the same blob is local.
+  assert!(repo.find_blob(blob).is_ok());
 }
 
 #[test]

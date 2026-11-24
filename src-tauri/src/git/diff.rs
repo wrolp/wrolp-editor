@@ -8,6 +8,7 @@
 use git2::{ObjectType, Oid, Repository, Tree};
 use serde::Serialize;
 use std::fs;
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use tauri::AppHandle;
 
@@ -238,8 +239,134 @@ fn workdir_side(abs: &str) -> Result<SideBytes, String> {
 }
 
 fn blob_bytes(repo: &Repository, oid: Oid) -> Result<Vec<u8>, String> {
-  let blob = repo.find_blob(oid).map_err(|e| fail("blob", e))?;
-  Ok(blob.content().to_vec())
+  match repo.find_blob(oid) {
+    Ok(blob) => Ok(blob.content().to_vec()),
+    // A partial clone (`--filter=blob:none`) delivers commits and trees without the blobs they
+    // name, and git downloads a missing object the first time anything asks for it. libgit2 has
+    // no promisor support, so that one download is delegated to the git binary; the object then
+    // lands in the same odb and every later read is local again. A repository without a promisor
+    // remote is not waiting on a download, so its error stays the plain one.
+    Err(error) if error.code() == git2::ErrorCode::NotFound && promisor_remote(repo) => {
+      fetch_blob_with_git(repo, oid)
+    }
+    Err(error) => Err(fail("blob", error)),
+  }
+}
+
+/// Whether some remote is marked as a promisor: the contract that makes a missing object one
+/// that was never downloaded rather than one that is gone.
+pub(crate) fn promisor_remote(repo: &Repository) -> bool {
+  let (Ok(remotes), Ok(config)) = (repo.remotes(), repo.config()) else {
+    return false;
+  };
+  for entry in remotes.iter() {
+    let Ok(Some(name)) = entry else {
+      continue;
+    };
+    if config
+      .get_bool(&format!("remote.{name}.promisor"))
+      .unwrap_or(false)
+    {
+      return true;
+    }
+  }
+  false
+}
+
+/// Read one missing object through the git binary, which fetches promisor objects on demand and
+/// keeps them, so this call is both the download and the read.
+fn fetch_blob_with_git(repo: &Repository, oid: Oid) -> Result<Vec<u8>, String> {
+  let Some(workdir) = repo.workdir() else {
+    return Err(format!("git_blob:object not found - no match for id ({oid})"));
+  };
+  let stamp = std::time::SystemTime::now()
+    .duration_since(std::time::UNIX_EPOCH)
+    .map(|d| d.as_nanos())
+    .unwrap_or(0);
+  let dir = std::env::temp_dir().join(format!("wrolp-git-blob-{}-{stamp}", std::process::id()));
+  fs::create_dir_all(&dir).map_err(|e| format!("git_blob_fetch:{e}"))?;
+  let content = dir.join("content");
+  let errors = dir.join("stderr.txt");
+  let result = run_cat_file(workdir, oid, &content, &errors).and_then(|()| read_capped(&content));
+  let _ = fs::remove_dir_all(&dir);
+  result
+}
+
+/// How long one missing object may spend downloading. A blob is small next to a fetch, and a
+/// click that ends in a sentence beats one that leaves the window waiting.
+const BLOB_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+fn run_cat_file(workdir: &Path, oid: Oid, content: &Path, errors: &Path) -> Result<(), String> {
+  let mut command = std::process::Command::new("git");
+  // `-C` rather than a changed current directory: the folder may sit on another drive, and this
+  // process's own working directory is not ours to move.
+  command
+    .arg("-C")
+    .arg(workdir)
+    .args(["cat-file", "blob"])
+    .arg(oid.to_string());
+  // Files rather than pipes: a blob can outgrow a pipe buffer, and nothing here can drain stdout
+  // while waiting for the process to finish.
+  command
+    .stdin(std::process::Stdio::null())
+    .stdout(std::process::Stdio::from(
+      fs::File::create(content).map_err(|e| format!("git_blob_fetch:{e}"))?,
+    ))
+    .stderr(std::process::Stdio::from(
+      fs::File::create(errors).map_err(|e| format!("git_blob_fetch:{e}"))?,
+    ))
+    // The download is the one network step this module makes, and a credential or host-key
+    // question has nobody to answer it here: failing fast is better than sitting on a prompt.
+    .env("GIT_TERMINAL_PROMPT", "0")
+    .env("GCM_INTERACTIVE", "never");
+  let mut child = command.spawn().map_err(|e| {
+    if e.kind() == std::io::ErrorKind::NotFound {
+      "git_blob_missing".to_string()
+    } else {
+      format!("git_blob_fetch:{e}")
+    }
+  })?;
+  let deadline = std::time::Instant::now() + BLOB_FETCH_TIMEOUT;
+  let status = loop {
+    match child.try_wait() {
+      Ok(Some(status)) => break status,
+      Ok(None) if std::time::Instant::now() < deadline => {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+      }
+      Ok(None) => {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err("git_blob_fetch:timeout".into());
+      }
+      Err(e) => return Err(format!("git_blob_fetch:{e}")),
+    }
+  };
+  if !status.success() {
+    let detail = fs::read_to_string(errors).unwrap_or_default();
+    let detail = detail.lines().next().unwrap_or("").trim().to_string();
+    // git's own sentence ("... does not appear to be a git repository") is the useful part.
+    return Err(format!(
+      "git_blob_fetch:{}",
+      if detail.is_empty() {
+        status.to_string()
+      } else {
+        detail
+      }
+    ));
+  }
+  Ok(())
+}
+
+/// Read at most one byte past the diff ceiling. That byte is enough for `diff_of` to call the
+/// side too large without the whole blob ever being held, and an oversized side sends no text.
+fn read_capped(path: &Path) -> Result<Vec<u8>, String> {
+  let file = fs::File::open(path).map_err(|e| format!("git_blob_fetch:{e}"))?;
+  let mut bytes = Vec::new();
+  file
+    .take(MAX_DIFF_BYTES as u64 + 1)
+    .read_to_end(&mut bytes)
+    .map_err(|e| format!("git_blob_fetch:{e}"))?;
+  Ok(bytes)
 }
 
 fn decode(bytes: Option<Vec<u8>>, preference: &str) -> Result<String, String> {
