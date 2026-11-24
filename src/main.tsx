@@ -1,5 +1,7 @@
 import ReactDOM from "react-dom/client";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import App from "./App";
+import StickyBoard from "./components/StickyBoard";
 import { SelectOverlay } from "./components/SelectOverlay";
 import "./styles/app.css";
 
@@ -21,10 +23,27 @@ window.addEventListener("contextmenu", (event) => {
 
 // StrictMode is not used: Monaco and the window event listeners have imperative
 // lifecycles, and the double mount would open files twice.
+const label = (() => {
+  try {
+    return getCurrentWindow().label;
+  } catch {
+    return "main";
+  }
+})();
+
+if (label.startsWith("sticky-")) {
+  document.documentElement.classList.add("sticky-window");
+  document.body.classList.add("sticky-window");
+}
+
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <>
-    <App />
-    {/* Draws the themed list a <select> expands into, in place of the OS widget. */}
-    <SelectOverlay />
-  </>
+  label.startsWith("sticky-") ? (
+    <StickyBoard label={label} />
+  ) : (
+    <>
+      <App />
+      {/* Draws the themed list a <select> expands into, in place of the OS widget. */}
+      <SelectOverlay />
+    </>
+  )
 );

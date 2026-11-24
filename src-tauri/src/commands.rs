@@ -2442,6 +2442,32 @@ where
     .collect()
 }
 
+/// Undecorated windows still get Windows 11's one-pixel system border. The sticky board is
+/// meant to be just the paper, so DWM is told to draw no border around it.
+#[tauri::command(async)]
+pub fn remove_window_border(window: tauri::WebviewWindow) -> Result<(), String> {
+  #[cfg(windows)]
+  {
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::Graphics::Dwm::{
+      DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE,
+    };
+    let hwnd = window.hwnd().map_err(|e| e.to_string())?;
+    unsafe {
+      DwmSetWindowAttribute(
+        HWND(hwnd.0),
+        DWMWA_BORDER_COLOR,
+        &DWMWA_COLOR_NONE as *const _ as *const core::ffi::c_void,
+        std::mem::size_of::<u32>() as u32,
+      )
+      .map_err(|e| e.to_string())?;
+    }
+  }
+  #[cfg(not(windows))]
+  let _ = window;
+  Ok(())
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;

@@ -253,6 +253,7 @@ pub fn run() {
       notes::create_note,
       notes::set_note_meta,
       notes::delete_note,
+      commands::remove_window_border,
       ai::ai_sessions,
       ai::ai_save_sessions
     ]);

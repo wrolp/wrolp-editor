@@ -2770,6 +2770,17 @@ export default function App() {
     [tabs.reloadTab, tabs.tabs]
   );
 
+  useEffect(() => {
+    // A sticky board writes the note in its own window; a clean tab showing it has to pick
+    // the new text up, the same as a change made here would.
+    const un = listen<string>("sticky-saved", (event) => {
+      noteMetaChanged(event.payload);
+    });
+    return () => {
+      void un.then((stop) => stop());
+    };
+  }, [noteMetaChanged]);
+
   const noteDeleted = useCallback(
     (path: string) => {
       const tab = tabs.tabs.find(
