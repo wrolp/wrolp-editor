@@ -9190,8 +9190,8 @@ select {
   align-self: center;
   display: inline-flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 6px;
+  gap: 2px;
+  padding: 2px 5px;
   /* The outline stays at rest so the pill reads as a control; like the number it is painted
      white and inverted by the blend, so it shows on the card and on a bright picture alike.
      Partial alpha keeps it from drawing a hard ring. */
@@ -9219,8 +9219,8 @@ select {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   padding: 0;
   border: 0;
   border-radius: 50%;
@@ -9248,7 +9248,11 @@ select {
    another pair of arrows beside the two already there. It is also the one element that stays
    fully lit at rest, so where you are reads at a glance. */
 .office-record-page-input {
-  width: 44px;
+  /* One character per digit, plus the 2px of padding and the 1px border on either side —
+     and a pixel of slack, so rounding never clips the last digit. `--jump-digits` is the
+     length of the number the view put in the box, so the field narrows to a single digit
+     as readily as it widens to a long record count. */
+  width: calc(var(--jump-digits, 1) * 1ch + 7px);
   padding: 2px;
   border: 1px solid transparent;
   border-radius: 4px;

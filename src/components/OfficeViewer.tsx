@@ -1655,12 +1655,16 @@ export default function OfficeViewer({ path, kind, csvText, paper, onSavePaper }
                   >
                     <IconChevron size={16} />
                   </button>
+                  {/* The box is exactly as wide as the digits it holds: its length arrives as
+                      a custom property, and the stylesheet adds the padding and border around
+                      them — a one-digit record no longer sits in a box built for four. */}
                   <input
                     className="office-record-page-input"
                     type="number"
                     min={1}
                     max={records.length}
                     value={jump}
+                    style={{ "--jump-digits": Math.max(jump.length, 1) } as CSSProperties}
                     aria-label={t("office.recordJumpPlaceholder")}
                     onChange={(event) => setJump(event.target.value)}
                     onBlur={() => setJump(String(current + 1))}
