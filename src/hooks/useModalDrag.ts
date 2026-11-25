@@ -53,6 +53,9 @@ export function useModalDrag<T extends HTMLElement>() {
     if ((e.target as HTMLElement).closest(INTERACTIVE)) return;
     const el = ref.current;
     if (!el) return;
+    // A dialog that was closed and reopened is a fresh node with no transform; the offset
+    // kept from the last opening would otherwise throw it back there on the first move.
+    if (!el.style.transform) offset.current = { x: 0, y: 0 };
     const rect = el.getBoundingClientRect();
     // The bounds below are in *offset* space, so they have to be derived from where the
     // dialog sits before any transform. Reading them off the live rect instead silently

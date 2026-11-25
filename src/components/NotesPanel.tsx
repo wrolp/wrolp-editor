@@ -163,6 +163,7 @@ export default function NotesPanel({
   const [deleteFor, setDeleteFor] = useState<NoteMeta | null>(null);
   const metaDrag = useModalDrag<HTMLDivElement>();
   const deleteDrag = useModalDrag<HTMLDivElement>();
+  const pickDrag = useModalDrag<HTMLDivElement>();
 
   const refresh = useCallback(async () => {
     try {
@@ -734,8 +735,10 @@ export default function NotesPanel({
 
       {picking && (
         <div className="modal-overlay">
-          <div className="modal note-pick">
-            <h3 className="modal-title">{t("sticky.pickTitle")}</h3>
+          <div className="modal note-pick" ref={pickDrag.ref}>
+            <h3 className="modal-title" {...pickDrag.handleProps}>
+              {t("sticky.pickTitle")}
+            </h3>
             <p className="muted">{t("sticky.pickHint")}</p>
             <div className="note-pick-list">
               {notes === null ? (
