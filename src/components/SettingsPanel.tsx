@@ -5,7 +5,9 @@ import logoUrl from "../../branding/logo.svg";
 import { formatWhen, LANGUAGES, t } from "../lib/i18n";
 import ArchivePasswordSettings from "./ArchivePasswordSettings";
 import { parseExtensionList } from "../lib/path";
+import { DEFAULT_STICKY_COLORS, STICKY_COLORS_MAX } from "../lib/stickyColors";
 import { loadOcrLanguages } from "../lib/ocrSupport";
+import { IconClose, IconPlus } from "./icons";
 import { LINE_ENDINGS } from "../lib/types";
 import SettingCheck from "./SettingCheck";
 import SettingField from "./SettingField";
@@ -1177,6 +1179,66 @@ export default function SettingsPanel({
                 <span className="muted">{t("settings.stickyFadeDelayUnit")}</span>
               </SettingField>
               <p className="muted">{t("settings.stickyFadeDelayDesc")}</p>
+            </div>
+            <div className="setting-group">
+              <SettingField label={t("settings.stickyColors")}>
+                <div className="sticky-colors">
+                  {settings.stickyColors.map((color, index) => (
+                    <span className="sticky-swatch" key={index}>
+                      <input
+                        type="color"
+                        value={color}
+                        aria-label={`${t("settings.stickyColor")} ${index + 1}`}
+                        onChange={(event) => {
+                          const next = [...settings.stickyColors];
+                          next[index] = event.target.value;
+                          void onSaveSettings({ stickyColors: next });
+                        }}
+                      />
+                      {settings.stickyColors.length > 1 && (
+                        <button
+                          className="sticky-swatch-remove"
+                          aria-label={t("settings.stickyColorRemove")}
+                          onClick={() =>
+                            void onSaveSettings({
+                              stickyColors: settings.stickyColors.filter(
+                                (_, i) => i !== index
+                              ),
+                            })
+                          }
+                        >
+                          <IconClose size={9} />
+                        </button>
+                      )}
+                    </span>
+                  ))}
+                  {settings.stickyColors.length < STICKY_COLORS_MAX && (
+                    <button
+                      className="sticky-swatch-add"
+                      aria-label={t("settings.stickyColorAdd")}
+                      onClick={() => {
+                        const unused = DEFAULT_STICKY_COLORS.find(
+                          (c) => !settings.stickyColors.includes(c)
+                        );
+                        void onSaveSettings({
+                          stickyColors: [...settings.stickyColors, unused ?? "#ffffff"],
+                        });
+                      }}
+                    >
+                      <IconPlus size={12} />
+                    </button>
+                  )}
+                  <button
+                    className="btn small"
+                    onClick={() =>
+                      void onSaveSettings({ stickyColors: [...DEFAULT_STICKY_COLORS] })
+                    }
+                  >
+                    {t("settings.stickyColorsReset")}
+                  </button>
+                </div>
+              </SettingField>
+              <p className="muted">{t("settings.stickyColorsDesc")}</p>
             </div>
           </div>
         )}

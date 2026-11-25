@@ -254,6 +254,7 @@ pub fn run() {
       notes::set_note_meta,
       notes::delete_note,
       commands::remove_window_border,
+      commands::sticky_backdrop,
       ai::ai_sessions,
       ai::ai_save_sessions
     ]);

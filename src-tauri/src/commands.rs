@@ -368,6 +368,9 @@ pub struct Settings {
   pub sticky_text_opaque: bool,
   /// Seconds after the pointer leaves a sticky board before its note fades.
   pub sticky_fade_delay: u32,
+  /// The paper colors sticky notes draw from. Each note takes one by its path, so a board
+  /// with several notes shows the group instead of one repeated color.
+  pub sticky_colors: Vec<String>,
   /// How many backups are kept. Older snapshots are deleted when a newer one is written, which is
   /// also what keeps an automatic snapshot from growing the folder without bound.
   pub backup_retain: u32,
@@ -451,6 +454,12 @@ impl Default for AiEndpoint {
   }
 }
 
+/// The paper colors a fresh install starts with; the frontend's `DEFAULT_STICKY_COLORS`
+/// matches. A board with several notes spreads them over the cards.
+const STICKY_COLORS: [&str; 5] = ["#f6f0c7", "#f2ded2", "#e3edd9", "#dbe6f1", "#e9ddef"];
+/// More colors than a board ever needs, and enough for a group to read as a palette.
+const STICKY_COLORS_MAX: usize = 8;
+
 /// Used when settings.json is absent or a key is missing, so a first run must not
 /// silently turn the sidebar and minimap off.
 impl Default for Settings {
@@ -524,6 +533,7 @@ impl Default for Settings {
       sticky_idle_opacity: 100,
       sticky_text_opaque: true,
       sticky_fade_delay: 2,
+      sticky_colors: STICKY_COLORS.iter().map(|c| (*c).to_string()).collect(),
       backup_retain: crate::backup::DEFAULT_RETAIN,
       auto_check_updates: true,
       ai_enabled: false,
@@ -919,6 +929,21 @@ impl Settings {
       sticky_text_opaque: self.sticky_text_opaque || self.sticky_idle_opacity == 0,
       // A minute is already longer than anyone waits to see a note fade.
       sticky_fade_delay: self.sticky_fade_delay.min(60),
+      // The color picker only ever writes `#rrggbb`, so anything else was hand-edited and is
+      // dropped rather than written into a background. An empty group falls back to the
+      // defaults: a note with no paper color would be an invisible note.
+      sticky_colors: {
+        let mut colors: Vec<String> = self
+          .sticky_colors
+          .iter()
+          .filter_map(|color| as_hex_color(color.trim()))
+          .take(STICKY_COLORS_MAX)
+          .collect();
+        if colors.is_empty() {
+          colors = STICKY_COLORS.iter().map(|c| (*c).to_string()).collect();
+        }
+        colors
+      },
       // A zero would leave no snapshot at all after the next write, and a hundred is already more
       // history than a configuration needs.
       backup_retain: if self.backup_retain == 0 {
@@ -2484,6 +2509,175 @@ pub fn remove_window_border(window: tauri::WebviewWindow) -> Result<(), String> 
   #[cfg(not(windows))]
   let _ = window;
   Ok(())
+}
+
+/// The average color of the desktop just outside a sticky board. A faded board lets the
+/// desktop through and its writing stays opaque, so the ink has to follow whatever is behind;
+/// sampling a thin band around the frame is the only place the board itself paints nothing.
+#[derive(Serialize)]
+pub struct StickyBackdrop {
+  pub r: u8,
+  pub g: u8,
+  pub b: u8,
+}
+
+/// `band` is the thickness of the sampled band in CSS pixels.
+#[tauri::command(async)]
+pub fn sticky_backdrop(
+  window: tauri::WebviewWindow,
+  band: f64,
+) -> Result<Option<StickyBackdrop>, String> {
+  #[cfg(windows)]
+  {
+    windows_backdrop::sample(&window, band)
+  }
+  #[cfg(not(windows))]
+  {
+    let _ = (window, band);
+    Ok(None)
+  }
+}
+
+#[cfg(windows)]
+mod windows_backdrop {
+  use super::StickyBackdrop;
+  use core::ffi::c_void;
+  use windows::Win32::Graphics::Gdi::{
+    BitBlt, CreateCompatibleDC, CreateDIBSection, DeleteDC, DeleteObject, GetDC, ReleaseDC,
+    SelectObject, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, CAPTUREBLT, DIB_RGB_COLORS, HDC, HGDIOBJ,
+    SRCCOPY,
+  };
+  use windows::Win32::UI::WindowsAndMessaging::{
+    GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
+  };
+
+  pub fn sample(
+    window: &tauri::WebviewWindow,
+    band: f64,
+  ) -> Result<Option<StickyBackdrop>, String> {
+    let scale = window.scale_factor().map_err(|e| e.to_string())?;
+    let origin = window.outer_position().map_err(|e| e.to_string())?;
+    let size = window.outer_size().map_err(|e| e.to_string())?;
+    let frame = (
+      origin.x,
+      origin.y,
+      origin.x + size.width as i32,
+      origin.y + size.height as i32,
+    );
+    let band = (band * scale).round().clamp(2.0, 64.0) as i32;
+
+    // Clipped to the desktop: BitBlt cannot read past it, and a board by an edge still has
+    // its other sides to average.
+    let (vx, vy, vw, vh) = unsafe {
+      (
+        GetSystemMetrics(SM_XVIRTUALSCREEN),
+        GetSystemMetrics(SM_YVIRTUALSCREEN),
+        GetSystemMetrics(SM_CXVIRTUALSCREEN),
+        GetSystemMetrics(SM_CYVIRTUALSCREEN),
+      )
+    };
+    let x = (frame.0 - band).max(vx);
+    let y = (frame.1 - band).max(vy);
+    let width = (frame.2 + band).min(vx + vw) - x;
+    let height = (frame.3 + band).min(vy + vh) - y;
+    if width <= 0 || height <= 0 || vw <= 0 || vh <= 0 {
+      return Ok(None);
+    }
+
+    unsafe {
+      let screen = GetDC(None);
+      if screen.is_invalid() {
+        return Ok(None);
+      }
+      let backdrop = average_band(screen, (x, y, width, height), frame);
+      ReleaseDC(None, screen);
+      Ok(backdrop)
+    }
+  }
+
+  /// Copies the band into a 32-bit DIB and averages it. CAPTUREBLT keeps layered windows
+  /// (which plain BitBlt leaves out) in the picture, so the sample sees the desktop as it is.
+  unsafe fn average_band(
+    screen: HDC,
+    area: (i32, i32, i32, i32),
+    frame: (i32, i32, i32, i32),
+  ) -> Option<StickyBackdrop> {
+    let (x, y, width, height) = area;
+    let mem = CreateCompatibleDC(Some(screen));
+    if mem.is_invalid() {
+      return None;
+    }
+
+    let header = BITMAPINFOHEADER {
+      biSize: core::mem::size_of::<BITMAPINFOHEADER>() as u32,
+      biWidth: width,
+      biHeight: -height,
+      biPlanes: 1,
+      biBitCount: 32,
+      biCompression: BI_RGB.0,
+      ..Default::default()
+    };
+    let info = BITMAPINFO {
+      bmiHeader: header,
+      ..Default::default()
+    };
+    let mut bits: *mut c_void = core::ptr::null_mut();
+    let dib = match CreateDIBSection(Some(mem), &info, DIB_RGB_COLORS, &mut bits, None, 0) {
+      Ok(dib) if !bits.is_null() => dib,
+      _ => {
+        let _ = DeleteDC(mem);
+        return None;
+      }
+    };
+
+    let old = SelectObject(mem, HGDIOBJ(dib.0));
+    let backdrop = if BitBlt(
+      mem,
+      0,
+      0,
+      width,
+      height,
+      Some(screen),
+      x,
+      y,
+      SRCCOPY | CAPTUREBLT,
+    )
+    .is_ok()
+    {
+      let stride = width as usize * 4;
+      let pixels = core::slice::from_raw_parts(bits as *const u8, stride * height as usize);
+      let (mut rs, mut gs, mut bs, mut count) = (0u64, 0u64, 0u64, 0u64);
+      // Every second pixel is plenty for an average. Pixels over the board itself are left
+      // out: only the band outside the frame shows the desktop untouched.
+      for py in (0..height as usize).step_by(2) {
+        let sy = y + py as i32;
+        let outside_rows = sy < frame.1 || sy >= frame.3;
+        for px in (0..width as usize).step_by(2) {
+          let sx = x + px as i32;
+          if !outside_rows && sx >= frame.0 && sx < frame.2 {
+            continue;
+          }
+          let at = py * stride + px * 4;
+          bs += pixels[at] as u64;
+          gs += pixels[at + 1] as u64;
+          rs += pixels[at + 2] as u64;
+          count += 1;
+        }
+      }
+      (count > 0).then(|| StickyBackdrop {
+        r: (rs / count) as u8,
+        g: (gs / count) as u8,
+        b: (bs / count) as u8,
+      })
+    } else {
+      None
+    };
+
+    SelectObject(mem, old);
+    let _ = DeleteObject(HGDIOBJ(dib.0));
+    let _ = DeleteDC(mem);
+    backdrop
+  }
 }
 
 #[cfg(test)]

@@ -102,6 +102,7 @@ import { useVersions } from "./hooks/useVersions";
 import { useWindowFrame } from "./hooks/useWindowFrame";
 import { useMenuPlacement } from "./hooks/useMenuPlacement";
 import { setLang, t } from "./lib/i18n";
+import { DEFAULT_STICKY_COLORS } from "./lib/stickyColors";
 import { parseExplorerSort } from "./lib/explorerSort";
 import { parseConflicts } from "./lib/mergeConflicts";
 import {
@@ -355,6 +356,7 @@ const DEFAULT_SETTINGS: Settings = {
   stickyIdleOpacity: 100,
   stickyTextOpaque: true,
   stickyFadeDelay: 2,
+  stickyColors: [...DEFAULT_STICKY_COLORS],
   ocrAuto: false,
   backupRetain: 20,
   // Checking costs one request and tells the user a new version exists; installing still waits

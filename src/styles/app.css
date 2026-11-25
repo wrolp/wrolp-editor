@@ -1774,6 +1774,42 @@ body.resizing .editor-host {
   overflow: hidden;
   background: transparent;
   color: var(--text);
+  /* Paper ink. When the writing outlives the paper, StickyBoard.tsx samples the desktop
+     around the frame and switches to `.ink-light` if that keeps more contrast. */
+  --note-ink: #3a382e;
+  --note-ink-hover: #1f2937;
+  --note-ink-strong: rgba(58, 56, 46, 0.75);
+  --note-ink-soft: rgba(58, 56, 46, 0.6);
+  --note-ink-icon: rgba(58, 56, 46, 0.45);
+  --note-ink-line: rgba(58, 56, 46, 0.2);
+  --note-ink-faint: rgba(58, 56, 46, 0.25);
+  --note-grip: rgba(58, 56, 46, 0.18);
+  --note-grip-hover: rgba(58, 56, 46, 0.35);
+  --note-code: rgba(0, 0, 0, 0.06);
+  --note-code-strong: rgba(0, 0, 0, 0.07);
+  --note-link: #2b4a8a;
+  --note-error: #a32020;
+  --note-pin: #4f46e5;
+  --note-pin-hover: #3730a3;
+  --note-close: #c0392b;
+}
+.sticky-board.ink-light {
+  --note-ink: #f3edde;
+  --note-ink-hover: #fffaf0;
+  --note-ink-strong: rgba(243, 237, 222, 0.78);
+  --note-ink-soft: rgba(243, 237, 222, 0.62);
+  --note-ink-icon: rgba(243, 237, 222, 0.5);
+  --note-ink-line: rgba(243, 237, 222, 0.26);
+  --note-ink-faint: rgba(243, 237, 222, 0.32);
+  --note-grip: rgba(243, 237, 222, 0.3);
+  --note-grip-hover: rgba(243, 237, 222, 0.5);
+  --note-code: rgba(255, 255, 255, 0.1);
+  --note-code-strong: rgba(255, 255, 255, 0.14);
+  --note-link: #b9ccf3;
+  --note-error: #f0a29b;
+  --note-pin: #a5b4fc;
+  --note-pin-hover: #c7d2fe;
+  --note-close: #ef8d80;
 }
 .sticky-actions {
   position: absolute;
@@ -1783,22 +1819,31 @@ body.resizing .editor-host {
   display: flex;
   gap: 4px;
 }
-/* The whole margin drags too, but a hairline is hard to catch; this is the handle the eye
-   finds. It sits on the paper, so the drop lands where the note already is. */
-.sticky-grip {
+/* The whole band under the window's top edge moves the board, not just the handle in the
+   middle: the resize edge keeps the top 5px, and the band runs down to the first line of
+   paper text. The grip stays as the hint that this strip is a handle. */
+.sticky-drag-top {
   position: absolute;
   top: 5px;
+  right: 0;
+  left: 0;
+  z-index: 8;
+  height: 11px;
+  cursor: grab;
+}
+.sticky-grip {
+  position: absolute;
+  top: 0;
   left: 50%;
-  z-index: 10;
   width: 34px;
   height: 5px;
   transform: translateX(-50%);
   border-radius: 3px;
-  background: rgba(58, 56, 46, 0.18);
-  cursor: grab;
+  background: var(--note-grip);
+  pointer-events: none;
 }
-.sticky-grip:hover {
-  background: rgba(58, 56, 46, 0.35);
+.sticky-drag-top:hover .sticky-grip {
+  background: var(--note-grip-hover);
 }
 .sticky-top,
 .sticky-close,
@@ -1813,7 +1858,7 @@ body.resizing .editor-host {
   border-radius: 7px;
   background: transparent;
   /* Paper ink, not a window token: these glyphs live on the note, not on the app surface. */
-  color: rgba(58, 56, 46, 0.45);
+  color: var(--note-ink-icon);
   cursor: pointer;
   opacity: 0.35;
 }
@@ -1827,20 +1872,20 @@ body.resizing .editor-host {
 .sticky-top:hover,
 .sticky-close:hover,
 .sticky-collapse:hover {
-  color: #1f2937;
+  color: var(--note-ink-hover);
 }
 /* Pinning shows in the pin itself; a filled button would fight the paper. */
 .sticky-top.on {
   border-color: transparent;
   background: transparent;
-  color: #4f46e5;
+  color: var(--note-pin);
 }
 .sticky-top.on:hover {
   background: transparent;
-  color: #3730a3;
+  color: var(--note-pin-hover);
 }
 .sticky-close:hover {
-  color: #c0392b;
+  color: var(--note-close);
 }
 .sticky-grid {
   display: grid;
@@ -1897,9 +1942,9 @@ body.resizing .editor-host {
   min-height: 120px;
   padding: 12px 13px 10px;
   border-radius: 3px;
-  color: #3a382e;
+  color: var(--note-ink);
   cursor: default;
-  transition: opacity 0.15s ease;
+  transition: opacity 0.15s ease, color 0.3s ease;
 }
 /* The paper lives on its own layer so the fade can be applied to the sheet alone. */
 .sticky-note::before {
@@ -1908,27 +1953,13 @@ body.resizing .editor-host {
   inset: 0;
   z-index: 0;
   border-radius: inherit;
+  background: var(--paper);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.28), 0 6px 14px rgba(0, 0, 0, 0.16);
   transition: opacity 0.15s ease;
 }
 .sticky-note > * {
   position: relative;
   z-index: 1;
-}
-.sticky-note.tone-0::before {
-  background: #f6f0c7;
-}
-.sticky-note.tone-1::before {
-  background: #f2ded2;
-}
-.sticky-note.tone-2::before {
-  background: #e3edd9;
-}
-.sticky-note.tone-3::before {
-  background: #dbe6f1;
-}
-.sticky-note.tone-4::before {
-  background: #e9ddef;
 }
 /* Settings → Notes decides which of the two fades this board uses. */
 .fade-text.idle .sticky-note {
@@ -1963,7 +1994,7 @@ body.resizing .editor-host {
   padding: 0;
   border: none;
   background: transparent;
-  color: #3a382e;
+  color: var(--note-ink);
   font-family: inherit;
   font-size: 12.5px;
   line-height: 1.55;
@@ -1972,7 +2003,7 @@ body.resizing .editor-host {
 }
 .sticky-note-error {
   margin-top: 6px;
-  color: #a32020;
+  color: var(--note-error);
   font-size: 10.5px;
 }
 .sticky-note-text > :first-child {
@@ -2017,7 +2048,7 @@ body.resizing .editor-host {
 .sticky-note-text code {
   padding: 0 3px;
   border-radius: 3px;
-  background: rgba(0, 0, 0, 0.07);
+  background: var(--note-code-strong);
   font-family: Consolas, "Cascadia Mono", "Courier New", monospace;
   font-size: 11px;
 }
@@ -2025,7 +2056,7 @@ body.resizing .editor-host {
   padding: 6px 8px;
   overflow: auto;
   border-radius: 4px;
-  background: rgba(0, 0, 0, 0.06);
+  background: var(--note-code);
 }
 .sticky-note-text pre code {
   padding: 0;
@@ -2033,11 +2064,11 @@ body.resizing .editor-host {
 }
 .sticky-note-text blockquote {
   padding-left: 8px;
-  border-left: 2px solid rgba(58, 56, 46, 0.25);
-  color: rgba(58, 56, 46, 0.75);
+  border-left: 2px solid var(--note-ink-faint);
+  color: var(--note-ink-strong);
 }
 .sticky-note-text a {
-  color: #2b4a8a;
+  color: var(--note-link);
 }
 .sticky-note-text table {
   border-collapse: collapse;
@@ -2046,12 +2077,12 @@ body.resizing .editor-host {
 .sticky-note-text th,
 .sticky-note-text td {
   padding: 2px 5px;
-  border: 1px solid rgba(58, 56, 46, 0.2);
+  border: 1px solid var(--note-ink-line);
 }
 .sticky-note-text hr {
   margin: 6px 0;
   border: none;
-  border-top: 1px solid rgba(58, 56, 46, 0.2);
+  border-top: 1px solid var(--note-ink-line);
 }
 .sticky-note-text img {
   max-width: 100%;
@@ -2060,7 +2091,7 @@ body.resizing .editor-host {
 .sticky-note-missing {
   flex: 1 1 auto;
   padding: 8px;
-  color: rgba(58, 56, 46, 0.6);
+  color: var(--note-ink-soft);
   font-size: 12px;
 }
 .sticky-note-foot {
@@ -2069,12 +2100,12 @@ body.resizing .editor-host {
   align-items: center;
   gap: 5px;
   margin-top: 8px;
-  color: rgba(58, 56, 46, 0.6);
+  color: var(--note-ink-soft);
   font-size: 10px;
 }
 .sticky-tag {
   padding: 0 5px;
-  border: 1px solid rgba(58, 56, 46, 0.2);
+  border: 1px solid var(--note-ink-line);
   border-radius: 999px;
 }
 .sticky-due {
@@ -2086,16 +2117,17 @@ body.resizing .editor-host {
 .sticky-capsule {
   position: relative;
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 6px;
   width: 100%;
-  height: 100%;
+  height: 34px;
   padding: 0 11px;
   overflow: hidden;
   border-radius: 999px;
-  color: #3a382e;
+  color: var(--note-ink);
   cursor: grab;
-  transition: opacity 0.15s ease;
+  transition: opacity 0.15s ease, color 0.3s ease;
 }
 .sticky-capsule:active {
   cursor: grabbing;
@@ -2107,6 +2139,7 @@ body.resizing .editor-host {
   inset: 0;
   z-index: 0;
   border-radius: inherit;
+  background: var(--paper);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.28), 0 4px 10px rgba(0, 0, 0, 0.18);
   transition: opacity 0.15s ease;
 }
@@ -2116,21 +2149,6 @@ body.resizing .editor-host {
 }
 .sticky-capsule:hover {
   filter: brightness(1.03);
-}
-.sticky-capsule.tone-0::before {
-  background: #f6f0c7;
-}
-.sticky-capsule.tone-1::before {
-  background: #f2ded2;
-}
-.sticky-capsule.tone-2::before {
-  background: #e3edd9;
-}
-.sticky-capsule.tone-3::before {
-  background: #dbe6f1;
-}
-.sticky-capsule.tone-4::before {
-  background: #e9ddef;
 }
 .fade-text.idle .sticky-capsule {
   opacity: var(--sticky-idle-opacity, 1);
@@ -2151,7 +2169,7 @@ body.resizing .editor-host {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: rgba(58, 56, 46, 0.45);
+  background: var(--note-ink-icon);
 }
 .sticky-capsule-title {
   flex: 1 1 auto;
@@ -2163,8 +2181,82 @@ body.resizing .editor-host {
 }
 .sticky-capsule-more {
   flex: 0 0 auto;
-  color: rgba(58, 56, 46, 0.6);
+  color: var(--note-ink-soft);
   font-size: 10px;
+}
+/* The pill opens back into the board; the glyph is the affordance, with no words over it. */
+.sticky-capsule-expand {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-right: -3px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--note-ink-icon);
+  cursor: pointer;
+}
+.sticky-capsule-expand:hover {
+  color: var(--note-ink-hover);
+}
+/* ---------- Capsule hover preview ----------
+   A pill shows one truncated name; resting the pointer on it grows the window *downward*
+   for a sheet of the actual writing. Moving the window to reach the sides above or left
+   would leave the pill anchored to a corner that jumps for the frames before the webview
+   catches up, so the window never moves: the sheet narrows or shortens to fit instead. */
+.sticky-tip {
+  position: relative;
+  flex: 0 0 auto;
+  align-self: flex-start;
+  width: 340px;
+  /* Room for the sheet's shadow around the edges the window does not hug. */
+  margin: 8px 10px 10px;
+  padding: 11px 13px 10px;
+  border-radius: 6px;
+  background: var(--paper);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3), 0 12px 28px rgba(0, 0, 0, 0.26);
+  color: var(--note-ink);
+  opacity: 0;
+  transition: opacity 0.14s ease;
+}
+.sticky-tip.ready {
+  opacity: 1;
+}
+/* The caret points back at the pill, under its middle. */
+.sticky-tip::before {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: calc(var(--tip-point, 24px) - 4.5px);
+  width: 9px;
+  height: 9px;
+  border-radius: 1px;
+  background: inherit;
+  transform: rotate(45deg);
+}
+.sticky-tip-scroll {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* The preview reads like the paper, but the panel is what scrolls, and nothing in it is
+   editable or selectable. */
+.sticky-tip .sticky-note-text {
+  flex: none;
+  overflow: visible;
+  cursor: default;
+}
+.sticky-tip-scroll > * + * {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--note-ink-line);
+}
+.sticky-tip-missing {
+  color: var(--note-ink-soft);
+  font-size: 12px;
 }
 /* The edges of the paper are the window's handles. */
 .sticky-resize {
@@ -6783,6 +6875,70 @@ button.pdf-outline-twist:hover {
    byte count is the only case in the panel where the digits run that long. */
 .setting-row input.num-wide[type="number"] {
   width: 132px;
+}
+/* The sticky color group: one picker per paper. The swatch is the whole control, with a
+   small remove badge so a group can be trimmed without a second row of buttons. */
+.sticky-colors {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.sticky-swatch {
+  position: relative;
+  display: inline-flex;
+}
+.sticky-swatch input[type="color"] {
+  width: 30px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: transparent;
+  cursor: pointer;
+}
+.sticky-swatch input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 3px;
+}
+.sticky-swatch input[type="color"]::-webkit-color-swatch {
+  border: none;
+  border-radius: 4px;
+}
+.sticky-swatch-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 15px;
+  height: 15px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface-2);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.sticky-swatch-remove:hover {
+  color: var(--danger);
+}
+.sticky-swatch-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 26px;
+  padding: 0;
+  border: 1px dashed var(--border);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.sticky-swatch-add:hover {
+  border-color: var(--text-dim);
+  color: var(--text);
 }
 /* Two things the OS draws on a <select> cannot be reached while its appearance is native: the
    arrow, which sits flush against the border with no way to give it a margin, and the popup's

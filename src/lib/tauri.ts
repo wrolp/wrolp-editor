@@ -445,6 +445,8 @@ export interface Settings {
   stickyTextOpaque: boolean;
   /** Seconds the pointer has to be away before a sticky note fades. */
   stickyFadeDelay: number;
+  /** Background colors sticky notes draw from; each note keeps one by its path. */
+  stickyColors: string[];
   /** Run OCR as soon as a picture is shown; off by default. */
   ocrAuto: boolean;
   /** How many snapshots are kept. Older ones are removed when a new one is written. */
