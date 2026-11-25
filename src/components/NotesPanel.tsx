@@ -15,6 +15,7 @@ import { splitNote } from "../lib/noteText";
 import { pathKey } from "../lib/types";
 import {
   IconBookmark,
+  IconCapsule,
   IconCheck,
   IconCopy,
   IconFilePlus,
@@ -598,11 +599,25 @@ export default function NotesPanel({
             </span>
             {t("note.edit")}
           </div>
+          <div
+            className="ctx-item"
+            onClick={() => {
+              // One note is the common case: the board opens straight away, and the dialog
+              // below is only for putting several notes on one board.
+              openBoard([menu.note]);
+              setMenu(null);
+            }}
+          >
+            <span className="ctx-icon">
+              <IconCapsule size={14} />
+            </span>
+            {t("note.boardOpen")}
+          </div>
           <div className="ctx-item" onClick={() => openPicker(menu.note)}>
             <span className="ctx-icon">
               <IconTable size={14} />
             </span>
-            {t("note.boardOpen")}
+            {t("note.boardPick")}
           </div>
           <div className="ws-sep" />
           <div
