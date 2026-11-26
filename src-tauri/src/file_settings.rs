@@ -391,7 +391,9 @@ mod tests {
       (
         "ai_completion",
         FileSettings {
-          ai_completion: Some(false),
+          // Only the yes is stored: `Some(false)` is the default and is dropped, so the
+          // yes is the value a one-field entry is made of.
+          ai_completion: Some(true),
           ..Default::default()
         },
       ),
@@ -465,7 +467,8 @@ mod tests {
     assert_eq!(got.encoding, None);
     assert_eq!(got.line_ending, None);
     assert_eq!(got.versioning, None);
-    assert_eq!(got.ai_completion, None);
+    // A yes is valid and kept; the no is the default and is what gets stripped.
+    assert_eq!(got.ai_completion, Some(true));
     assert_eq!(got.language, None);
     assert_eq!(got.word_wrap, Some(true));
     assert_eq!(got.sticky_scroll, Some(false));

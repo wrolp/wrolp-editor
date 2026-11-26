@@ -3841,8 +3841,20 @@ mod tests {
     assert_eq!(strip_xml_preamble("<svg/>"), "<svg/>");
   }
 
+  /// The render tests each start a `dot` that owns a temporary directory for as long as it
+  /// runs, and a count taken beside another render in flight sees that directory. Serialise
+  /// the tests that look at the count rather than assume the harness keeps them apart.
+  static DIAGRAM_TEMP_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+  fn diagram_temp_lock() -> std::sync::MutexGuard<'static, ()> {
+    DIAGRAM_TEMP_LOCK
+      .lock()
+      .unwrap_or_else(|poisoned| poisoned.into_inner())
+  }
+
   #[test]
   fn rendering_a_diagram_leaves_no_temporary_directory_behind() {
+    let _serial = diagram_temp_lock();
     let before = temp_diagram_dirs();
     let _ = render_diagram("graphviz".to_string(), "digraph{a}".to_string());
     // Success or failure, the scratch directory is gone either way.
@@ -3851,6 +3863,7 @@ mod tests {
 
   #[test]
   fn graphviz_renders_and_a_syntax_error_is_reported() {
+    let _serial = diagram_temp_lock();
     // Only meaningful where graphviz is installed; elsewhere the missing program is itself
     // the thing to assert, so both outcomes are checked rather than one being assumed.
     match render_diagram("graphviz".to_string(), "digraph{a}".to_string()) {
