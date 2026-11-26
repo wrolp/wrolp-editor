@@ -20,6 +20,7 @@ import ExportProgress from "./components/ExportProgress";
 import GitCloneDialog from "./components/GitCloneDialog";
 import MergeView from "./components/MergeView";
 import MarkdownPreview from "./components/MarkdownPreview";
+import DotPreview from "./components/DotPreview";
 import PaneErrorBoundary from "./components/PaneErrorBoundary";
 import DraftRestoreDialog from "./components/DraftRestoreDialog";
 import NewGroupDialog from "./components/NewGroupDialog";
@@ -109,6 +110,7 @@ import {
   basename,
   isBitmapImage,
   isCsv,
+  isDot,
   isExecutableExt,
   isHtml,
   isMarkdown,
@@ -485,8 +487,11 @@ function usePrefersDark(): boolean {
   return dark;
 }
 
-/** What fills the preview pane: rendered markdown, a picture, or a live HTML page. */
-type PreviewKind = "markdown" | "image" | "html" | null;
+/**
+ * What fills the preview pane: rendered markdown, a Graphviz drawing, a picture, or a live
+ * HTML page.
+ */
+type PreviewKind = "markdown" | "dot" | "image" | "html" | null;
 
 /** A pasted picture held while the reader names the file it becomes. */
 interface ImageSaveAsk {
@@ -3637,11 +3642,13 @@ export default function App() {
       ? null
       : isMarkdown(editorTab.path)
         ? "markdown"
-        : isHtml(editorTab.path)
-          ? "html"
-          : isPreviewableImage(editorTab.path)
-            ? "image"
-            : null
+        : isDot(editorTab.path)
+          ? "dot"
+          : isHtml(editorTab.path)
+            ? "html"
+            : isPreviewableImage(editorTab.path)
+              ? "image"
+              : null
     : null;
 /**
    * The layout a file opens in when it has no stored choice of its own.
@@ -3650,13 +3657,13 @@ export default function App() {
    * "editor only" would put an editable-looking buffer in front of a photo and any keystroke
    * would corrupt it. Everything else that has a preview follows the setting, and a file with
    * nothing to preview is always text. `auto` keeps the per-kind behaviour this replaced —
-   * markdown is read as prose, and SVG and HTML are edited as source and read as a rendering
-   * of that source, so all three open side by side.
+   * markdown is read as prose, and DOT, SVG and HTML are edited as source and read as a
+   * rendering of that source, so all four open side by side.
    */
 const defaultModeFor = useCallback(
     (path: string): PreviewMode => {
       if (isBitmapImage(path)) return "preview";
-      if (!isMarkdown(path) && !isSvg(path) && !isHtml(path)) return "text";
+      if (!isMarkdown(path) && !isDot(path) && !isSvg(path) && !isHtml(path)) return "text";
       if (previewLayout === "split" || previewLayout === "preview") return previewLayout;
       if (previewLayout === "text") return "text";
       return "split";
@@ -3778,7 +3785,10 @@ const defaultModeFor = useCallback(
     (path: string) => {
       const prev = previewPrefRef.current;
       const current = prev[path] ?? defaultModeFor(path);
-      if (current === "text") commitPreviewModes({ ...prev, [path]: defaultModeFor(path) });
+      // From text the way back is side by side, not the global default: with the default
+      // set to "editor only" (the shipped value) writing that default back here changed
+      // nothing, and the switch looked dead on every file that had a preview.
+      if (current === "text") commitPreviewModes({ ...prev, [path]: "split" });
       else if (current === "preview") commitPreviewModes({ ...prev, [path]: "split" });
       else commitPreviewModes({ ...prev, [path]: "text" });
     },
@@ -3842,6 +3852,7 @@ const defaultModeFor = useCallback(
     !showGallery &&
     !!editorTab &&
     (previewKind === "markdown" ||
+      previewKind === "dot" ||
       previewKind === "html" ||
       (previewKind === "image" && isSvg(editorTab.path)));
   const previewText = useMemo(() => {
@@ -3872,9 +3883,10 @@ const defaultModeFor = useCallback(
   }, [csvTable, tabs.fileTab?.original, contentRev]);
 
   /**
-   * A debounced copy of `previewText`. Markdown is re-parsed and an HTML frame is rebuilt
-   * from this, and doing either on every keystroke is what makes typing in a long document
-   * stutter. A different file is shown at once: waiting to switch would look like a hang.
+   * A debounced copy of `previewText`. Markdown is re-parsed, an HTML frame is rebuilt and a
+   * DOT drawing is sent back through Graphviz from this, and doing any of them on every
+   * keystroke is what makes typing in a long document stutter. A different file is shown at
+   * once: waiting to switch would look like a hang.
    */
   const [docText, setDocText] = useState("");
   const previewPath = useRef<string | undefined>(undefined);
@@ -4409,6 +4421,12 @@ const defaultModeFor = useCallback(
               onOpenPath={(path) => void tabs.openPath(path)}
               onError={(message) => toast(message)}
             />
+          )}
+
+          {showPreview && !showSettings && !showGallery && editorTab && previewKind === "dot" && (
+            // Keyed by path so a layout or tab switch starts the next drawing at fit rather
+            // than carrying the previous one's zoom; edits to the same file keep it.
+            <DotPreview key={editorTab.path} text={docText} />
           )}
 
           {showPreview && !showSettings && !showGallery && editorTab && previewKind === "html" && (

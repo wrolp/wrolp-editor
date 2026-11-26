@@ -380,6 +380,9 @@ body.sticky-window::-webkit-scrollbar {
 .file-glyph.icon-svg {
   color: #ffb13b;
 }
+.file-glyph.icon-gv {
+  color: #34d399;
+}
 .file-glyph.icon-vue {
   color: #42b883;
 }
@@ -4900,6 +4903,7 @@ body.tree-dragging * {
 }
 .editor-wrap.preview-only .md-preview,
 .editor-wrap.preview-only .img-preview,
+.editor-wrap.preview-only .dot-preview,
 .editor-wrap.preview-only .html-preview {
   flex: 1 1 100%;
 }
@@ -4909,6 +4913,7 @@ body.tree-dragging * {
    too — otherwise the editor is drawn straight over it. */
 .md-preview,
 .img-preview,
+.dot-preview,
 .html-preview {
   position: relative;
   z-index: 1;
@@ -8427,6 +8432,141 @@ select {
 }
 .editor-wrap.preview-only > .html-preview {
   border-left: none;
+}
+
+/* ---------- Graphviz DOT preview ----------
+   A drawing made by the local `dot`, framed the way an image is: the tools stay on one row
+   above the stage, the stage scrolls and pans, and the drawing sits on white paper so a
+   diagram written without colours of its own stays readable under the dark theme. */
+.dot-preview {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 50%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+}
+.editor-wrap.preview-only > .dot-preview {
+  border-left: none;
+}
+.dot-tools {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  flex: 0 0 auto;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--titlebar);
+  font-size: 11px;
+  color: var(--muted);
+}
+.dot-dims {
+  margin-left: 4px;
+}
+/* Pushed to the far end so a status word never shifts the controls under the pointer. */
+.dot-note {
+  margin-left: auto;
+  color: var(--muted);
+}
+/* The source changed under a drawing that could not be made again. The last good picture
+   stays on screen, and this strip is the explanation, red like the diagram error a markdown
+   fence shows. */
+.dot-error-bar {
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--danger-bg-2);
+  color: var(--danger);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dot-error-detail {
+  white-space: pre;
+}
+.dot-stage {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  padding: 16px;
+  background: var(--sunken);
+  scrollbar-width: thin;
+  scrollbar-color: var(--scroll-thumb) transparent;
+}
+.dot-stage::-webkit-scrollbar {
+  width: var(--scroll-size);
+  height: var(--scroll-size);
+}
+.dot-stage::-webkit-scrollbar-track,
+.dot-stage::-webkit-scrollbar-corner {
+  background: transparent;
+}
+.dot-stage::-webkit-scrollbar-thumb {
+  background: var(--scroll-thumb);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 6px;
+  transition: background-color 0.15s ease;
+}
+.dot-stage:hover::-webkit-scrollbar-thumb {
+  background-color: var(--scroll-thumb-hover);
+}
+/* Only when the drawing overflows does it become grabbable, so the cursor never promises a
+   drag that would do nothing. */
+.dot-stage.dot-can-pan {
+  cursor: grab;
+}
+.dot-stage.dot-can-pan.dot-dragging {
+  cursor: grabbing;
+}
+/* `margin: auto` centres a drawing that fits and resolves to 0 once it does not, so a zoomed
+   drawing still scrolls all the way to its own left edge — the same reason the markdown
+   diagram stage uses it. White, because `dot` draws with the light page's inks. */
+.dot-canvas {
+  flex: 0 0 auto;
+  margin: auto;
+  background: #fff;
+  box-shadow: 0 1px 6px rgba(0, 0, 0, 0.22);
+}
+
+.dot-canvas svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* A `URL` attribute in the source turns a node into an `<a>` inside the drawing, and a
+     click on it would navigate the whole window away from the app. The pane is a viewer:
+     the drawing takes no pointer events, and dragging the canvas still works because the
+     events land on the stage behind it. */
+  pointer-events: none;
+}
+.dot-message {
+  margin: auto;
+  max-width: 720px;
+  padding: 24px;
+  text-align: center;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.dot-message-title {
+  color: var(--text);
+}
+.dot-message-detail {
+  margin: 10px 0 0;
+  padding: 10px 12px;
+  max-height: 50vh;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--sunken);
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 .html-preview iframe {
   display: block;

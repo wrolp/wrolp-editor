@@ -192,6 +192,7 @@ const GLYPHS: Record<string, FileGlyph> = {
   scss: { cls: "icon-scss", sym: "#" },
   xml: { cls: "icon-xml", sym: "</>" },
   svg: { cls: "icon-svg", sym: "◇" },
+  graphviz: { cls: "icon-gv", sym: "Gv" },
   vue: { cls: "icon-vue", sym: "V" },
   svelte: { cls: "icon-svelte", sym: "Sv" },
 
@@ -259,7 +260,6 @@ const EXT_GLYPH: Record<string, string> = {
   pdf: "pdf",
   doc: "doc",
   docx: "doc",
-  dot: "doc",
   odt: "doc",
   rtf: "doc",
   xls: "sheet",
@@ -284,6 +284,8 @@ const EXT_GLYPH: Record<string, string> = {
   xsd: "xml",
   dtd: "xml",
   svg: "svg",
+  dot: "graphviz",
+  gv: "graphviz",
   vue: "vue",
   svelte: "svelte",
 
@@ -460,6 +462,19 @@ const MARKDOWN_EXT = new Set(["md", "markdown", "mdown", "mkd"]);
 /** True when a path looks like markdown, which is what the preview is for. */
 export function isMarkdown(path: string): boolean {
   return MARKDOWN_EXT.has(extOf(path).toLowerCase());
+}
+
+/**
+ * Graphviz source. `.gv` is the extension Graphviz itself recommends, because `.dot` is also
+ * Word's old template extension — but `.dot` is what diagrams are named in practice, and a
+ * file that turns out to be a binary template is refused by the text reader before it can
+ * reach the drawing pane.
+ */
+const DOT_EXT = new Set(["dot", "gv"]);
+
+/** True when a path is a Graphviz DOT file, which the preview draws with the local `dot`. */
+export function isDot(path: string): boolean {
+  return DOT_EXT.has(extOf(path).toLowerCase());
 }
 
 /** Raster images: bytes with no text in them, so the editor has nothing to show. */
