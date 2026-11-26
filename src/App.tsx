@@ -282,6 +282,9 @@ const DEFAULT_SETTINGS: Settings = {
   wordWrap: false,
   stickyScroll: true,
   theme: "system",
+  // A drawing is read against the window it sits in, so it follows the app theme by default
+  // instead of arriving as a white sheet on a dark pane.
+  dotTheme: "auto",
   tabSize: 2,
   insertSpaces: true,
   detectIndentation: true,
@@ -4426,7 +4429,13 @@ const defaultModeFor = useCallback(
           {showPreview && !showSettings && !showGallery && editorTab && previewKind === "dot" && (
             // Keyed by path so a layout or tab switch starts the next drawing at fit rather
             // than carrying the previous one's zoom; edits to the same file keep it.
-            <DotPreview key={editorTab.path} text={docText} />
+            <DotPreview
+              key={editorTab.path}
+              text={docText}
+              appTheme={theme}
+              palette={settings.dotTheme}
+              onPalette={(value) => void saveSettings({ dotTheme: value })}
+            />
           )}
 
           {showPreview && !showSettings && !showGallery && editorTab && previewKind === "html" && (

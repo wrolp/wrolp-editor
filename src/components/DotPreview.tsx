@@ -18,6 +18,118 @@ const MIN_ZOOM = 10;
 const MAX_ZOOM = 800;
 /** What `.dot-stage` pads the drawing on every side; fit is measured inside it. */
 const STAGE_PAD = 16;
+/** What the drawing's default black ink is turned into on the dark paper. */
+const DARK_TEXT = "#e6e6e6";
+
+/** A sentinel no colour name resolves to, so an unreadable value can be told from black. */
+const UNREADABLE = "#010203";
+let colourCtx: CanvasRenderingContext2D | null | undefined;
+
+/**
+ * The `[r, g, b]` behind a CSS colour, or null when the value is not a colour this build
+ * understands. The canvas is the parser: it knows every named colour Graphviz can emit,
+ * and a sentinel set first is what tells a failed parse from a real black.
+ */
+function cssRgb(value: string): [number, number, number] | null {
+  if (colourCtx === undefined) {
+    colourCtx = document.createElement("canvas").getContext("2d");
+  }
+  const ctx = colourCtx;
+  if (!ctx) return null;
+  const before = String(ctx.fillStyle);
+  try {
+    ctx.fillStyle = UNREADABLE;
+    ctx.fillStyle = value;
+    const out = String(ctx.fillStyle);
+    if (out === UNREADABLE) return null;
+    const hex = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(out);
+    if (hex) {
+      return [
+        parseInt(hex[1], 16),
+        parseInt(hex[2], 16),
+        parseInt(hex[3], 16),
+      ];
+    }
+    const rgb = /^rgba?\(\s*(\d+)[,\s]+(\d+)[,\s]+(\d+)/i.exec(out);
+    if (rgb) return [Number(rgb[1]), Number(rgb[2]), Number(rgb[3])];
+    return null;
+  } finally {
+    ctx.fillStyle = before;
+  }
+}
+
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+  const rn = r / 255;
+  const gn = g / 255;
+  const bn = b / 255;
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const l = (max + min) / 2;
+  if (max === min) return [0, 0, l];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h: number;
+  if (max === rn) h = (gn - bn) / d + (gn < bn ? 6 : 0);
+  else if (max === gn) h = (bn - rn) / d + 2;
+  else h = (rn - gn) / d + 4;
+  return [h / 6, s, l];
+}
+
+function hslToHex(h: number, s: number, l: number): string {
+  const channel = (n: number) => {
+    const k = (n + h * 12) % 12;
+    const a = s * Math.min(l, 1 - l);
+    const v = l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1));
+    return Math.round(v * 255)
+      .toString(16)
+      .padStart(2, "0");
+  };
+  return `#${channel(0)}${channel(8)}${channel(4)}`;
+}
+
+/**
+ * A colour carried across to the dark paper: hue and saturation stay, lightness is flipped
+ * and held inside a range that is readable on a near-black sheet. Named colours (blue,
+ * lightgrey, darkred) survive as themselves — a blue border stays blue, only lighter.
+ */
+function darkInk(value: string): string | null {
+  const text = value.trim().toLowerCase();
+  if (!text || text === "none" || text === "transparent" || text.startsWith("url(")) return null;
+  const rgb = cssRgb(text);
+  if (!rgb) return null;
+  const [h, s, l] = rgbToHsl(rgb[0], rgb[1], rgb[2]);
+  const flipped = Math.min(0.92, Math.max(0.1, 1 - l));
+  return hslToHex(h, s, flipped);
+}
+
+/**
+ * Recolours a finished drawing for the dark pane.
+ *
+ * The colours that make a light drawing unreadable on dark are usually written into the
+ * source itself — a white node fill, a #202124 label — so the command-line defaults a
+ * backend could set never reach them. Working on the finished SVG reaches every one of
+ * them: fills and strokes are moved to the other side of the paper, and text that carried
+ * no fill at all (SVG's initial black) is given the dark paper's ink.
+ */
+function darkenSvg(markup: string): string {
+  const doc = new DOMParser().parseFromString(markup, "image/svg+xml");
+  const root = doc.documentElement;
+  if (!root || root.nodeName.toLowerCase() === "parsererror") return markup;
+  const visit = (el: Element) => {
+    for (const prop of ["fill", "stroke"]) {
+      const value = el.getAttribute(prop);
+      if (!value) continue;
+      const mapped = darkInk(value);
+      if (mapped) el.setAttribute(prop, mapped);
+    }
+    if (el.nodeName.toLowerCase() === "text" && !el.getAttribute("fill")) {
+      el.setAttribute("fill", DARK_TEXT);
+    }
+    for (const child of Array.from(el.children)) visit(child);
+  };
+  visit(root);
+  return new XMLSerializer().serializeToString(root);
+}
 
 function clampZoom(value: number): number {
   return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(value)));
@@ -62,6 +174,12 @@ function naturalSize(markup: string): { w: number; h: number } {
 interface Props {
   /** The buffer's current text; the drawing follows it as the user types. */
   text: string;
+  /** The app's resolved scheme, which `auto` follows. */
+  appTheme: "dark" | "light";
+  /** Settings.dotTheme: auto | dark | light. */
+  palette: string;
+  /** Writes the reader's choice back to the settings. */
+  onPalette: (palette: "light" | "dark") => void;
 }
 
 /**
@@ -76,7 +194,12 @@ interface Props {
  * last drawing and reports the error in a strip above it instead of blanking the pane on
  * every half-typed line.
  */
-export default function DotPreview({ text }: Props) {
+export default function DotPreview({ text, appTheme, palette, onPalette }: Props) {
+  /**
+   * The palette the drawing is actually made in. `auto` follows the app theme, so the pane a
+   * drawing opens in never decides its colours against a window it is not in.
+   */
+  const drawTheme = palette === "dark" || palette === "light" ? palette : appTheme;
   const [svg, setSvg] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -120,6 +243,15 @@ export default function DotPreview({ text }: Props) {
   }, [text]);
 
   const size = useMemo(() => naturalSize(svg), [svg]);
+  /**
+   * What the pane draws. Recolouring is immediate: the same SVG is carried to the other
+   * side of the paper, so switching themes does not wait for another Graphviz run and the
+   * zoom the reader set is not disturbed by one.
+   */
+  const shownSvg = useMemo(
+    () => (drawTheme === "dark" ? darkenSvg(svg) : svg),
+    [svg, drawTheme]
+  );
 
   /** The room the drawing is fitted into, watched rather than assumed. */
   useLayoutEffect(() => {
@@ -258,7 +390,7 @@ export default function DotPreview({ text }: Props) {
   const hasDrawing = size.w > 0 && size.h > 0;
 
   return (
-    <div className="dot-preview">
+    <div className="dot-preview" data-dot-theme={drawTheme}>
       <div className="dot-tools">
         <button
           className="img-tool"
@@ -325,6 +457,15 @@ export default function DotPreview({ text }: Props) {
             {Math.round(size.w)} × {Math.round(size.h)}
           </span>
         )}
+        {/* The label names the palette the click leads to, like the panes' Fit buttons;
+            `auto` has no button state of its own, it is the Settings default. */}
+        <button
+          className="img-tool dot-theme"
+          title={drawTheme === "dark" ? t("dot.toLight") : t("dot.toDark")}
+          onClick={() => onPalette(drawTheme === "dark" ? "light" : "dark")}
+        >
+          {drawTheme === "dark" ? t("dot.themeLight") : t("dot.themeDark")}
+        </button>
         <span className="dot-note">{busy ? t("dot.rendering") : ""}</span>
       </div>
 
@@ -364,7 +505,7 @@ export default function DotPreview({ text }: Props) {
                   : undefined
               }
               // Sanitized in the effect that renders it; the raw SVG never reaches the DOM.
-              dangerouslySetInnerHTML={{ __html: svg }}
+              dangerouslySetInnerHTML={{ __html: shownSvg }}
             />
           </div>
         </>

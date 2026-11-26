@@ -109,6 +109,8 @@ const NAME_ELLIPSIS = ["middle", "end"] as const;
 /** `auto` last: it is the fallback that decides by file type, not a layout of its own. */
 const PREVIEW_LAYOUTS = ["text", "split", "preview", "auto"] as const;
 const PREVIEW_WIDTHS = ["narrow", "wide", "full"] as const;
+/** The palettes a Graphviz drawing can be drawn in. `auto` first: it is the default. */
+const DOT_THEMES = ["auto", "light", "dark"] as const;
 /** Sides a navigation column can take; the markdown outline and the PDF's bookmarks both pick
  * from this list. Right first: it is the default, and it keeps the column off the Explorer's
  * edge. */
@@ -1001,6 +1003,20 @@ export default function SettingsPanel({
                 </select>
               </SettingField>
               <p className="muted">{t("settings.previewWidthDesc")}</p>
+              <SettingField label={t("settings.dotTheme")}>
+                <select
+                  className="select"
+                  value={settings.dotTheme}
+                  onChange={(e) => onSaveSettings({ dotTheme: e.target.value })}
+                >
+                  {DOT_THEMES.map((mode) => (
+                    <option key={mode} value={mode}>
+                      {t(`settings.dotTheme.${mode}`)}
+                    </option>
+                  ))}
+                </select>
+              </SettingField>
+              <p className="muted">{t("settings.dotThemeDesc")}</p>
               <SettingField label={t("settings.tocSide")}>
                 <select
                   className="select"

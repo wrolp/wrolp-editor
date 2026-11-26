@@ -304,6 +304,11 @@ export interface Settings {
   stickyScroll: boolean;
   /** system | dark | light. `system` follows the OS preference at runtime. */
   theme: string;
+  /**
+   * Which palette a Graphviz DOT drawing is rendered in: `auto` | `dark` | `light`. `auto`
+   * follows the app theme; the other two pin the drawing's colours.
+   */
+  dotTheme: string;
   /** Columns per indentation level, 1..8. */
   tabSize: number;
   /** Insert spaces rather than a tab character. */
@@ -1426,6 +1431,9 @@ export const api = {
    * `kind` is `graphviz` or `plantuml`; anything else is refused by the backend before a
    * process is started. The error string is shown to the user as-is, so it is written to be
    * read ("diagram_missing:plantuml" says the program is not installed).
+   *
+   * The SVG comes back in the colours the source asks for; a dark pane recolours it on the
+   * frontend, where the source's own attributes can be reached too.
    */
   renderDiagram: (kind: string, source: string) =>
     invoke<string>("render_diagram", { kind, source }),

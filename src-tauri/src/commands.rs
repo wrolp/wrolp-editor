@@ -323,6 +323,10 @@ pub struct Settings {
   /// Colour scheme: system | dark | light. `system` follows the OS preference at runtime,
   /// so a machine that switches at dusk does not need the app restarted.
   pub theme: String,
+  /// Which palette a Graphviz DOT drawing is rendered in: auto | dark | light. `auto` follows
+  /// the app theme, so a drawing does not arrive as a white sheet on a dark window; the other
+  /// two pin it, for a reader who wants the graph's colours independent of the chrome.
+  pub dot_theme: String,
   /// Minutes an encrypted file stays unlocked without being touched. 0 means never lock
   /// automatically, which is a deliberate choice rather than a missing value, so it is
   /// kept as written.
@@ -516,6 +520,7 @@ impl Default for Settings {
       pdf_outline_open: false,
       pdf_outline_width: 220.0,
       theme: "system".into(),
+      dot_theme: "auto".into(),
       encrypt_idle_minutes: ENCRYPT_IDLE_DEFAULT_MINUTES,
       versioning_enabled: false,
       versioning_show_limit: VERSIONING_DEFAULT_SHOW_LIMIT,
@@ -594,6 +599,9 @@ const AUTO_SAVE_MAX_SECONDS: u32 = 3600;
 const RENDER_WHITESPACE: [&str; 5] = ["none", "boundary", "selection", "all", "trailing"];
 /// Colour schemes the frontend knows how to apply.
 const THEMES: [&str; 3] = ["system", "dark", "light"];
+/// Palettes a DOT drawing can be drawn in. `auto` is resolved to one of the other two by the
+/// frontend, which is the only place that knows the app's own theme.
+const DOT_THEMES: [&str; 3] = ["auto", "dark", "light"];
 /// What startup does with a draft the file on disk does not have.
 const DRAFT_RESTORE: [&str; 2] = ["auto", "ask"];
 /// Preview layouts a file can open in. `auto` is the per-kind behaviour the frontend used
@@ -896,6 +904,13 @@ impl Settings {
         self.theme.clone()
       } else {
         "system".into()
+      },
+      // An unknown value has no palette to resolve, so `auto` is the only safe reading: the
+      // frontend then follows the app theme instead of pinning one that does not exist.
+      dot_theme: if DOT_THEMES.contains(&self.dot_theme.as_str()) {
+        self.dot_theme.clone()
+      } else {
+        "auto".into()
       },
       // 0 is "never lock" and must survive as written; only the upper end is clamped, since
       // a huge value there is a typo rather than an intention.
@@ -1782,6 +1797,11 @@ pub fn write_export(path: String, data: String) -> Result<(), String> {
 /// Neither tool is required. A missing program is reported as an error the preview shows
 /// above the source, which is the whole of the contract: the document stays readable whether
 /// or not the user has these installed.
+///
+/// The drawing always comes back in the palette the source asks for. A dark pane is the
+/// frontend's doing: it recolours the finished SVG, because the colours that make a light
+/// drawing unreadable on a dark page are usually written into the source itself
+/// (`fillcolor="#FFFFFF"`, `fontcolor="#202124"`), where no command-line default reaches.
 #[tauri::command(async)]
 pub fn render_diagram(kind: String, source: String) -> Result<String, String> {
   // `(program, input extension, args)`. Args are fixed strings except for the two paths,
@@ -3244,6 +3264,34 @@ mod tests {
       }
       .filled()
       .compact_mode
+    );
+  }
+
+  #[test]
+  fn dot_theme_defaults_to_auto_and_an_unknown_value_falls_back() {
+    assert_eq!(Settings::default().dot_theme, "auto");
+    // A settings.json written before the key existed keeps following the app theme.
+    let s: Settings = serde_json::from_str("{\"fontSize\":16.0}").expect("parse partial settings");
+    assert_eq!(s.filled().dot_theme, "auto");
+    for good in ["auto", "dark", "light"] {
+      assert_eq!(
+        Settings {
+          dot_theme: good.into(),
+          ..Default::default()
+        }
+        .filled()
+        .dot_theme,
+        good
+      );
+    }
+    assert_eq!(
+      Settings {
+        dot_theme: "sepia".into(),
+        ..Default::default()
+      }
+      .filled()
+      .dot_theme,
+      "auto"
     );
   }
 
